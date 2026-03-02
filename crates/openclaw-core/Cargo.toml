@@ -1,0 +1,35 @@
+[package]
+name = "openclaw-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core types and traits for OpenClaw AI Gateway"
+
+[dependencies]
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+semver = { workspace = true }
+
+# 异步 traits
+async-trait = { workspace = true }
+
+# 错误处理
+thiserror = { workspace = true }
+
+# UUID
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# 枚举工具
+strum = { workspace = true }
+
+# 数据库（用于 From 实现，可选）
+sqlx = { workspace = true, optional = true }
+
+[features]
+default = []
+full = []
+sqlx = ["dep:sqlx"]

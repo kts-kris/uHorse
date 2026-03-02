@@ -1,0 +1,103 @@
+[workspace]
+members = [
+    "crates/openclaw-core",
+    "crates/openclaw-gateway",
+    "crates/openclaw-storage",
+    "crates/openclaw-session",
+    "crates/openclaw-channel",
+    "crates/openclaw-tool",
+    "crates/openclaw-security",
+    "crates/openclaw-scheduler",
+    "crates/openclaw-observability",
+    "crates/openclaw-config",
+    "crates/openclaw-bin",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+authors = ["OpenClaw Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/openclaw/openclaw-rs"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-tungstenite = "0.24"
+
+# Web framework
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.25"
+opentelemetry = "0.24"
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+opentelemetry-jaeger = "0.23"
+
+# Metrics
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
+
+# Authentication
+jsonwebtoken = "9.0"
+
+# UUID
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Configuration
+config = "0.14"
+toml = "0.8"
+serde_yaml = "0.9"
+
+# Async traits
+async-trait = "0.1"
+
+# Semver
+semver = { version = "1.0", features = ["serde"] }
+
+# JSON Schema
+jsonschema = "0.20"
+
+# Cron
+cron = "0.12"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Utilities
+derive_more = { version = "1.0", features = ["from", "display"] }
+strum = { version = "0.26", features = ["derive"] }
+
+# Dev dependencies
+tokio-test = "0.4"
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+split-debuginfo = "unpacked"
