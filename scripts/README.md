@@ -1,6 +1,6 @@
-# OpenClaw 测试脚本
+# uHorse 测试脚本
 
-本目录包含 OpenClaw 项目的自动化测试脚本。
+本目录包含 uHorse 项目的自动化测试脚本。
 
 ## 可用脚本
 
@@ -85,8 +85,8 @@ sudo apt install wrk apache2-utils
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+git clone https://github.com/uhorse/uhorse.git
+cd uhorse
 
 # 2. 运行快速测试
 ./scripts/quick-test.sh
@@ -169,7 +169,7 @@ curl http://localhost:8080/health/ready
 ### 指标查看
 
 ```bash
-curl http://localhost:8080/metrics | grep openclaw_
+curl http://localhost:8080/metrics | grep uhorse_
 ```
 
 ### WebSocket 测试
@@ -207,10 +207,10 @@ ab -n 10000 -c 100 http://localhost:8080/health/live
 docker-compose ps
 
 # 查看服务日志
-docker-compose logs openclaw
+docker-compose logs uhorse
 
 # 重启服务
-docker-compose restart openclaw
+docker-compose restart uhorse
 ```
 
 ### 端口占用
@@ -231,7 +231,7 @@ docker-compose up -d
 docker-compose down -v
 
 # 清理镜像
-docker rmi openclaw:test openclaw:latest
+docker rmi uhorse:test uhorse:latest
 
 # 清理构建缓存
 docker builder prune

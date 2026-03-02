@@ -1,5 +1,5 @@
 #!/bin/bash
-# OpenClaw 本地启动脚本
+# uHorse 本地启动脚本
 # 用法: ./scripts/start.sh
 
 set -e
@@ -19,7 +19,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo "╔════════════════════════════════════════════════╗"
-echo "║     OpenClaw 本地开发启动                     ║"
+echo "║     uHorse 本地开发启动                     ║"
 echo "╚════════════════════════════════════════════════╝"
 
 # 检查 Rust 工具链
@@ -70,7 +70,7 @@ fi
 
 # 编译项目
 section "4. 编译项目"
-info "编译 OpenClaw..."
+info "编译 uHorse..."
 if cargo build --release 2>&1 | tail -n 5; then
     pass "编译成功"
 else
@@ -81,7 +81,7 @@ fi
 # 运行数据库迁移
 section "5. 数据库迁移"
 info "运行数据库迁移..."
-if ./target/release/openclaw migrate 2>&1; then
+if ./target/release/uhorse migrate 2>&1; then
     pass "数据库迁移完成"
 else
     info "数据库迁移可能已执行或出错，继续启动..."
@@ -91,7 +91,7 @@ fi
 section "6. 启动应用"
 echo ""
 echo "╔════════════════════════════════════════════════╗"
-echo "║     OpenClaw 正在启动                          ║"
+echo "║     uHorse 正在启动                          ║"
 echo "╚════════════════════════════════════════════════╝"
 echo ""
 echo "服务地址:"
@@ -104,4 +104,4 @@ echo "按 Ctrl+C 停止服务"
 echo ""
 
 # 启动应用
-exec ./target/release/openclaw serve
+exec ./target/release/uhorse serve

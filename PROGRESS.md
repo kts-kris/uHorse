@@ -1,4 +1,4 @@
-# OpenClaw Rust 实施进度
+# uHorse Rust 实施进度
 
 ## ✅ Phase 1: 核心基础设施 (已完成)
 
@@ -8,7 +8,7 @@
   - 创建了 10 个 crate 的 workspace 结构
   - 配置了 workspace 依赖管理
 
-- [x] **核心类型定义** (openclaw-core)
+- [x] **核心类型定义** (uhorse-core)
   - 会话类型 (Session, SessionId, IsolationLevel)
   - 消息类型 (Message, MessageContent, MessageRole)
   - 工具类型 (ToolId, Tool, ToolCall, ToolResult)
@@ -16,14 +16,14 @@
   - 认证类型 (DeviceId, AccessToken, DeviceInfo)
   - 错误码系统 (ErrorCode, ErrorCategory)
 
-- [x] **协议定义** (openclaw-core/protocol)
+- [x] **协议定义** (uhorse-core/protocol)
   - WebSocket 握手协议
   - 请求-响应消息格式
   - 事件消息格式
   - 心跳协议 (Ping/Pong)
   - 错误详情格式
 
-- [x] **Trait 接口** (openclaw-core/traits)
+- [x] **Trait 接口** (uhorse-core/traits)
   - Channel trait (通道接口)
   - ToolExecutor trait (工具执行器)
   - Plugin trait (插件接口)
@@ -35,52 +35,52 @@
   - AuthService trait (认证服务)
   - IdempotencyService trait (幂等性)
 
-- [x] **SQLite 存储层** (openclaw-storage)
+- [x] **SQLite 存储层** (uhorse-storage)
   - 数据库迁移脚本
   - SessionStore 实现
   - ConversationStore 实现
   - JSONL 日志记录器
   - 密钥存储
 
-- [x] **会话层** (openclaw-session)
+- [x] **会话层** (uhorse-session)
   - SessionManager 实现
   - 隔离策略 (IsolationPolicy)
   - 会话存储适配器
 
-- [x] **网关层** (openclaw-gateway)
+- [x] **网关层** (uhorse-gateway)
   - WebSocket 处理器
   - HTTP API 路由
   - 中间件 (CORS, 日志, 追踪)
 
-- [x] **通道适配器** (openclaw-channel)
+- [x] **通道适配器** (uhorse-channel)
   - Telegram Bot API 实现
   - Slack Events API 实现
   - Discord Bot API 实现
   - WhatsApp Business API 实现
 
-- [x] **工具层** (openclaw-tool)
+- [x] **工具层** (uhorse-tool)
   - ToolRegistry 实现
   - 参数验证器
   - 权限检查器
   - 内置工具集 (6 个工具)
 
-- [x] **安全层** (openclaw-security)
+- [x] **安全层** (uhorse-security)
   - JWT 认证服务
   - 设备配对管理
   - 审批流程
   - 幂等性缓存
 
-- [x] **调度层** (openclaw-scheduler)
+- [x] **调度层** (uhorse-scheduler)
   - JobScheduler 实现
   - Cron 解析器
   - 执行队列
 
-- [x] **可观测性** (openclaw-observability)
+- [x] **可观测性** (uhorse-observability)
   - Tracing 初始化
   - Metrics 框架
   - 审计日志
 
-- [x] **二进制程序** (openclaw-bin)
+- [x] **二进制程序** (uhorse-bin)
   - CLI 参数解析
   - 配置加载
   - 优雅关闭
@@ -94,7 +94,7 @@
 
 ```
 ✅ 所有 crate 编译成功
-✅ 二进制文件生成成功 (target/release/openclaw)
+✅ 二进制文件生成成功 (target/release/uhorse)
 ✅ CLI 运行正常
 ```
 
@@ -140,7 +140,7 @@
 
 ### 已完成项
 
-- [x] **内置工具集** (openclaw-tool/tools.rs)
+- [x] **内置工具集** (uhorse-tool/tools.rs)
   - CalculatorTool - 基本数学计算
   - HttpTool - HTTP 请求工具
   - SearchTool - Web 搜索接口
@@ -148,13 +148,13 @@
   - TextTool - 文本处理工具
   - WeatherTool - 天气查询 (原有)
 
-- [x] **插件运行时** (openclaw-tool/plugin.rs)
+- [x] **插件运行时** (uhorse-tool/plugin.rs)
   - ProcessPlugin - 进程插件实现
   - PluginRuntime - 插件管理器
   - JSON-RPC 2.0 协议支持
   - 进程生命周期管理
 
-- [x] **沙箱隔离** (openclaw-tool/plugin.rs)
+- [x] **沙箱隔离** (uhorse-tool/plugin.rs)
   - PluginSandbox - 沙箱配置
   - 资源限制 (内存、CPU、超时)
   - 路径访问控制
@@ -166,7 +166,7 @@
   - 创建了 10 个 crate 的 workspace 结构
   - 配置了 workspace 依赖管理
 
-- [x] **核心类型定义** (openclaw-core)
+- [x] **核心类型定义** (uhorse-core)
   - 会话类型 (Session, SessionId, IsolationLevel)
   - 消息类型 (Message, MessageContent, MessageRole)
   - 工具类型 (ToolId, Tool, ToolCall, ToolResult)
@@ -174,14 +174,14 @@
   - 认证类型 (DeviceId, AccessToken, DeviceInfo)
   - 错误码系统 (ErrorCode, ErrorCategory)
 
-- [x] **协议定义** (openclaw-core/protocol)
+- [x] **协议定义** (uhorse-core/protocol)
   - WebSocket 握手协议
   - 请求-响应消息格式
   - 事件消息格式
   - 心跳协议 (Ping/Pong)
   - 错误详情格式
 
-- [x] **Trait 接口** (openclaw-core/traits)
+- [x] **Trait 接口** (uhorse-core/traits)
   - Channel trait (通道接口)
   - ToolExecutor trait (工具执行器)
   - Plugin trait (插件接口)
@@ -193,52 +193,52 @@
   - AuthService trait (认证服务)
   - IdempotencyService trait (幂等性)
 
-- [x] **SQLite 存储层** (openclaw-storage)
+- [x] **SQLite 存储层** (uhorse-storage)
   - 数据库迁移脚本
   - SessionStore 实现
   - ConversationStore 实现
   - JSONL 日志记录器
   - 密钥存储
 
-- [x] **会话层** (openclaw-session)
+- [x] **会话层** (uhorse-session)
   - SessionManager 实现
   - 隔离策略 (IsolationPolicy)
   - 会话存储适配器
 
-- [x] **网关层** (openclaw-gateway)
+- [x] **网关层** (uhorse-gateway)
   - WebSocket 处理器
   - HTTP API 路由
   - 中间件 (CORS, 日志, 追踪)
 
-- [x] **通道适配器** (openclaw-channel)
+- [x] **通道适配器** (uhorse-channel)
   - Telegram 适配器框架
   - Slack 适配器框架
   - Discord 适配器框架
   - WhatsApp 适配器框架
 
-- [x] **工具层** (openclaw-tool)
+- [x] **工具层** (uhorse-tool)
   - ToolRegistry 实现
   - 参数验证器
   - 权限检查器
   - 示例工具 (WeatherTool)
 
-- [x] **安全层** (openclaw-security)
+- [x] **安全层** (uhorse-security)
   - JWT 认证服务
   - 设备配对管理
   - 审批流程
   - 幂等性缓存
 
-- [x] **调度层** (openclaw-scheduler)
+- [x] **调度层** (uhorse-scheduler)
   - JobScheduler 实现
   - Cron 解析器
   - 执行队列
 
-- [x] **可观测性** (openclaw-observability)
+- [x] **可观测性** (uhorse-observability)
   - Tracing 初始化
   - Metrics 框架
   - 审计日志
 
-- [x] **二进制程序** (openclaw-bin)
+- [x] **二进制程序** (uhorse-bin)
   - CLI 参数解析
   - 配置加载
   - 优雅关闭
@@ -252,7 +252,7 @@
 
 ```
 ✅ 所有 crate 编译成功
-✅ 二进制文件生成成功 (target/release/openclaw)
+✅ 二进制文件生成成功 (target/release/uhorse)
 ✅ CLI 运行正常
 ```
 
@@ -269,34 +269,34 @@
 
 ### 已完成项
 
-- [x] **Cron 调度器完整实现** (openclaw-scheduler/cron.rs)
+- [x] **Cron 调度器完整实现** (uhorse-scheduler/cron.rs)
   - 标准 5 段和 6 段格式支持
   - 完整的字段解析（数字、范围、列表、步长）
   - 下次执行时间计算
   - 匹配验证逻辑
   - 常用预设表达式
 
-- [x] **调度循环增强** (openclaw-scheduler/scheduler.rs)
+- [x] **调度循环增强** (uhorse-scheduler/scheduler.rs)
   - 1 秒精度调度循环
   - 任务执行器注册
   - 自动更新下次执行时间
   - 一次性任务自动清理
 
-- [x] **令牌刷新机制** (openclaw-security/auth.rs)
+- [x] **令牌刷新机制** (uhorse-security/auth.rs)
   - 访问令牌 + 刷新令牌模式
   - 令牌黑名单（撤销）
   - 自动刷新过期令牌
   - TokenPair 类型
   - 清理过期撤销记录
 
-- [x] **设备配对流程** (openclaw-security/pairing.rs)
+- [x] **设备配对流程** (uhorse-security/pairing.rs)
   - 6 位配对码生成
   - 配对状态管理（Pending/Pairing/Rejected/Expired）
   - 配对请求过期处理
   - 完整的配对协议
   - 用户待处理请求列表
 
-- [x] **审批流程增强** (openclaw-security/approval.rs)
+- [x] **审批流程增强** (uhorse-security/approval.rs)
   - 多级审批（Single/Sequential/Parallel）
   - 条件审批（基于规则）
   - 审批规则引擎
@@ -314,14 +314,14 @@
 
 ### 已完成项
 
-- [x] **OpenTelemetry 集成框架** (openclaw-observability/telemetry.rs)
+- [x] **OpenTelemetry 集成框架** (uhorse-observability/telemetry.rs)
   - OtelConfig 配置结构
   - init_observability 初始化函数
   - SpanContext 工具（提取 trace_id、span_id）
   - traced! 宏用于自动 span 管理
   - 简化的追踪集成（无需外部 OTLP 依赖）
 
-- [x] **Metrics 收集系统** (openclaw-observability/metrics.rs)
+- [x] **Metrics 收集系统** (uhorse-observability/metrics.rs)
   - MetricsCollector：完整的指标收集器
     - 消息计数（接收/发送）
     - 工具执行计数和错误
@@ -333,20 +333,20 @@
   - MetricsExporter：简化的指标导出
   - 自动计时器（ToolTimer、ApiTimer）
 
-- [x] **审计日志系统** (openclaw-observability/metrics.rs)
+- [x] **审计日志系统** (uhorse-observability/metrics.rs)
   - AuditLogger：审计日志记录器
   - AuditLog：结构化审计事件
   - AuditResult：审计结果枚举
   - AuditFilter：审计日志查询过滤器
   - 自动日志轮转（最大 10000 条）
 
-- [x] **系统健康监控** (openclaw-observability/metrics.rs)
+- [x] **系统健康监控** (uhorse-observability/metrics.rs)
   - HealthMetrics：健康状态指标
   - SystemMonitor：系统监控器
   - 运行时间追踪
   - 版本信息导出
 
-- [x] **Tracing 初始化** (openclaw-observability/tracing_setup.rs)
+- [x] **Tracing 初始化** (uhorse-observability/tracing_setup.rs)
   - init_tracing：基础初始化
   - init_dev_observability：开发环境（debug 级别）
   - init_full_observability：完整配置
@@ -362,7 +362,7 @@
 
 ### 已完成项
 
-- [x] **配置管理系统** (openclaw-config)
+- [x] **配置管理系统** (uhorse-config)
   - 完整的配置结构定义
     - ServerConfig: 服务器配置（TLS、健康检查）
     - DatabaseConfig: 数据库配置（连接池、WAL、外键）
@@ -386,7 +386,7 @@
     - ChannelsValidator: 通道配置验证
     - 生产/开发环境验证器
 
-- [x] **健康检查系统** (openclaw-observability/health.rs)
+- [x] **健康检查系统** (uhorse-observability/health.rs)
   - HealthStatus: 健康/降级/不健康状态
   - HealthCheck: 健康检查结果
     - 时间戳、版本、运行时长
@@ -457,7 +457,7 @@
     - 安全: 认证失败、审批拒绝
 
 - [x] **Grafana 仪表板** (deployments/grafana/)
-  - openclaw-dashboard.json: 19 个面板
+  - uhorse-dashboard.json: 19 个面板
     - 概览面板: 服务状态、活跃会话、P95 延迟、健康检查
     - API 面板: 请求速率、延迟分布、错误率
     - 资源面板: 内存使用、CPU 使用率、运行时间
@@ -561,7 +561,7 @@ cargo build --release
 cp config.example.toml config.toml
 
 # 运行
-./target/release/openclaw
+./target/release/uhorse
 ```
 
 ---

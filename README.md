@@ -1,4 +1,4 @@
-# OpenClaw AI Gateway (Rust)
+# uHorse AI Gateway (Rust)
 
 多渠道 AI 网关框架 - Rust 实现。
 
@@ -19,17 +19,17 @@
 ## 架构概览
 
 ```
-openclaw-rs/
-├── openclaw-core/        # 核心类型和 trait
-├── openclaw-gateway/      # 网关层 (HTTP/WebSocket)
-├── openclaw-storage/      # 存储层 (SQLite/JSONL)
-├── openclaw-session/      # 会话层
-├── openclaw-channel/      # 通道适配器
-├── openclaw-tool/         # 工具执行层
-├── openclaw-security/     # 安全层 (认证/授权)
-├── openclaw-scheduler/    # 调度器
-├── openclaw-observability/# 可观测性
-└── openclaw-bin/          # 二进制程序
+uhorse-rs/
+├── uhorse-core/        # 核心类型和 trait
+├── uhorse-gateway/      # 网关层 (HTTP/WebSocket)
+├── uhorse-storage/      # 存储层 (SQLite/JSONL)
+├── uhorse-session/      # 会话层
+├── uhorse-channel/      # 通道适配器
+├── uhorse-tool/         # 工具执行层
+├── uhorse-security/     # 安全层 (认证/授权)
+├── uhorse-scheduler/    # 调度器
+├── uhorse-observability/# 可观测性
+└── uhorse-bin/          # 二进制程序
 ```
 
 ## 开发路线图
@@ -68,12 +68,47 @@ openclaw-rs/
 
 ## 快速开始
 
-### 方式一：本地开发 (推荐)
+### 方式一：一键安装脚本（最简单）⭐
+
+```bash
+# 克隆仓库
+git clone https://github.com/uhorse/uhorse-rs
+cd uhorse-rs
+
+# 运行一键安装脚本
+./install.sh
+```
+
+**install.sh 脚本会自动完成：**
+- ✅ 检查依赖（Rust、Cargo）
+- ✅ 编译项目（Release 模式）
+- ✅ 创建必要目录（data/、logs/）
+- ✅ 启动配置向导
+- ✅ 生成配置文件（config.toml、.env）
+- ✅ 可选：立即启动服务
+
+### 方式二：快速设置（默认配置）
+
+```bash
+# 克隆仓库
+git clone https://github.com/uhorse/uhorse-rs
+cd uhorse-rs
+
+# 运行快速设置脚本
+./quick-setup.sh
+```
+
+**quick-setup.sh 使用场景：**
+- 快速本地测试
+- 使用默认配置
+- 无需通道配置
+
+### 方式三：交互式配置向导（推荐生产环境）
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/openclaw/openclaw-rs
-cd openclaw-rs
+git clone https://github.com/uhorse/uhorse-rs
+cd uhorse-rs
 
 # 2. 复制环境配置
 cp .env.example .env
@@ -102,26 +137,112 @@ docker-compose up -d
 docker-compose ps
 
 # 查看日志
-docker-compose logs -f openclaw
+docker-compose logs -f uhorse
 ```
 
 **详细指南**: [部署文档](deployments/DEPLOYMENT.md)
 
 ## 配置
 
+### 方式一：配置文件
+
 创建 `config.toml`:
 
 ```toml
 [server]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 8080
 
+[channels]
+enabled = []
+
 [database]
-path = "./data/openclaw.db"
+path = "./data/uhorse.db"
 
 [security]
 jwt_secret = "your-secret-key"
 token_expiry = 86400
+```
+
+### 方式二：环境变量
+
+创建 `.env` 文件:
+
+```bash
+cp .env.example .env
+# 编辑 .env 文件配置您的环境
+```
+
+## 📚 文档
+
+| 文档 | 说明 |
+|------|------|
+| [安装指南](INSTALL.md) | 安装和设置说明 |
+| [配置向导](WIZARD.md) | 交互式配置向导 |
+| [配置指南](CONFIG.md) | 完整配置说明 |
+| [API 使用指南](API.md) | API 文档和使用示例 |
+| [通道集成指南](CHANNELS.md) | 各通道集成步骤 |
+| [本地开发](LOCAL_SETUP.md) | 本地开发环境 |
+| [测试指南](TESTING.md) | 测试说明 |
+| [部署指南](deployments/DEPLOYMENT.md) | 生产环境部署 |
+
+## 🚀 快速命令
+
+### 安装和配置
+
+```bash
+# 一键安装（推荐）
+./install.sh
+
+# 快速设置（默认配置）
+./quick-setup.sh
+
+# 仅运行配置向导
+./target/release/uhorse wizard
+```
+
+### 服务管理
+
+```bash
+# 启动服务器
+./start.sh                    # 后台启动
+./run.sh                      # 前台启动（开发模式）
+./target/release/uhorse run   # 直接运行
+
+# 停止服务器
+./stop.sh
+
+# 重启服务器
+./restart.sh
+```
+
+### 命令行选项
+
+```bash
+# 查看帮助
+./target/release/uhorse --help
+
+# 查看版本
+./target/release/uhorse --version
+
+# 使用自定义配置文件启动
+./target/release/uhorse -c /path/to/config.toml run
+
+# 设置日志级别
+./target/release/uhorse -l debug run
+```
+
+### 健康检查
+
+```bash
+# 存活性检查
+curl http://localhost:8080/health/live
+
+# 就绪性检查
+curl http://localhost:8080/health/ready
+
+# 查看指标
+curl http://localhost:8080/metrics
 ```
 
 ## 技术栈

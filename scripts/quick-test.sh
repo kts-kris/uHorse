@@ -12,7 +12,7 @@ pass() { echo -e "${GREEN}✓${NC} $1"; }
 fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
 info() { echo -e "${YELLOW}→${NC} $1"; }
 
-echo "=== OpenClaw 快速测试 ==="
+echo "=== uHorse 快速测试 ==="
 
 # 1. 编译
 info "编译项目..."
@@ -26,12 +26,12 @@ pass "单元测试通过"
 
 # 3. Docker 构建
 info "构建 Docker 镜像..."
-docker build -t openclaw:latest -q . 2>&1 | tail -n 3
+docker build -t uhorse:latest -q . 2>&1 | tail -n 3
 pass "Docker 镜像构建成功"
 
 # 4. 启动服务
 info "启动服务..."
-docker-compose up -d postgres redis openclaw --quiet
+docker-compose up -d postgres redis uhorse --quiet
 sleep 5
 
 # 5. 健康检查
@@ -44,7 +44,7 @@ fi
 
 # 6. 指标检查
 info "指标检查..."
-if curl -sf http://localhost:8080/metrics | grep -q "openclaw_"; then
+if curl -sf http://localhost:8080/metrics | grep -q "uhorse_"; then
     pass "指标端点正常"
 else
     fail "指标端点异常"

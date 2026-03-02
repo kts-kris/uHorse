@@ -3,7 +3,7 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: 'openclaw-production'
+    cluster: 'uhorse-production'
     environment: 'production'
 
 # 告警管理器配置
@@ -19,11 +19,11 @@ rule_files:
 
 # 抓取配置
 scrape_configs:
-  # OpenClaw 应用指标
-  - job_name: 'openclaw'
+  # uHorse 应用指标
+  - job_name: 'uhorse'
     static_configs:
       - targets:
-        - 'openclaw:9090'
+        - 'uhorse:9090'
     scrape_interval: 15s
     scrape_timeout: 10s
     metrics_path: /metrics
@@ -35,7 +35,7 @@ scrape_configs:
     relabel_configs:
       - source_labels: [__meta_kubernetes_pod_label_app]
         action: keep
-        regex: openclaw
+        regex: uhorse
       - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
         action: keep
         regex: 'true'

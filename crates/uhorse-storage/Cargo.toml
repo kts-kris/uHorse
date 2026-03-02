@@ -1,0 +1,20 @@
+[package]
+name = "uhorse-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Storage layer for uHorse AI Gateway"
+
+[dependencies]
+uhorse-core = { path = "../uhorse-core", features = ["sqlx"] }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }

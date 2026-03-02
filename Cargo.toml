@@ -1,16 +1,16 @@
 [workspace]
 members = [
-    "crates/openclaw-core",
-    "crates/openclaw-gateway",
-    "crates/openclaw-storage",
-    "crates/openclaw-session",
-    "crates/openclaw-channel",
-    "crates/openclaw-tool",
-    "crates/openclaw-security",
-    "crates/openclaw-scheduler",
-    "crates/openclaw-observability",
-    "crates/openclaw-config",
-    "crates/openclaw-bin",
+    "crates/uhorse-core",
+    "crates/uhorse-gateway",
+    "crates/uhorse-storage",
+    "crates/uhorse-session",
+    "crates/uhorse-channel",
+    "crates/uhorse-tool",
+    "crates/uhorse-security",
+    "crates/uhorse-scheduler",
+    "crates/uhorse-observability",
+    "crates/uhorse-config",
+    "crates/uhorse-bin",
 ]
 resolver = "2"
 
@@ -18,9 +18,9 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.78"
-authors = ["OpenClaw Contributors"]
+authors = ["uHorse Contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/openclaw/openclaw-rs"
+repository = "https://github.com/uhorse/uhorse-rs"
 
 [workspace.dependencies]
 # Async runtime

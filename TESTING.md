@@ -1,4 +1,4 @@
-# OpenClaw 测试指南
+# uHorse 测试指南
 
 ## 目录
 
@@ -64,7 +64,7 @@ cargo watch -x run
 cargo run --release
 
 # 后台运行
-cargo run --release > openclaw.log 2>&1 &
+cargo run --release > uhorse.log 2>&1 &
 ```
 
 ### 3. 单元测试
@@ -74,8 +74,8 @@ cargo run --release > openclaw.log 2>&1 &
 cargo test
 
 # 运行特定模块测试
-cargo test --package openclaw-core
-cargo test --package openclaw-gateway
+cargo test --package uhorse-core
+cargo test --package uhorse-gateway
 
 # 带输出的测试
 cargo test -- --nocapture
@@ -102,13 +102,13 @@ cargo test -- --test-threads=1
 
 ```bash
 # 构建生产镜像
-docker build -t openclaw:latest .
+docker build -t uhorse:latest .
 
 # 验证镜像
-docker images | grep openclaw
+docker images | grep uhorse
 
 # 检查镜像大小
-docker inspect openclaw:latest | grep Size
+docker inspect uhorse:latest | grep Size
 ```
 
 ### 2. 运行容器
@@ -116,19 +116,19 @@ docker inspect openclaw:latest | grep Size
 ```bash
 # 单独运行应用容器
 docker run -d \
-  --name openclaw \
+  --name uhorse \
   -p 8080:8080 \
   -p 9090:9090 \
-  -e OPENCLAW_DATABASE_URL="postgresql://openclaw:password@host.docker.internal:5432/openclaw" \
+  -e OPENCLAW_DATABASE_URL="postgresql://uhorse:password@host.docker.internal:5432/uhorse" \
   -e OPENCLAW_REDIS_URL="redis://host.docker.internal:6379" \
   -e OPENCLAW_JWT_SECRET="test-secret-for-development-only" \
-  openclaw:latest
+  uhorse:latest
 
 # 查看日志
-docker logs -f openclaw
+docker logs -f uhorse
 
 # 进入容器
-docker exec -it openclaw /bin/bash
+docker exec -it uhorse /bin/bash
 ```
 
 ### 3. Docker Compose 测试
@@ -144,7 +144,7 @@ docker-compose ps
 docker-compose logs -f
 
 # 重启服务
-docker-compose restart openclaw
+docker-compose restart uhorse
 
 # 停止服务
 docker-compose down
@@ -176,7 +176,7 @@ curl http://localhost:8080/health/live | jq .
 
 ```bash
 # 使用 Kind 创建本地集群
-kind create cluster --name openclaw-test
+kind create cluster --name uhorse-test
 
 # 或使用 MicroK8s
 microk8s install
@@ -188,16 +188,16 @@ microk8s enable dns storage ingress
 
 ```bash
 # 创建命名空间
-kubectl create namespace openclaw
+kubectl create namespace uhorse
 
 # 生成测试密钥
 JWT_SECRET=$(openssl rand -hex 32)
 
 # 创建 Secret
-kubectl create secret generic openclaw-secrets \
+kubectl create secret generic uhorse-secrets \
   --from-literal=jwt_secret=${JWT_SECRET} \
   --from-literal=telegram_bot_token="" \
-  --namespace=openclaw
+  --namespace=uhorse
 
 # 部署应用
 kubectl apply -f deployments/k8s/base/rbac.yaml
@@ -210,26 +210,26 @@ kubectl apply -f deployments/k8s/base/deployment.yaml
 
 ```bash
 # 查看 Pod 状态
-kubectl get pods -n openclaw
+kubectl get pods -n uhorse
 
 # 等待 Pod 就绪
-kubectl wait --for=condition=ready pod -l app=openclaw -n openclaw --timeout=60s
+kubectl wait --for=condition=ready pod -l app=uhorse -n uhorse --timeout=60s
 
 # 查看 Service
-kubectl get svc -n openclaw
+kubectl get svc -n uhorse
 
 # 查看 PVC
-kubectl get pvc -n openclaw
+kubectl get pvc -n uhorse
 
 # 查看日志
-kubectl logs -f deployment/openclaw -n openclaw
+kubectl logs -f deployment/uhorse -n uhorse
 ```
 
 ### 4. 端口转发测试
 
 ```bash
 # 本地访问
-kubectl port-forward -n openclaw svc/openclaw 8080:8080
+kubectl port-forward -n uhorse svc/uhorse 8080:8080
 
 # 测试健康检查
 curl http://localhost:8080/health/live
@@ -239,13 +239,13 @@ curl http://localhost:8080/health/live
 
 ```bash
 # 手动扩容
-kubectl scale deployment openclaw --replicas=5 -n openclaw
+kubectl scale deployment uhorse --replicas=5 -n uhorse
 
 # 观察扩容
-kubectl get pods -n openclaw -w
+kubectl get pods -n uhorse -w
 
 # 查看自动扩缩容
-kubectl get hpa -n openclaw
+kubectl get hpa -n uhorse
 ```
 
 ---
@@ -373,10 +373,10 @@ wscat -c ws://localhost:8080/ws
 
 ```bash
 # 监控内存使用
-docker stats openclaw
+docker stats uhorse
 
 # Kubernetes 环境内存使用
-kubectl top pod -n openclaw
+kubectl top pod -n uhorse
 
 # 内存泄漏检测
 # 运行长时间测试
@@ -407,7 +407,7 @@ done
 #!/bin/bash
 set -e
 
-echo "=== OpenClaw E2E Test ==="
+echo "=== uHorse E2E Test ==="
 
 # 1. 健康检查
 echo "Testing health endpoint..."
@@ -419,12 +419,12 @@ timeout 5 wscat -c ws://localhost:8080/ws <<< '{"type":"ping","id":"test"}' || e
 
 # 3. 指标端点
 echo "Testing metrics endpoint..."
-curl -f http://localhost:8080/metrics | grep openclaw || exit 1
+curl -f http://localhost:8080/metrics | grep uhorse || exit 1
 
 # 4. 数据库连接
 echo "Testing database connection..."
-kubectl exec -n openclaw deployment/openclaw -- \
-  /app/openclaw db:ping || exit 1
+kubectl exec -n uhorse deployment/uhorse -- \
+  /app/uhorse db:ping || exit 1
 
 echo "=== All tests passed! ==="
 ```
@@ -433,9 +433,9 @@ echo "=== All tests passed! ==="
 
 ```bash
 # 测试 Pod 故障恢复
-kubectl delete pod -l app=openclaw -n openclaw
+kubectl delete pod -l app=uhorse -n uhorse
 # 验证自动重建
-kubectl get pods -n openclaw -w
+kubectl get pods -n uhorse -w
 
 # 测试节点故障
 kubectl cordon node-1
@@ -457,7 +457,7 @@ kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 909
 
 # 查询指标
 curl -G http://localhost:9090/api/v1/query \
-  --data-urlencode 'query=up{job="openclaw"}'
+  --data-urlencode 'query=up{job="uhorse"}'
 
 # 访问 Grafana
 kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
@@ -481,7 +481,7 @@ kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-alertmanager 9
 set -e
 
 echo "╔════════════════════════════════════════════════╗"
-echo "║     OpenClaw 自动化测试套件                   ║"
+echo "║     uHorse 自动化测试套件                   ║"
 echo "╚════════════════════════════════════════════════╝"
 
 # 颜色定义
@@ -513,12 +513,12 @@ pass "单元测试通过"
 
 # Docker 构建测试
 info "构建 Docker 镜像..."
-docker build -t openclaw:test -f Dockerfile . >/dev/null 2>&1
+docker build -t uhorse:test -f Dockerfile . >/dev/null 2>&1
 pass "Docker 镜像构建成功"
 
 # 启动测试环境
 info "启动测试环境..."
-docker-compose up -d postgres redis openclaw >/dev/null 2>&1
+docker-compose up -d postgres redis uhorse >/dev/null 2>&1
 sleep 10
 pass "测试环境启动成功"
 
@@ -537,7 +537,7 @@ pass "就绪检查通过"
 # 指标测试
 info "验证指标端点..."
 METRICS=$(curl -s http://localhost:8080/metrics)
-echo "$METRICS" | grep -q "openclaw_"
+echo "$METRICS" | grep -q "uhorse_"
 pass "指标端点正常"
 
 # WebSocket 测试

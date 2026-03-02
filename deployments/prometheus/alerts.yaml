@@ -1,21 +1,21 @@
 # Prometheus 告警规则
 groups:
   # 应用可用性告警
-  - name: openclaw_availability
+  - name: uhorse_availability
     interval: 30s
     rules:
-      - alert: OpenClawDown
-        expr: up{job="openclaw"} == 0
+      - alert: uHorseDown
+        expr: up{job="uhorse"} == 0
         for: 1m
         labels:
           severity: critical
           component: api
         annotations:
-          summary: "OpenClaw 服务宕机"
-          description: "OpenClaw 服务已宕机超过 1 分钟"
+          summary: "uHorse 服务宕机"
+          description: "uHorse 服务已宕机超过 1 分钟"
 
-      - alert: OpenClawHighErrorRate
-        expr: rate(openclaw_api_errors_total[5m]) / rate(openclaw_api_requests_total[5m]) > 0.05
+      - alert: uHorseHighErrorRate
+        expr: rate(uhorse_api_errors_total[5m]) / rate(uhorse_api_requests_total[5m]) > 0.05
         for: 5m
         labels:
           severity: warning
@@ -24,8 +24,8 @@ groups:
           summary: "API 错误率过高"
           description: "API 错误率超过 5%，当前值：{{ $value | humanizePercentage }}"
 
-      - alert: OpenClawHighLatency
-        expr: histogram_quantile(0.95, rate(openclaw_api_latency_ms_bucket[5m])) > 1000
+      - alert: uHorseHighLatency
+        expr: histogram_quantile(0.95, rate(uhorse_api_latency_ms_bucket[5m])) > 1000
         for: 5m
         labels:
           severity: warning
@@ -35,45 +35,45 @@ groups:
           description: "API P95 延迟超过 1秒，当前值：{{ $value }}ms"
 
   # 资源使用告警
-  - name: openclaw_resources
+  - name: uhorse_resources
     interval: 30s
     rules:
-      - alert: OpenClawHighMemoryUsage
-        expr: container_memory_usage_bytes{container="openclaw"} / container_spec_memory_limit_bytes{container="openclaw"} > 0.8
+      - alert: uHorseHighMemoryUsage
+        expr: container_memory_usage_bytes{container="uhorse"} / container_spec_memory_limit_bytes{container="uhorse"} > 0.8
         for: 5m
         labels:
           severity: warning
           component: resources
         annotations:
           summary: "内存使用率过高"
-          description: "OpenClaw 容器内存使用率超过 80%，当前值：{{ $value | humanizePercentage }}"
+          description: "uHorse 容器内存使用率超过 80%，当前值：{{ $value | humanizePercentage }}"
 
-      - alert: OpenClawHighCPUUsage
-        expr: rate(container_cpu_usage_seconds_total{container="openclaw"}[5m]) > 0.8
+      - alert: uHorseHighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{container="uhorse"}[5m]) > 0.8
         for: 5m
         labels:
           severity: warning
           component: resources
         annotations:
           summary: "CPU 使用率过高"
-          description: "OpenClaw 容器 CPU 使用率超过 80%，当前值：{{ $value | humanizePercentage }}"
+          description: "uHorse 容器 CPU 使用率超过 80%，当前值：{{ $value | humanizePercentage }}"
 
-      - alert: OpenClawPodCrashLooping
-        expr: rate(kube_pod_container_status_restarts_total{container="openclaw"}[15m]) > 0
+      - alert: uHorsePodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{container="uhorse"}[15m]) > 0
         for: 5m
         labels:
           severity: critical
           component: resources
         annotations:
           summary: "Pod 频繁重启"
-          description: "OpenClaw Pod 在过去 15 分钟内频繁重启"
+          description: "uHorse Pod 在过去 15 分钟内频繁重启"
 
   # 业务指标告警
-  - name: openclaw_business
+  - name: uhorse_business
     interval: 1m
     rules:
-      - alert: OpenClawLowActiveSessions
-        expr: openclaw_active_sessions < 10
+      - alert: uHorseLowActiveSessions
+        expr: uhorse_active_sessions < 10
         for: 10m
         labels:
           severity: info
@@ -82,8 +82,8 @@ groups:
           summary: "活跃会话数过低"
           description: "活跃会话数少于 10，当前值：{{ $value }}"
 
-      - alert: OpenClawToolFailureRate
-        expr: rate(openclaw_tool_errors_total[5m]) / rate(openclaw_tool_executions_total[5m]) > 0.1
+      - alert: uHorseToolFailureRate
+        expr: rate(uhorse_tool_errors_total[5m]) / rate(uhorse_tool_executions_total[5m]) > 0.1
         for: 5m
         labels:
           severity: warning
@@ -92,8 +92,8 @@ groups:
           summary: "工具失败率过高"
           description: "工具失败率超过 10%，当前值：{{ $value | humanizePercentage }}"
 
-      - alert: OpenClawChannelMessageBacklog
-        expr: openclaw_message_backlog > 1000
+      - alert: uHorseChannelMessageBacklog
+        expr: uhorse_message_backlog > 1000
         for: 5m
         labels:
           severity: warning
@@ -103,11 +103,11 @@ groups:
           description: "消息积压超过 1000 条，当前值：{{ $value }}"
 
   # 数据库告警
-  - name: openclaw_database
+  - name: uhorse_database
     interval: 30s
     rules:
-      - alert: OpenClawDatabaseQuerySlow
-        expr: histogram_quantile(0.95, rate(openclaw_db_query_duration_ms_bucket[5m])) > 500
+      - alert: uHorseDatabaseQuerySlow
+        expr: histogram_quantile(0.95, rate(uhorse_db_query_duration_ms_bucket[5m])) > 500
         for: 5m
         labels:
           severity: warning
@@ -116,8 +116,8 @@ groups:
           summary: "数据库查询缓慢"
           description: "数据库查询 P95 延迟超过 500ms，当前值：{{ $value }}ms"
 
-      - alert: OpenClawHighCacheMissRate
-        expr: rate(openclaw_cache_misses_total[5m]) / (rate(openclaw_cache_hits_total[5m]) + rate(openclaw_cache_misses_total[5m])) > 0.5
+      - alert: uHorseHighCacheMissRate
+        expr: rate(uhorse_cache_misses_total[5m]) / (rate(uhorse_cache_hits_total[5m]) + rate(uhorse_cache_misses_total[5m])) > 0.5
         for: 10m
         labels:
           severity: warning
@@ -127,11 +127,11 @@ groups:
           description: "缓存未命中率超过 50%，当前值：{{ $value | humanizePercentage }}"
 
   # 安全告警
-  - name: openclaw_security
+  - name: uhorse_security
     interval: 1m
     rules:
-      - alert: OpenClawHighAuthFailureRate
-        expr: rate(openclaw_auth_errors_total[5m]) / rate(openclaw_auth_requests_total[5m]) > 0.1
+      - alert: uHorseHighAuthFailureRate
+        expr: rate(uhorse_auth_errors_total[5m]) / rate(uhorse_auth_requests_total[5m]) > 0.1
         for: 5m
         labels:
           severity: warning
@@ -140,8 +140,8 @@ groups:
           summary: "认证失败率过高"
           description: "认证失败率超过 10%，可能存在暴力破解攻击"
 
-      - alert: OpenClawApprovalRejectionRate
-        expr: rate(openclaw_approval_rejected_total[1h]) / rate(openclaw_approval_requests_total[1h]) > 0.5
+      - alert: uHorseApprovalRejectionRate
+        expr: rate(uhorse_approval_rejected_total[1h]) / rate(uhorse_approval_requests_total[1h]) > 0.5
         for: 10m
         labels:
           severity: info

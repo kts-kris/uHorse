@@ -1,4 +1,4 @@
-# OpenClaw 部署指南
+# uHorse 部署指南
 
 ## 目录
 
@@ -14,7 +14,7 @@
 
 ## 概述
 
-本文档提供 OpenClaw 的完整部署指南，包括本地开发环境、Docker 容器化部署和 Kubernetes 生产环境部署。
+本文档提供 uHorse 的完整部署指南，包括本地开发环境、Docker 容器化部署和 Kubernetes 生产环境部署。
 
 ## 前置要求
 
@@ -63,8 +63,8 @@ helm 3.12+
 
 ```bash
 # 克隆仓库
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+git clone https://github.com/uhorse/uhorse.git
+cd uhorse
 
 # 安装 Rust 工具链 (如果尚未安装)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -98,7 +98,7 @@ host = "127.0.0.1"
 port = 8080
 
 [database]
-url = "postgresql://openclaw:password@localhost:5432/openclaw"
+url = "postgresql://uhorse:password@localhost:5432/uhorse"
 
 [channels.telegram]
 bot_token = "YOUR_BOT_TOKEN"
@@ -114,10 +114,10 @@ secret = "CHANGE_ME_TO_RANDOM_32_CHAR_STRING"
 cargo build --release
 
 # 初始化数据库
-./target/release/openclaw migrate
+./target/release/uhorse migrate
 
 # 运行应用
-./target/release/openclaw serve
+./target/release/uhorse serve
 ```
 
 ### 5. 验证
@@ -139,10 +139,10 @@ wscat -c ws://localhost:8080/ws
 
 ```bash
 # 构建生产镜像
-docker build -t openclaw:latest .
+docker build -t uhorse:latest .
 
 # 验证镜像
-docker images | grep openclaw
+docker images | grep uhorse
 ```
 
 ### 2. 使用 Docker Compose
@@ -152,7 +152,7 @@ docker images | grep openclaw
 docker-compose up -d
 
 # 查看日志
-docker-compose logs -f openclaw
+docker-compose logs -f uhorse
 
 # 查看状态
 docker-compose ps
@@ -168,7 +168,7 @@ OPENCLAW_SERVER_HOST=0.0.0.0
 OPENCLAW_SERVER_PORT=8080
 
 # 数据库
-OPENCLAW_DATABASE_URL=postgresql://openclaw:password@postgres:5432/openclaw
+OPENCLAW_DATABASE_URL=postgresql://uhorse:password@postgres:5432/uhorse
 
 # Redis
 OPENCLAW_REDIS_URL=redis://redis:6379
@@ -193,13 +193,13 @@ docker-compose restart
 docker-compose logs -f [service]
 
 # 进入容器
-docker-compose exec openclaw /bin/bash
+docker-compose exec uhorse /bin/bash
 
 # 数据库迁移
-docker-compose exec openclaw /app/openclaw migrate
+docker-compose exec uhorse /app/uhorse migrate
 
 # 执行命令
-docker-compose exec openclaw /app/openclaw --help
+docker-compose exec uhorse /app/uhorse --help
 ```
 
 ## Kubernetes 部署
@@ -212,7 +212,7 @@ kubectl cluster-info
 kubectl get nodes
 
 # 创建命名空间
-kubectl create namespace openclaw
+kubectl create namespace uhorse
 ```
 
 ### 2. 创建 Secret
@@ -222,13 +222,13 @@ kubectl create namespace openclaw
 JWT_SECRET=$(openssl rand -hex 32)
 
 # 创建 Secret
-kubectl create secret generic openclaw-secrets \
+kubectl create secret generic uhorse-secrets \
   --from-literal=jwt_secret=${JWT_SECRET} \
   --from-literal=telegram_bot_token=YOUR_BOT_TOKEN \
-  --namespace=openclaw
+  --namespace=uhorse
 
 # 验证 Secret
-kubectl get secret openclaw-secrets -n openclaw
+kubectl get secret uhorse-secrets -n uhorse
 ```
 
 ### 3. 部署基础组件
@@ -251,61 +251,61 @@ kubectl apply -f deployments/k8s/base/deployment.yaml
 
 ```bash
 # 查看 Pod 状态
-kubectl get pods -n openclaw
+kubectl get pods -n uhorse
 
 # 查看 Service
-kubectl get svc -n openclaw
+kubectl get svc -n uhorse
 
 # 查看 PVC
-kubectl get pvc -n openclaw
+kubectl get pvc -n uhorse
 
 # 查看日志
-kubectl logs -f deployment/openclaw -n openclaw
+kubectl logs -f deployment/uhorse -n uhorse
 ```
 
 ### 5. 访问服务
 
 ```bash
 # 端口转发 (本地测试)
-kubectl port-forward -n openclaw svc/openclaw 8080:8080
+kubectl port-forward -n uhorse svc/uhorse 8080:8080
 
 # 获取 LoadBalancer IP (生产环境)
-kubectl get svc openclaw-lb -n openclaw
+kubectl get svc uhorse-lb -n uhorse
 ```
 
 ### 6. 水平扩缩容
 
 ```bash
 # 手动扩容
-kubectl scale deployment openclaw --replicas=5 -n openclaw
+kubectl scale deployment uhorse --replicas=5 -n uhorse
 
 # 查看扩容状态
-kubectl get pods -n openclaw -w
+kubectl get pods -n uhorse -w
 
 # 查看自动扩缩容状态
-kubectl get hpa -n openclaw
+kubectl get hpa -n uhorse
 ```
 
 ### 7. 更新部署
 
 ```bash
 # 构建新镜像
-docker build -t openclaw:v1.0.1 .
+docker build -t uhorse:v1.0.1 .
 
 # 推送到镜像仓库
-docker tag openclaw:v1.0.1 registry.example.com/openclaw:v1.0.1
-docker push registry.example.com/openclaw:v1.0.1
+docker tag uhorse:v1.0.1 registry.example.com/uhorse:v1.0.1
+docker push registry.example.com/uhorse:v1.0.1
 
 # 更新部署
-kubectl set image deployment/openclaw \
-  openclaw=registry.example.com/openclaw:v1.0.1 \
-  -n openclaw
+kubectl set image deployment/uhorse \
+  uhorse=registry.example.com/uhorse:v1.0.1 \
+  -n uhorse
 
 # 查看滚动更新状态
-kubectl rollout status deployment/openclaw -n openclaw
+kubectl rollout status deployment/uhorse -n uhorse
 
 # 回滚 (如果需要)
-kubectl rollout undo deployment/openclaw -n openclaw
+kubectl rollout undo deployment/uhorse -n uhorse
 ```
 
 ## 监控配置
@@ -346,7 +346,7 @@ kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
 
 # 导入仪表板
 # 1. 登录后点击 "+" → "Import"
-# 2. 上传 deployments/grafana/openclaw-dashboard.json
+# 2. 上传 deployments/grafana/uhorse-dashboard.json
 # 3. 选择 Prometheus 数据源
 # 4. 点击 "Import"
 ```
@@ -395,7 +395,7 @@ curl http://localhost:8080/health/live
 curl http://localhost:8080/health/ready
 
 # Kubernetes 环境
-kubectl exec -n openclaw deployment/openclaw -- \
+kubectl exec -n uhorse deployment/uhorse -- \
   wget -qO- http://localhost:8080/health/live
 ```
 
@@ -409,7 +409,7 @@ wscat -c ws://localhost:8080/ws
 echo '{"type":"ping","id":"test-001"}' | wscat -c ws://localhost:8080/ws
 
 # 查看指标
-curl http://localhost:8080/metrics | grep openclaw
+curl http://localhost:8080/metrics | grep uhorse
 ```
 
 ### 3. 性能测试
@@ -419,17 +419,17 @@ curl http://localhost:8080/metrics | grep openclaw
 wrk -t4 -c100 -d30s http://localhost:8080/health/live
 
 # 查看资源使用
-docker stats openclaw
+docker stats uhorse
 ```
 
 ### 4. 故障测试
 
 ```bash
 # 模拟 Pod 故障
-kubectl delete pod -l app=openclaw -n openclaw
+kubectl delete pod -l app=uhorse -n uhorse
 
 # 验证自动恢复
-kubectl get pods -n openclaw -w
+kubectl get pods -n uhorse -w
 ```
 
 ## 常见问题
@@ -441,14 +441,14 @@ kubectl get pods -n openclaw -w
 **解决**:
 ```bash
 # 检查数据库状态
-kubectl get pods -n openclaw | grep postgres
+kubectl get pods -n uhorse | grep postgres
 
 # 检查数据库连接字符串
-kubectl get configmap openclaw-config -n openclaw -o yaml
+kubectl get configmap uhorse-config -n uhorse -o yaml
 
 # 测试数据库连接
 kubectl run -it --rm psql --image=postgres:14 -- \
-  psql postgresql://openclaw:password@postgres:5432/openclaw
+  psql postgresql://uhorse:password@postgres:5432/uhorse
 ```
 
 ### 2. 内存不足
@@ -458,10 +458,10 @@ kubectl run -it --rm psql --image=postgres:14 -- \
 **解决**:
 ```bash
 # 增加内存限制
-kubectl set resources deployment openclaw \
+kubectl set resources deployment uhorse \
   --limits=memory=1Gi \
   --requests=memory=256Mi \
-  -n openclaw
+  -n uhorse
 ```
 
 ### 3. 镜像拉取失败
@@ -471,17 +471,17 @@ kubectl set resources deployment openclaw \
 **解决**:
 ```bash
 # 验证镜像存在
-docker images | grep openclaw
+docker images | grep uhorse
 
 # 创建 imagePullSecret
 kubectl create secret docker-registry regcred \
   --docker-server=registry.example.com \
   --docker-username=user \
   --docker-password=pass \
-  -n openclaw
+  -n uhorse
 
 # 更新 Deployment 使用 imagePullSecret
-kubectl patch deployment openclaw -n openclaw -p \
+kubectl patch deployment uhorse -n uhorse -p \
   '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"regcred"}]}}}}'
 ```
 
@@ -489,26 +489,26 @@ kubectl patch deployment openclaw -n openclaw -p \
 
 ```bash
 # 实时查看 Pod 日志
-kubectl logs -f deployment/openclaw -n openclaw
+kubectl logs -f deployment/uhorse -n uhorse
 
 # 查看所有副本日志
-kubectl logs -f -l app=openclaw -n openclaw --all-containers=true
+kubectl logs -f -l app=uhorse -n uhorse --all-containers=true
 
 # 查看最近的日志
-kubectl logs --tail=100 deployment/openclaw -n openclaw
+kubectl logs --tail=100 deployment/uhorse -n uhorse
 ```
 
 ### 5. 进入容器调试
 
 ```bash
 # 进入容器 Shell
-kubectl exec -it deployment/openclaw -n openclaw -- /bin/bash
+kubectl exec -it deployment/uhorse -n uhorse -- /bin/bash
 
 # 查看环境变量
-kubectl exec deployment/openclaw -n openclaw -- env
+kubectl exec deployment/uhorse -n uhorse -- env
 
 # 测试网络连接
-kubectl exec deployment/openclaw -n openclaw -- \
+kubectl exec deployment/uhorse -n uhorse -- \
   wget -qO- http://postgres:5432
 ```
 
@@ -518,33 +518,33 @@ kubectl exec deployment/openclaw -n openclaw -- \
 
 ```bash
 # 1. 构建新版本
-docker build -t openclaw:v1.1.0 .
+docker build -t uhorse:v1.1.0 .
 
 # 2. 推送到镜像仓库
-docker push registry.example.com/openclaw:v1.1.0
+docker push registry.example.com/uhorse:v1.1.0
 
 # 3. 更新 Deployment
-kubectl set image deployment/openclaw \
-  openclaw=registry.example.com/openclaw:v1.1.0 \
-  -n openclaw
+kubectl set image deployment/uhorse \
+  uhorse=registry.example.com/uhorse:v1.1.0 \
+  -n uhorse
 
 # 4. 监控滚动更新
-kubectl rollout status deployment/openclaw -n openclaw
+kubectl rollout status deployment/uhorse -n uhorse
 
 # 5. 验证新版本
-kubectl describe deployment openclaw -n openclaw
+kubectl describe deployment uhorse -n uhorse
 ```
 
 ### 2. 数据库迁移
 
 ```bash
 # 运行迁移
-kubectl exec deployment/openclaw -n openclaw -- \
-  /app/openclaw migrate
+kubectl exec deployment/uhorse -n uhorse -- \
+  /app/uhorse migrate
 
 # 回滚迁移 (如果需要)
-kubectl exec deployment/openclaw -n openclaw -- \
-  /app/openclaw migrate rollback
+kubectl exec deployment/uhorse -n uhorse -- \
+  /app/uhorse migrate rollback
 ```
 
 ### 3. 配置更新
@@ -554,20 +554,20 @@ kubectl exec deployment/openclaw -n openclaw -- \
 kubectl apply -f deployments/k8s/base/configmap.yaml
 
 # 触发 Pod 重启以加载新配置
-kubectl rollout restart deployment/openclaw -n openclaw
+kubectl rollout restart deployment/uhorse -n uhorse
 ```
 
 ### 4. 紧急回滚
 
 ```bash
 # 查看更新历史
-kubectl rollout history deployment/openclaw -n openclaw
+kubectl rollout history deployment/uhorse -n uhorse
 
 # 回滚到上一版本
-kubectl rollout undo deployment/openclaw -n openclaw
+kubectl rollout undo deployment/uhorse -n uhorse
 
 # 回滚到指定版本
-kubectl rollout undo deployment/openclaw --to-revision=3 -n openclaw
+kubectl rollout undo deployment/uhorse --to-revision=3 -n uhorse
 ```
 
 ## 生产环境检查清单
@@ -607,4 +607,4 @@ kubectl rollout undo deployment/openclaw --to-revision=3 -n openclaw
 
 **文档版本**: v1.0.0
 **最后更新**: 2026-03-02
-**维护者**: OpenClaw 团队
+**维护者**: uHorse 团队

@@ -1,5 +1,5 @@
 #!/bin/bash
-# OpenClaw 开发模式启动脚本 (热重载)
+# uHorse 开发模式启动脚本 (热重载)
 # 用法: ./scripts/dev.sh
 
 set -e
@@ -19,7 +19,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo "╔════════════════════════════════════════════════╗"
-echo "║     OpenClaw 开发模式 (热重载)                 ║"
+echo "║     uHorse 开发模式 (热重载)                 ║"
 echo "╚════════════════════════════════════════════════╝"
 
 # 检查 cargo-watch
@@ -56,9 +56,9 @@ fi
 
 # 运行数据库迁移
 section "数据库迁移"
-if [ -f target/debug/openclaw ]; then
+if [ -f target/debug/uhorse ]; then
     info "运行数据库迁移..."
-    ./target/debug/openclaw migrate 2>/dev/null || true
+    ./target/debug/uhorse migrate 2>/dev/null || true
 fi
 
 # 启动开发模式

@@ -2,7 +2,7 @@
 set -e
 
 echo "╔════════════════════════════════════════════════╗"
-echo "║     OpenClaw 自动化测试套件                   ║"
+echo "║     uHorse 自动化测试套件                   ║"
 echo "╚════════════════════════════════════════════════╝"
 
 # 颜色定义
@@ -50,18 +50,18 @@ fi
 
 # Docker 构建测试
 section "4. 构建 Docker 镜像"
-info "构建 openclaw:test 镜像..."
-if docker build -t openclaw:test -f Dockerfile . > /tmp/docker-build.log 2>&1; then
+info "构建 uhorse:test 镜像..."
+if docker build -t uhorse:test -f Dockerfile . > /tmp/docker-build.log 2>&1; then
     pass "Docker 镜像构建成功"
-    docker images | grep openclaw
+    docker images | grep uhorse
 else
     fail "Docker 构建失败，查看 /tmp/docker-build.log"
 fi
 
 # 启动测试环境
 section "5. 启动测试环境"
-info "启动 PostgreSQL, Redis 和 OpenClaw..."
-docker-compose up -d postgres redis openclaw 2>&1 | tee /tmp/compose-up.log
+info "启动 PostgreSQL, Redis 和 uHorse..."
+docker-compose up -d postgres redis uhorse 2>&1 | tee /tmp/compose-up.log
 
 # 等待服务启动
 info "等待服务就绪..."
@@ -105,13 +105,13 @@ fi
 section "8. 指标端点测试"
 info "检查 /metrics 端点..."
 METRICS=$(curl -s http://localhost:8080/metrics)
-if echo "$METRICS" | grep -q "openclaw_"; then
-    METRIC_COUNT=$(echo "$METRICS" | grep -c "^openclaw_")
+if echo "$METRICS" | grep -q "uhorse_"; then
+    METRIC_COUNT=$(echo "$METRICS" | grep -c "^uhorse_")
     pass "指标端点正常 (找到 $METRIC_COUNT 个指标)"
     info "部分指标示例:"
-    echo "$METRICS" | grep "^openclaw_" | head -n 5
+    echo "$METRICS" | grep "^uhorse_" | head -n 5
 else
-    fail "指标端点未找到 openclaw_ 指标"
+    fail "指标端点未找到 uhorse_ 指标"
 fi
 
 # API 测试
@@ -168,17 +168,17 @@ fi
 # 日志检查
 section "12. 日志检查"
 info "检查应用日志是否有错误..."
-ERROR_COUNT=$(docker-compose logs --no-log-prefix openclaw 2>&1 | grep -i "error" | wc -l | tr -d ' ')
+ERROR_COUNT=$(docker-compose logs --no-log-prefix uhorse 2>&1 | grep -i "error" | wc -l | tr -d ' ')
 if [ "$ERROR_COUNT" -eq 0 ]; then
     pass "日志中无错误信息"
 else
     info "发现 $ERROR_COUNT 条错误信息 (可能是正常的错误日志)"
-    docker-compose logs --no-log-prefix openclaw 2>&1 | grep -i "error" | head -n 3
+    docker-compose logs --no-log-prefix uhorse 2>&1 | grep -i "error" | head -n 3
 fi
 
 # 资源使用
 section "13. 资源使用"
-docker stats --no-stream openclaw 2>/dev/null || true
+docker stats --no-stream uhorse 2>/dev/null || true
 pass "资源使用检查完成"
 
 # 清理
@@ -206,6 +206,6 @@ echo "  - /tmp/docker-build.log (Docker 构建日志)"
 echo "  - /tmp/compose-up.log   (Docker Compose 日志)"
 echo ""
 echo "快速命令:"
-echo "  查看日志: docker-compose logs -f openclaw"
-echo "  重启服务: docker-compose restart openclaw"
+echo "  查看日志: docker-compose logs -f uhorse"
+echo "  重启服务: docker-compose restart uhorse"
 echo "  停止服务: docker-compose down"

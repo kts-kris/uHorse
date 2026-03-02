@@ -1,6 +1,6 @@
-# OpenClaw 本地开发启动指南
+# uHorse 本地开发启动指南
 
-本指南介绍如何在本地开发环境中运行 OpenClaw，不使用 Docker 容器化应用。
+本指南介绍如何在本地开发环境中运行 uHorse，不使用 Docker 容器化应用。
 
 ## 目录
 
@@ -62,7 +62,7 @@ docker-compose logs redis
 
 ```bash
 # 数据库
-OPENCLAW_DATABASE_URL=postgresql://openclaw:password@localhost:5432/openclaw
+OPENCLAW_DATABASE_URL=postgresql://uhorse:password@localhost:5432/uhorse
 
 # Redis
 OPENCLAW_REDIS_URL=redis://localhost:6379
@@ -98,7 +98,7 @@ cargo run
 cargo run --release
 
 # 后台运行
-cargo run --release > openclaw.log 2>&1 &
+cargo run --release > uhorse.log 2>&1 &
 ```
 
 ### 5. 验证
@@ -130,11 +130,11 @@ brew install postgresql@14
 brew services start postgresql@14
 
 # 创建数据库
-createdb openclaw
+createdb uhorse
 
 # 创建用户
-psql -d postgres -c "CREATE USER openclaw WITH PASSWORD 'password';"
-psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE openclaw TO openclaw;"
+psql -d postgres -c "CREATE USER uhorse WITH PASSWORD 'password';"
+psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE uhorse TO uhorse;"
 ```
 
 #### Linux (Ubuntu/Debian)
@@ -149,16 +149,16 @@ sudo systemctl start postgresql
 sudo systemctl enable postgresql
 
 # 创建数据库和用户
-sudo -u postgres createdb openclaw
-sudo -u postgres psql -c "CREATE USER openclaw WITH PASSWORD 'password';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE openclaw TO openclaw;"
+sudo -u postgres createdb uhorse
+sudo -u postgres psql -c "CREATE USER uhorse WITH PASSWORD 'password';"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE uhorse TO uhorse;"
 ```
 
 #### 验证
 
 ```bash
 # 连接测试
-psql -U openclaw -d openclaw -h localhost
+psql -U uhorse -d uhorse -h localhost
 
 # 退出
 \q
@@ -199,14 +199,14 @@ redis-cli ping
 
 ```bash
 # 在 shell 中设置
-export OPENCLAW_DATABASE_URL="postgresql://openclaw:password@localhost:5432/openclaw"
+export OPENCLAW_DATABASE_URL="postgresql://uhorse:password@localhost:5432/uhorse"
 export OPENCLAW_REDIS_URL="redis://localhost:6379"
 export RUST_LOG="info"
 export OPENCLAW_JWT_SECRET="test-secret-for-development-only"
 
 # 或创建 .env 文件
 cat > .env << EOF
-OPENCLAW_DATABASE_URL=postgresql://openclaw:password@localhost:5432/openclaw
+OPENCLAW_DATABASE_URL=postgresql://uhorse:password@localhost:5432/uhorse
 OPENCLAW_REDIS_URL=redis://localhost:6379
 RUST_LOG=info
 OPENCLAW_JWT_SECRET=test-secret-for-development-only
@@ -262,16 +262,16 @@ cargo run --release -- --port 8080
 
 ```bash
 # 后台运行并记录日志
-cargo run --release > openclaw.log 2>&1 &
+cargo run --release > uhorse.log 2>&1 &
 
 # 保存 PID
-echo $! > openclaw.pid
+echo $! > uhorse.pid
 
 # 查看日志
-tail -f openclaw.log
+tail -f uhorse.log
 
 # 停止服务
-kill $(cat openclaw.pid)
+kill $(cat uhorse.pid)
 ```
 
 ---
@@ -317,13 +317,13 @@ cargo test
 RUST_LOG=debug cargo run
 
 # 启用特定模块的详细日志
-RUST_LOG=openclaw_gateway=debug,openclaw_tool=trace cargo run
+RUST_LOG=uhorse_gateway=debug,uhorse_tool=trace cargo run
 
 # 使用 lldb 进行调试
-rust-lldb -- target/debug/openclaw
+rust-lldb -- target/debug/uhorse
 
 # 使用 gdb 进行调试 (Linux)
-rust-gdb -- target/debug/openclaw
+rust-gdb -- target/debug/uhorse
 ```
 
 ### 4. 运行测试
@@ -333,7 +333,7 @@ rust-gdb -- target/debug/openclaw
 cargo test
 
 # 特定模块
-cargo test --package openclaw-gateway
+cargo test --package uhorse-gateway
 
 # 带输出
 cargo test -- --nocapture
@@ -389,7 +389,7 @@ brew services list | grep postgresql  # macOS
 sudo systemctl status postgresql     # Linux
 
 # 检查连接
-psql -U openclaw -d openclaw -h localhost
+psql -U uhorse -d uhorse -h localhost
 ```
 
 ### 2. Redis 连接失败
@@ -439,10 +439,10 @@ cargo update
 RUST_LOG=debug cargo run
 
 # 保存日志到文件
-cargo run 2>&1 | tee openclaw.log
+cargo run 2>&1 | tee uhorse.log
 
 # 实时查看日志
-tail -f openclaw.log
+tail -f uhorse.log
 ```
 
 ---

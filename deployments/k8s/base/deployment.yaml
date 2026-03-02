@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: openclaw
+  name: uhorse
   namespace: default
   labels:
-    app: openclaw
+    app: uhorse
     component: api
 spec:
   replicas: 3
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      app: openclaw
+      app: uhorse
       component: api
   strategy:
     type: RollingUpdate
@@ -21,7 +21,7 @@ spec:
   template:
     metadata:
       labels:
-        app: openclaw
+        app: uhorse
         component: api
         version: v1
       annotations:
@@ -29,14 +29,14 @@ spec:
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: openclaw
+      serviceAccountName: uhorse
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
       containers:
-      - name: openclaw
-        image: openclaw:latest
+      - name: uhorse
+        image: uhorse:latest
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
@@ -49,37 +49,37 @@ spec:
         - name: RUST_LOG
           valueFrom:
             configMapKeyRef:
-              name: openclaw-env
+              name: uhorse-env
               key: RUST_LOG
         - name: OPENCLAW_CONFIG
           valueFrom:
             configMapKeyRef:
-              name: openclaw-env
+              name: uhorse-env
               key: OPENCLAW_CONFIG
         - name: OPENCLAW_DATA_DIR
           valueFrom:
             configMapKeyRef:
-              name: openclaw-env
+              name: uhorse-env
               key: OPENCLAW_DATA_DIR
         - name: OPENCLAW_LOG_DIR
           valueFrom:
             configMapKeyRef:
-              name: openclaw-env
+              name: uhorse-env
               key: OPENCLAW_LOG_DIR
         - name: OPENCLAW_JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: openclaw-secrets
+              name: uhorse-secrets
               key: jwt_secret
         - name: OPENCLAW_TELEGRAM_BOT_TOKEN
           valueFrom:
             secretKeyRef:
-              name: openclaw-secrets
+              name: uhorse-secrets
               key: telegram_bot_token
           optional: true
         envFrom:
         - configMapRef:
-            name: openclaw-config
+            name: uhorse-config
         volumeMounts:
         - name: config
           mountPath: /app/config
@@ -114,21 +114,21 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: openclaw-config
+          name: uhorse-config
       - name: data
         persistentVolumeClaim:
-          claimName: openclaw-data
+          claimName: uhorse-data
       - name: logs
         persistentVolumeClaim:
-          claimName: openclaw-logs
+          claimName: uhorse-logs
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: openclaw
+  name: uhorse
   namespace: default
   labels:
-    app: openclaw
+    app: uhorse
     component: api
 spec:
   type: ClusterIP
@@ -143,16 +143,16 @@ spec:
     targetPort: metrics
     protocol: TCP
   selector:
-    app: openclaw
+    app: uhorse
     component: api
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: openclaw-lb
+  name: uhorse-lb
   namespace: default
   labels:
-    app: openclaw
+    app: uhorse
     component: api
 spec:
   type: LoadBalancer
@@ -163,31 +163,31 @@ spec:
     targetPort: http
     protocol: TCP
   selector:
-    app: openclaw
+    app: uhorse
     component: api
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: openclaw-pdb
+  name: uhorse-pdb
   namespace: default
 spec:
   minAvailable: 2
   selector:
     matchLabels:
-      app: openclaw
+      app: uhorse
       component: api
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: openclaw-hpa
+  name: uhorse-hpa
   namespace: default
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: openclaw
+    name: uhorse
   minReplicas: 3
   maxReplicas: 10
   metrics:
@@ -223,7 +223,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: openclaw-data
+  name: uhorse-data
   namespace: default
 spec:
   accessModes:
@@ -236,7 +236,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: openclaw-logs
+  name: uhorse-logs
   namespace: default
 spec:
   accessModes:

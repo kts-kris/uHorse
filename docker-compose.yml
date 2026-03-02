@@ -1,31 +1,31 @@
 version: '3.8'
 
 services:
-  openclaw:
+  uhorse:
     build:
       context: .
       dockerfile: Dockerfile
-    image: openclaw:latest
-    container_name: openclaw
+    image: uhorse:latest
+    container_name: uhorse
     restart: unless-stopped
     ports:
       - "8080:8080"  # HTTP API
       - "9090:9090"  # Metrics
     environment:
       - RUST_LOG=info
-      - OPENCLAW_SERVER_HOST=0.0.0.0
-      - OPENCLAW_SERVER_PORT=8080
-      - OPENCLAW_DATABASE_PATH=/app/data/openclaw.db
-      - OPENCLAW_LOG_LEVEL=info
+      - UHORSE_SERVER_HOST=0.0.0.0
+      - UHORSE_SERVER_PORT=8080
+      - UHORSE_DATABASE_PATH=/app/data/uhorse.db
+      - UHORSE_LOG_LEVEL=info
       # 安全配置（生产环境应使用密钥管理）
-      - OPENCLAW_JWT_SECRET=dev-secret-change-in-production
-      - OPENCLAW_TOKEN_EXPIRY=86400
+      - UHORSE_JWT_SECRET=dev-secret-change-in-production
+      - UHORSE_TOKEN_EXPIRY=86400
     volumes:
-      - openclaw_data:/app/data
-      - openclaw_logs:/app/logs
+      - uhorse_data:/app/data
+      - uhorse_logs:/app/logs
       - ./config.toml:/app/config/config.toml:ro
     networks:
-      - openclaw_network
+      - uhorse_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -36,36 +36,36 @@ services:
   # PostgreSQL（可选，用于生产环境）
   postgres:
     image: postgres:16-alpine
-    container_name: openclaw_postgres
+    container_name: uhorse_postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=openclaw
-      - POSTGRES_USER=openclaw
-      - POSTGRES_PASSWORD=openclaw
+      - POSTGRES_DB=uhorse
+      - POSTGRES_USER=uhorse
+      - POSTGRES_PASSWORD=uhorse
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - openclaw_network
+      - uhorse_network
     ports:
       - "5432:5432"
 
   # Redis（可选，用于缓存和会话存储）
   redis:
     image: redis:7-alpine
-    container_name: openclaw_redis
+    container_name: uhorse_redis
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     networks:
-      - openclaw_network
+      - uhorse_network
     ports:
       - "6379:6379"
 
   # Prometheus（监控）
   prometheus:
     image: prom/prometheus:latest
-    container_name: openclaw_prometheus
+    container_name: uhorse_prometheus
     restart: unless-stopped
     ports:
       - "9091:9090"
@@ -80,32 +80,32 @@ services:
       - '--storage.tsdb.retention.time=200h'
       - '--web.enable-lifecycle'
     networks:
-      - openclaw_network
+      - uhorse_network
 
   # Grafana（可视化）
   grafana:
     image: grafana/grafana:latest
-    container_name: openclaw_grafana
+    container_name: uhorse_grafana
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=openclaw
+      - GF_SECURITY_ADMIN_PASSWORD=uhorse
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
       - ./deployments/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
-      - openclaw_network
+      - uhorse_network
     depends_on:
       - prometheus
 
 volumes:
-  openclaw_data:
+  uhorse_data:
     driver: local
-  openclaw_logs:
+  uhorse_logs:
     driver: local
   postgres_data:
     driver: local
@@ -117,5 +117,5 @@ volumes:
     driver: local
 
 networks:
-  openclaw_network:
+  uhorse_network:
     driver: bridge

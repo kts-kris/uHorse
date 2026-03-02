@@ -1,8 +1,8 @@
-# OpenClaw 灾备方案
+# uHorse 灾备方案
 
 ## 概述
 
-本文档描述 OpenClaw 生产环境的灾备策略，包括数据备份、灾难恢复、高可用性和应急响应流程。
+本文档描述 uHorse 生产环境的灾备策略，包括数据备份、灾难恢复、高可用性和应急响应流程。
 
 ## 1. 备份策略
 
@@ -12,7 +12,7 @@
 
 ```bash
 # 每日全量备份 (凌晨 2:00)
-0 2 * * * pg_dump -U openclaw -h postgres.openclaw.svc openclaw | gzip > /backup/openclaw-db-$(date +\%Y\%m\%d).sql.gz
+0 2 * * * pg_dump -U uhorse -h postgres.uhorse.svc uhorse | gzip > /backup/uhorse-db-$(date +\%Y\%m\%d).sql.gz
 
 # 每小时增量备份 (WAL 归档)
 archive_mode = on
@@ -39,11 +39,11 @@ archive_command = 'cp %p /backup/wal/%f'
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
-  name: openclaw-data-snapshot
+  name: uhorse-data-snapshot
 spec:
   volumeSnapshotClassName: csi-snapshotter
   source:
-    persistentVolumeClaimName: openclaw-data
+    persistentVolumeClaimName: uhorse-data
 ```
 
 **Restic 异地备份**
@@ -51,7 +51,7 @@ spec:
 ```bash
 # 每日备份到 S3
 restic backup /app/data \
-  --repo s3:s3.amazonaws.com/openclaw-backup \
+  --repo s3:s3.amazonaws.com/uhorse-backup \
   --password-file /etc/restic/password
 
 # 保留策略
@@ -59,7 +59,7 @@ restic forget \
   --keep-daily 7 \
   --keep-weekly 4 \
   --keep-monthly 12 \
-  --repo s3:s3.amazonaws.com/openclaw-backup
+  --repo s3:s3.amazonaws.com/uhorse-backup
 ```
 
 ### 1.3 配置备份
@@ -76,8 +76,8 @@ git commit -m "config: backup $(date)"
 
 ```bash
 # 每日导出配置
-kubectl get configmap openclaw-config -o yaml > /backup/configmap-$(date +%Y%m%d).yaml
-kubectl get secret openclaw-secrets -o yaml > /backup/secrets-$(date +%Y%m%d).yaml.enc
+kubectl get configmap uhorse-config -o yaml > /backup/configmap-$(date +%Y%m%d).yaml
+kubectl get secret uhorse-secrets -o yaml > /backup/secrets-$(date +%Y%m%d).yaml.enc
 
 # 加密存储
 ansible-vault encrypt /backup/secrets-*.yaml.enc
@@ -103,7 +103,7 @@ affinity:
           - key: app
             operator: In
             values:
-            - openclaw
+            - uhorse
         topologyKey: kubernetes.io/hostname
 ```
 
@@ -120,7 +120,7 @@ affinity:
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: openclaw-db
+  name: uhorse-db
 spec:
   instances: 3
   primaryUpdateStrategy: unsupervised
@@ -130,8 +130,8 @@ spec:
       hot_standby: "on"
   bootstrap:
     initdb:
-      database: openclaw
-      owner: openclaw
+      database: uhorse
+      owner: uhorse
   storage:
     size: 100Gi
     storageClass: fast-ssd
@@ -153,7 +153,7 @@ spec:
         image: edoburu/pgbouncer:latest
         env:
         - name: DATABASE_URL
-          value: "postgres://openclaw:password@openclaw-db-rw.openclaw.svc/openclaw"
+          value: "postgres://uhorse:password@uhorse-db-rw.uhorse.svc/uhorse"
 ```
 
 ### 2.3 Redis 高可用
@@ -291,19 +291,19 @@ RPO: < 24 小时
 # restore-db.sh
 
 BACKUP_DATE=$1
-BACKUP_FILE="/backup/openclaw-db-${BACKUP_DATE}.sql.gz"
+BACKUP_FILE="/backup/uhorse-db-${BACKUP_DATE}.sql.gz"
 
 # 停止应用
-kubectl scale deployment openclaw --replicas=0
+kubectl scale deployment uhorse --replicas=0
 
 # 恢复数据库
-gunzip < ${BACKUP_FILE} | psql -U openclaw -h postgres.openclaw.svc openclaw
+gunzip < ${BACKUP_FILE} | psql -U uhorse -h postgres.uhorse.svc uhorse
 
 # 重启应用
-kubectl scale deployment openclaw --replicas=3
+kubectl scale deployment uhorse --replicas=3
 
 # 验证
-kubectl rollout status deployment openclaw
+kubectl rollout status deployment uhorse
 ```
 
 **卷恢复**
@@ -318,7 +318,7 @@ kubectl apply -f - <<EOF
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: openclaw-data-restored
+  name: uhorse-data-restored
 spec:
   dataSource:
     name: ${SNAPSHOT_NAME}
@@ -332,7 +332,7 @@ spec:
 EOF
 
 # 更新 Deployment 使用恢复的卷
-kubectl patch deployment openclaw -p '{"spec":{"template":{"spec":{"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"openclaw-data-restored"}}]}}}}'
+kubectl patch deployment uhorse -p '{"spec":{"template":{"spec":{"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"uhorse-data-restored"}}]}}}}'
 ```
 
 ## 4. 应急响应
@@ -354,7 +354,7 @@ Info      → 静默记录
 ```
 
 **事故响应频道**
-- Slack: #openclaw-incident
+- Slack: #uhorse-incident
 - 电话: 值班表
 
 ### 4.3 事故分级
@@ -436,7 +436,7 @@ kubectl delete pod postgres-0
 
 # 验证自动故障转移
 kubectl get postgresql
-psql -h openclaw-db-rw.openclaw.svc
+psql -h uhorse-db-rw.uhorse.svc
 ```
 
 **场景 2: 节点故障**
@@ -486,12 +486,12 @@ kubectl get endpoints
 
 **运维团队**
 - 值班电话: +86-xxx-xxxx-xxxx
-- 邮箱: ops@openclaw.io
-- Slack: #openclaw-ops
+- 邮箱: ops@uhorse.io
+- Slack: #uhorse-ops
 
 **管理层**
-- 技术总监: cto@openclaw.io
-- 产品经理: pm@openclaw.io
+- 技术总监: cto@uhorse.io
+- 产品经理: pm@uhorse.io
 
 **供应商**
 - 云服务商: AWS/阿里云/腾讯云

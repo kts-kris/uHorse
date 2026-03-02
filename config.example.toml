@@ -1,4 +1,4 @@
-# OpenClaw AI Gateway 配置示例
+# uHorse AI Gateway 配置示例
 
 [server]
 # 服务监听地址
@@ -12,7 +12,7 @@ websocket_timeout = 300
 
 [database]
 # SQLite 数据库路径
-path = "./data/openclaw.db"
+path = "./data/uhorse.db"
 # 连接池大小
 pool_size = 10
 

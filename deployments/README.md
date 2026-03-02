@@ -1,6 +1,6 @@
-# OpenClaw 部署配置
+# uHorse 部署配置
 
-本目录包含 OpenClaw 生产环境的完整部署配置和文档。
+本目录包含 uHorse 生产环境的完整部署配置和文档。
 
 ## 目录结构
 
@@ -21,7 +21,7 @@ deployments/
 │   ├── prometheus.yml           # Prometheus 主配置
 │   └── alerts.yaml              # 告警规则
 └── grafana/                     # Grafana 仪表板
-    └── openclaw-dashboard.json  # 监控仪表板
+    └── uhorse-dashboard.json  # 监控仪表板
 ```
 
 ## 快速开始
@@ -36,23 +36,23 @@ docker-compose up -d
 docker-compose ps
 
 # 查看日志
-docker-compose logs -f openclaw
+docker-compose logs -f uhorse
 ```
 
 ### Kubernetes 部署
 
 ```bash
 # 1. 创建 Secret
-kubectl create secret generic openclaw-secrets \
+kubectl create secret generic uhorse-secrets \
   --from-literal=jwt_secret=$(openssl rand -hex 32) \
   --from-literal=telegram_bot_token=YOUR_TOKEN \
-  -n openclaw
+  -n uhorse
 
 # 2. 部署应用
 kubectl apply -f deployments/k8s/base/
 
 # 3. 验证部署
-kubectl get pods -n openclaw
+kubectl get pods -n uhorse
 ```
 
 ## 文档索引
@@ -75,7 +75,7 @@ kubectl get pods -n openclaw
 ### docker-compose.yml
 
 本地开发环境，包含：
-- **openclaw**: 主应用
+- **uhorse**: 主应用
 - **postgres**: PostgreSQL 14 数据库
 - **redis**: Redis 7 缓存
 - **prometheus**: 监控指标收集
@@ -108,7 +108,7 @@ kubectl get pods -n openclaw
 **prometheus.yml**
 - 15 秒抓取间隔
 - Kubernetes 服务发现
-- OpenClaw 应用指标
+- uHorse 应用指标
 
 **alerts.yaml**
 - 5 个告警组
@@ -117,7 +117,7 @@ kubectl get pods -n openclaw
 
 ### Grafana 仪表板
 
-**openclaw-dashboard.json**
+**uhorse-dashboard.json**
 - 19 个监控面板
 - 实时服务状态
 - API 性能指标
@@ -224,13 +224,13 @@ kubectl get pods -n openclaw
 
 ```bash
 # 查看实时日志
-kubectl logs -f deployment/openclaw -n openclaw
+kubectl logs -f deployment/uhorse -n uhorse
 
 # 查看所有副本
-kubectl logs -f -l app=openclaw -n openclaw --all-containers=true
+kubectl logs -f -l app=uhorse -n uhorse --all-containers=true
 
 # 查看最近日志
-kubectl logs --tail=100 deployment/openclaw -n openclaw
+kubectl logs --tail=100 deployment/uhorse -n uhorse
 ```
 
 ## 升级指南
@@ -239,27 +239,27 @@ kubectl logs --tail=100 deployment/openclaw -n openclaw
 
 ```bash
 # 更新镜像
-kubectl set image deployment/openclaw \
-  openclaw=openclaw:v1.0.1 \
-  -n openclaw
+kubectl set image deployment/uhorse \
+  uhorse=uhorse:v1.0.1 \
+  -n uhorse
 
 # 查看状态
-kubectl rollout status deployment/openclaw -n openclaw
+kubectl rollout status deployment/uhorse -n uhorse
 
 # 回滚
-kubectl rollout undo deployment/openclaw -n openclaw
+kubectl rollout undo deployment/uhorse -n uhorse
 ```
 
 ### 数据库迁移
 
 ```bash
 # 执行迁移
-kubectl exec deployment/openclaw -n openclaw -- \
-  /app/openclaw migrate
+kubectl exec deployment/uhorse -n uhorse -- \
+  /app/uhorse migrate
 
 # 回滚迁移
-kubectl exec deployment/openclaw -n openclaw -- \
-  /app/openclaw migrate rollback
+kubectl exec deployment/uhorse -n uhorse -- \
+  /app/uhorse migrate rollback
 ```
 
 ## 更多信息
@@ -271,6 +271,6 @@ kubectl exec deployment/openclaw -n openclaw -- \
 
 ---
 
-**维护者**: OpenClaw 团队
+**维护者**: uHorse 团队
 **版本**: v1.0.0
 **最后更新**: 2026-03-02
