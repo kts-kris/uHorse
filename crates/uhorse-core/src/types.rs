@@ -109,6 +109,9 @@ pub enum ChannelType {
     Slack,
     Discord,
     WhatsApp,
+    DingTalk,
+    Feishu,
+    WeWork,
 }
 
 impl ChannelType {
@@ -119,6 +122,9 @@ impl ChannelType {
             "slack" => Some(ChannelType::Slack),
             "discord" => Some(ChannelType::Discord),
             "whatsapp" => Some(ChannelType::WhatsApp),
+            "dingtalk" | "钉钉" => Some(ChannelType::DingTalk),
+            "feishu" | "飞书" => Some(ChannelType::Feishu),
+            "wework" | "企业微信" | "wecom" => Some(ChannelType::WeWork),
             _ => None,
         }
     }

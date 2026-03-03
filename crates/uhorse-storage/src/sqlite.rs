@@ -310,6 +310,9 @@ fn channel_to_string(channel: ChannelType) -> String {
         ChannelType::Slack => "slack".to_string(),
         ChannelType::Discord => "discord".to_string(),
         ChannelType::WhatsApp => "whatsapp".to_string(),
+        ChannelType::DingTalk => "dingtalk".to_string(),
+        ChannelType::Feishu => "feishu".to_string(),
+        ChannelType::WeWork => "wework".to_string(),
     }
 }
 
@@ -319,6 +322,9 @@ fn string_to_channel(s: &str) -> Option<ChannelType> {
         "slack" => Some(ChannelType::Slack),
         "discord" => Some(ChannelType::Discord),
         "whatsapp" => Some(ChannelType::WhatsApp),
+        "dingtalk" => Some(ChannelType::DingTalk),
+        "feishu" => Some(ChannelType::Feishu),
+        "wework" => Some(ChannelType::WeWork),
         _ => None,
     }
 }

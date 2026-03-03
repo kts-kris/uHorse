@@ -33,6 +33,9 @@ struct ChannelsConfig {
     slack: Option<ChannelConfig>,
     discord: Option<ChannelConfig>,
     whatsapp: Option<ChannelConfig>,
+    dingtalk: Option<ChannelConfig>,
+    feishu: Option<ChannelConfig>,
+    wework: Option<ChannelConfig>,
 }
 
 #[derive(Debug, Default)]
@@ -345,13 +348,17 @@ impl ConfigWizard {
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!();
         println!("选择要启用的通道:");
+        println!("  [默认预装] Telegram, 钉钉");
         println!();
 
         let channels = vec![
-            ("Telegram", "telegram"),
+            ("Telegram ⭐", "telegram"),
             ("Slack", "slack"),
             ("Discord", "discord"),
             ("WhatsApp", "whatsapp"),
+            ("钉钉 ⭐", "dingtalk"),
+            ("飞书", "feishu"),
+            ("企业微信", "wework"),
         ];
 
         for (i, (name, _)) in channels.iter().enumerate() {
@@ -359,9 +366,12 @@ impl ConfigWizard {
         }
 
         println!();
+        println!("提示: Telegram 和钉钉为默认预装通道，推荐优先配置");
+        println!();
+
         let choice = self.prompt_choice(
             "选择要配置的通道 (输入序号，多个用空格分隔): ",
-            &["1", "2", "3", "4", "继续 (跳过通道配置)"],
+            &["1", "2", "3", "4", "5", "6", "7", "继续 (跳过通道配置)"],
         )?;
 
         match choice.as_str() {
@@ -401,12 +411,23 @@ impl ConfigWizard {
         )?;
 
         let config = if enabled == "是" {
-            let bot_token = self.prompt_input("请输入 Bot Token: ", String::new())?;
+            let bot_token = match channel_key {
+                "dingtalk" => self.prompt_input("请输入 App Key: ", String::new())?,
+                "feishu" => self.prompt_input("请输入 App ID: ", String::new())?,
+                "wework" => self.prompt_input("请输入 Corp ID: ", String::new())?,
+                _ => self.prompt_input("请输入 Bot Token: ", String::new())?,
+            };
 
             let mut extra = std::collections::HashMap::new();
 
             // 根据通道类型询问额外配置
             match channel_key {
+                "telegram" => {
+                    let webhook_secret = self.prompt_input("请输入 Webhook Secret (可选): ", String::new())?;
+                    if !webhook_secret.is_empty() {
+                        extra.insert("webhook_secret".to_string(), webhook_secret);
+                    }
+                }
                 "slack" => {
                     let signing_secret = self.prompt_input("请输入 Signing Secret: ", String::new())?;
                     extra.insert("signing_secret".to_string(), signing_secret);
@@ -422,8 +443,48 @@ impl ConfigWizard {
                     let business_account_id = self.prompt_input("请输入 Business Account ID: ", String::new())?;
                     extra.insert("business_account_id".to_string(), business_account_id);
 
-                    let webhook_verify_token = self.prompt_input("请输入 Webhook Verify Token: ", String::new())?;
-                    extra.insert("webhook_verify_token".to_string(), webhook_verify_token);
+                    let webhook_verify_token = self.prompt_input("请输入 Webhook Verify Token (可选): ", String::new())?;
+                    if !webhook_verify_token.is_empty() {
+                        extra.insert("webhook_verify_token".to_string(), webhook_verify_token);
+                    }
+                }
+                "dingtalk" => {
+                    let app_secret = self.prompt_input("请输入 App Secret: ", String::new())?;
+                    extra.insert("app_secret".to_string(), app_secret);
+
+                    let agent_id = self.prompt_input("请输入 Agent ID: ", String::new())?;
+                    extra.insert("agent_id".to_string(), agent_id);
+                }
+                "feishu" => {
+                    let app_secret = self.prompt_input("请输入 App Secret: ", String::new())?;
+                    extra.insert("app_secret".to_string(), app_secret);
+
+                    let encrypt_key = self.prompt_input("请输入 Encrypt Key (可选): ", String::new())?;
+                    if !encrypt_key.is_empty() {
+                        extra.insert("encrypt_key".to_string(), encrypt_key);
+                    }
+
+                    let verify_token = self.prompt_input("请输入 Verify Token (可选): ", String::new())?;
+                    if !verify_token.is_empty() {
+                        extra.insert("verify_token".to_string(), verify_token);
+                    }
+                }
+                "wework" => {
+                    let secret = self.prompt_input("请输入 Secret: ", String::new())?;
+                    extra.insert("secret".to_string(), secret);
+
+                    let agent_id = self.prompt_input("请输入 Agent ID: ", String::new())?;
+                    extra.insert("agent_id".to_string(), agent_id);
+
+                    let token = self.prompt_input("请输入 Token (可选): ", String::new())?;
+                    if !token.is_empty() {
+                        extra.insert("token".to_string(), token);
+                    }
+
+                    let encoding_aes_key = self.prompt_input("请输入 Encoding AES Key (可选): ", String::new())?;
+                    if !encoding_aes_key.is_empty() {
+                        extra.insert("encoding_aes_key".to_string(), encoding_aes_key);
+                    }
                 }
                 _ => {}
             }
@@ -443,11 +504,14 @@ impl ConfigWizard {
             "slack" => self.config.channels.slack = config,
             "discord" => self.config.channels.discord = config,
             "whatsapp" => self.config.channels.whatsapp = config,
+            "dingtalk" => self.config.channels.dingtalk = config,
+            "feishu" => self.config.channels.feishu = config,
+            "wework" => self.config.channels.wework = config,
             _ => {}
         }
 
         println!();
-        println!("✓ {} 配置完成", channel_name);
+        println!("✅ {} 配置完成", channel_name);
 
         Ok(())
     }
@@ -605,25 +669,55 @@ impl ConfigWizard {
 
         // 通道配置
         config.push_str("[channels]\n");
+        let mut enabled_channels = Vec::new();
+
         if let Some(telegram) = &self.config.channels.telegram {
             if telegram.enabled {
-                config.push_str("enabled = [\"telegram\"]\n");
+                enabled_channels.push("telegram".to_string());
+            }
+        }
+        if let Some(dingtalk) = &self.config.channels.dingtalk {
+            if dingtalk.enabled {
+                enabled_channels.push("dingtalk".to_string());
             }
         }
         if let Some(slack) = &self.config.channels.slack {
             if slack.enabled {
-                config.push_str("enabled = [\"telegram\", \"slack\"]\n");
+                enabled_channels.push("slack".to_string());
             }
         }
         if let Some(discord) = &self.config.channels.discord {
             if discord.enabled {
-                config.push_str("enabled = [\"telegram\", \"slack\", \"discord\"]\n");
+                enabled_channels.push("discord".to_string());
             }
         }
         if let Some(whatsapp) = &self.config.channels.whatsapp {
             if whatsapp.enabled {
-                config.push_str("enabled = [\"telegram\", \"slack\", \"discord\", \"whatsapp\"]\n");
+                enabled_channels.push("whatsapp".to_string());
             }
+        }
+        if let Some(feishu) = &self.config.channels.feishu {
+            if feishu.enabled {
+                enabled_channels.push("feishu".to_string());
+            }
+        }
+        if let Some(wework) = &self.config.channels.wework {
+            if wework.enabled {
+                enabled_channels.push("wework".to_string());
+            }
+        }
+
+        if !enabled_channels.is_empty() {
+            config.push_str("enabled = [");
+            for (i, channel) in enabled_channels.iter().enumerate() {
+                if i > 0 {
+                    config.push_str(", ");
+                }
+                config.push_str(&format!("\"{}\"", channel));
+            }
+            config.push_str("]\n");
+        } else {
+            config.push_str("enabled = []\n");
         }
         config.push_str("\n");
 
@@ -635,6 +729,20 @@ impl ConfigWizard {
                     config.push_str(&format!("bot_token = \"{}\"\n", token));
                 }
                 for (key, value) in &telegram.extra {
+                    config.push_str(&format!("{} = \"{}\"\n", key, value));
+                }
+                config.push_str("\n");
+            }
+        }
+
+        // 钉钉配置
+        if let Some(dingtalk) = &self.config.channels.dingtalk {
+            if dingtalk.enabled {
+                config.push_str("[channels.dingtalk]\n");
+                if let Some(token) = &dingtalk.bot_token {
+                    config.push_str(&format!("app_key = \"{}\"\n", token));
+                }
+                for (key, value) in &dingtalk.extra {
                     config.push_str(&format!("{} = \"{}\"\n", key, value));
                 }
                 config.push_str("\n");
@@ -674,6 +782,34 @@ impl ConfigWizard {
             if whatsapp.enabled {
                 config.push_str("[channels.whatsapp]\n");
                 for (key, value) in &whatsapp.extra {
+                    config.push_str(&format!("{} = \"{}\"\n", key, value));
+                }
+                config.push_str("\n");
+            }
+        }
+
+        // 飞书配置
+        if let Some(feishu) = &self.config.channels.feishu {
+            if feishu.enabled {
+                config.push_str("[channels.feishu]\n");
+                if let Some(token) = &feishu.bot_token {
+                    config.push_str(&format!("app_id = \"{}\"\n", token));
+                }
+                for (key, value) in &feishu.extra {
+                    config.push_str(&format!("{} = \"{}\"\n", key, value));
+                }
+                config.push_str("\n");
+            }
+        }
+
+        // 企业微信配置
+        if let Some(wework) = &self.config.channels.wework {
+            if wework.enabled {
+                config.push_str("[channels.wework]\n");
+                if let Some(token) = &wework.bot_token {
+                    config.push_str(&format!("corp_id = \"{}\"\n", token));
+                }
+                for (key, value) in &wework.extra {
                     config.push_str(&format!("{} = \"{}\"\n", key, value));
                 }
                 config.push_str("\n");

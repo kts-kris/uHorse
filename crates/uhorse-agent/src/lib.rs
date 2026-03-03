@@ -38,17 +38,35 @@ pub mod error;
 pub mod agent_scope;
 pub mod session_key;
 pub mod bindings;
+pub mod mcp;
+pub mod skills;
+pub mod tools;
 
 // 重新导出核心类型
 pub use gateway::{Gateway, GatewayConfig, GatewayEvent};
 pub use agent::{Agent, AgentBuilder, AgentConfig, AgentResponse};
-pub use skill::{Skill, SkillRegistry, SkillManifest, SkillExecutor, SkillConfig};
+pub use skill::{Skill, SkillRegistry, SkillManifest, SkillExecutor};
 pub use memory::{FileMemory, MemoryStore};
 pub use router::{Router, Route, RouteTarget};
 pub use error::{AgentError, AgentResult};
 pub use agent_scope::{AgentScope, AgentScopeConfig, AgentManager, SessionState};
 pub use session_key::{SessionKey, ChannelType};
 pub use bindings::{Binding, BindingsConfig, BindingsRouter, BindingBuilder};
+
+// MCP 相关
+pub use mcp::{
+    types::{McpTool, McpToolCall, McpToolResult, McpContent, McpResource, McpPrompt},
+    protocol::McpProtocol,
+};
+
+// Skills 相关
+pub use skills::{
+    SkillManifestParser, SkillConfig, SkillPermission,
+    Skill as McpSkill, SkillRegistry as McpSkillRegistry,
+};
+
+// Tools 相关
+pub use tools::{Tool, ToolRegistry, ToolBuilder, builtin_tools};
 
 /// uHorse Agent 框架版本
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
