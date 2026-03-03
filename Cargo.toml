@@ -68,7 +68,7 @@ anyhow = "1.0"
 
 # Configuration
 config = "0.14"
-toml = "0.8"
+toml = "1.0"
 serde_yaml = "0.9"
 
 # Async traits
