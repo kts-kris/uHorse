@@ -27,7 +27,7 @@ repository = "https://github.com/uhorse/uhorse-rs"
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.28"
 
 # Web framework
 axum = { version = "0.7", features = ["ws", "macros"] }
