@@ -265,7 +265,7 @@ impl ApprovalRuleEngine {
         // 简化实现：检查元数据中是否包含所有条件
         if let Some(obj) = condition.as_object() {
             obj.iter().all(|(key, value)| {
-                metadata.get(key).map_or(false, |v| v == value)
+                metadata.get(key) == Some(value)
             })
         } else {
             false

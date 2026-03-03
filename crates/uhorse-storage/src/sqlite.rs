@@ -137,7 +137,7 @@ impl SessionStore for SqliteStore {
         .await
         .map_err(|e| StorageError::QueryError(e.to_string()))?;
 
-        Ok(row.map(|r| row_to_session(r)))
+        Ok(row.map(row_to_session))
     }
 
     #[instrument(skip(self))]
@@ -153,7 +153,7 @@ impl SessionStore for SqliteStore {
         .await
         .map_err(|e| StorageError::QueryError(e.to_string()))?;
 
-        Ok(row.map(|r| row_to_session(r)))
+        Ok(row.map(row_to_session))
     }
 
     #[instrument(skip(self))]
@@ -209,7 +209,7 @@ impl SessionStore for SqliteStore {
         .await
         .map_err(|e| StorageError::QueryError(e.to_string()))?;
 
-        Ok(rows.into_iter().map(|r| row_to_session(r)).collect())
+        Ok(rows.into_iter().map(row_to_session).collect())
     }
 }
 
@@ -267,7 +267,7 @@ impl ConversationStore for SqliteStore {
         // 反转顺序（因为查询是 DESC）
         let messages: Vec<Message> = rows.into_iter()
             .rev()
-            .map(|r| row_to_message(r))
+            .map(row_to_message)
             .collect();
 
         Ok(messages)

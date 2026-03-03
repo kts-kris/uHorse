@@ -8,7 +8,6 @@ use crate::types::{
 };
 use crate::error::{UHorseError, Result, ChannelError, PluginError};
 use async_trait::async_trait;
-use serde_json::Value;
 
 // ============== 通道 Trait ==============
 

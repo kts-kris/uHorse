@@ -239,7 +239,7 @@ impl CronSchedule {
             if self.matches(&current) {
                 return current;
             }
-            current = current + chrono::Duration::seconds(60);
+            current += chrono::Duration::seconds(60);
         }
 
         // 如果找不到，返回远期时间
@@ -266,12 +266,12 @@ impl CronSchedule {
         }
 
         // 检查月
-        if !self.months.values.contains(&(dt.month() as u32)) {
+        if !self.months.values.contains(&dt.month()) {
             return false;
         }
 
         // 检查日和星期（逻辑或关系）
-        let day_matches = self.days_of_month.values.contains(&(dt.day() as u32));
+        let day_matches = self.days_of_month.values.contains(&dt.day());
         let weekday_matches = self.days_of_week.values.contains(&(dt.weekday().num_days_from_monday()));
 
         // 特殊处理：如果都是 *，则每天都匹配

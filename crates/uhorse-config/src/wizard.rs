@@ -2,6 +2,9 @@
 //!
 //! 交互式配置向导工具
 
+#![allow(clippy::never_loop)]
+#![allow(clippy::single_char_add_str)]
+
 use std::io::{self, Write};
 use std::fs;
 use std::path::Path;
@@ -351,7 +354,7 @@ impl ConfigWizard {
         println!("  [默认预装] Telegram, 钉钉");
         println!();
 
-        let channels = vec![
+        let channels = [
             ("Telegram ⭐", "telegram"),
             ("Slack", "slack"),
             ("Discord", "discord"),
@@ -607,9 +610,9 @@ impl ConfigWizard {
             }
         }
 
-        // 验证端口范围
-        if self.config.server.port < 1024 || self.config.server.port > 65535 {
-            return Err(anyhow::anyhow!("端口号超出范围 (1024-65535)"));
+        // 验证端口范围 (u16 最大值为 65535，无需检查上限)
+        if self.config.server.port < 1024 {
+            return Err(anyhow::anyhow!("端口号需要 root 权限 (< 1024)，建议使用 1024-65535"));
         }
 
         // 验证数据库路径
@@ -840,7 +843,7 @@ impl ConfigWizard {
         // LLM 配置
         if self.config.llm.enabled {
             config.push_str("[llm]\n");
-            config.push_str(&format!("enabled = true\n"));
+            config.push_str("enabled = true\n");
             config.push_str(&format!("provider = \"{}\"\n", self.config.llm.provider));
             config.push_str(&format!("api_key = \"{}\"\n", self.config.llm.api_key));
             config.push_str(&format!("base_url = \"{}\"\n", self.config.llm.base_url));
@@ -885,14 +888,14 @@ impl ConfigWizard {
 
         // LLM 配置
         if self.config.llm.enabled {
-            env.push_str(&format!("UHORSE_LLM_ENABLED=true\n"));
+            env.push_str("UHORSE_LLM_ENABLED=true\n");
             env.push_str(&format!("UHORSE_LLM_PROVIDER={}\n", self.config.llm.provider));
             env.push_str(&format!("UHORSE_LLM_API_KEY={}\n", self.config.llm.api_key));
             env.push_str(&format!("UHORSE_LLM_BASE_URL={}\n", self.config.llm.base_url));
             env.push_str(&format!("UHORSE_LLM_MODEL={}\n", self.config.llm.model));
         }
 
-        env.push_str(&format!("RUST_LOG=info\n"));
+        env.push_str("RUST_LOG=info\n");
 
         env
     }
@@ -1010,6 +1013,7 @@ impl CliWizard {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_imports)]
     use super::*;
 
     #[test]

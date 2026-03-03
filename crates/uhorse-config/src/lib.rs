@@ -40,6 +40,7 @@ pub struct UHorseConfig {
     pub llm: LLMConfig,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for UHorseConfig {
     fn default() -> Self {
         Self {
@@ -194,6 +195,7 @@ pub struct ChannelsConfig {
     pub whatsapp: Option<WhatsAppConfig>,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ChannelsConfig {
     fn default() -> Self {
         Self {
@@ -363,6 +365,7 @@ pub enum LogOutput {
     Both { file: PathBuf, rotate: bool },
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for LogOutput {
     fn default() -> Self {
         Self::Stdout

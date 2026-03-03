@@ -174,7 +174,7 @@ impl Channel for DiscordChannel {
         info!("Starting Discord channel");
 
         let user = self.get_current_user().await
-            .map_err(|e| UHorseError::ChannelError(e))?;
+            .map_err(UHorseError::ChannelError)?;
         info!("Connected as Discord bot: {}", user.username);
 
         *self.running.write().await = true;

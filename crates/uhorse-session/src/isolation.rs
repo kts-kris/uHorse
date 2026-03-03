@@ -60,7 +60,7 @@ impl IsolationContext {
 
         self.groups
             .entry(group_key)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(session.id.clone());
     }
 

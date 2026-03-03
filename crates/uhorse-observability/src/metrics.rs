@@ -320,7 +320,14 @@ pub enum AuditResult {
 #[derive(Debug)]
 pub struct AuditLogger {
     logs: Arc<RwLock<Vec<AuditLog>>>,
+    #[allow(clippy::derivable_impls)]
     max_logs: usize,
+}
+
+impl Default for AuditLogger {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuditLogger {
@@ -482,7 +489,7 @@ mod tests {
         collector.inc_active_sessions().await;
         collector.inc_active_sessions().await;
 
-        assert_eq!(*collector.active_sessions.blocking_read(), 2);
+        assert_eq!(*collector.active_sessions.read().await, 2);
     }
 
     #[test]

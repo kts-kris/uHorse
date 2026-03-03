@@ -60,12 +60,9 @@ impl ConfigValidator for ServerValidator {
     fn validate(&self, config: &UHorseConfig) -> ValidationResult {
         let mut errors = Vec::new();
 
-        // 验证端口范围
+        // 验证端口范围 (u16 最大值为 65535，无需检查上限)
         if config.server.port < 1024 {
             errors.push("Server port < 1024 requires root privileges".to_string());
-        }
-        if config.server.port > 65535 {
-            errors.push("Server port must be <= 65535".to_string());
         }
 
         // 验证超时设置
@@ -275,8 +272,8 @@ impl CompositeValidator {
         }
     }
 
-    /// 添加验证器
-    pub fn add(mut self, validator: Box<dyn ConfigValidator>) -> Self {
+    /// 添加验证器（builder 模式）
+    pub fn with_validator(mut self, validator: Box<dyn ConfigValidator>) -> Self {
         self.validators.push(validator);
         self
     }
@@ -284,17 +281,17 @@ impl CompositeValidator {
     /// 创建生产环境验证器
     pub fn production() -> Self {
         Self::new()
-            .add(Box::new(ServerValidator::default()))
-            .add(Box::new(DatabaseValidator::default()))
-            .add(Box::new(SecurityValidator::default()))
-            .add(Box::new(ChannelsValidator::default()))
+            .with_validator(Box::new(ServerValidator))
+            .with_validator(Box::new(DatabaseValidator))
+            .with_validator(Box::new(SecurityValidator))
+            .with_validator(Box::new(ChannelsValidator))
     }
 
     /// 创建开发环境验证器（较宽松）
     pub fn development() -> Self {
         Self::new()
-            .add(Box::new(ServerValidator::default()))
-            .add(Box::new(DatabaseValidator::default()))
+            .with_validator(Box::new(ServerValidator))
+            .with_validator(Box::new(DatabaseValidator))
     }
 }
 

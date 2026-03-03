@@ -185,14 +185,14 @@ impl HealthService {
         let status = self.overall_status(&checks);
 
         // 更新当前状态
-        *self.status.write().await = status.clone();
+        *self.status.write().await = status;
 
         HealthCheck {
             status,
             timestamp: Utc::now(),
             version: self.version.clone(),
             started_at: DateTime::from_timestamp(self.start_time.elapsed().as_secs() as i64, 0)
-                .unwrap_or_else(|| Utc::now()),
+                .unwrap_or(Utc::now()),
             uptime_seconds: self.start_time.elapsed().as_secs(),
             checks,
         }

@@ -266,7 +266,7 @@ impl PluginRuntime {
             debug!("Initializing plugin: {}", name);
             let mut plugin = plugin.write().await;
             plugin.initialize().await
-                .map_err(|e| uhorse_core::UHorseError::PluginError(e))?;
+                .map_err(uhorse_core::UHorseError::PluginError)?;
         }
         Ok(())
     }
@@ -279,7 +279,7 @@ impl PluginRuntime {
 
         let plugin = plugin.read().await;
         plugin.call(method, params).await
-            .map_err(|e| uhorse_core::UHorseError::PluginError(e))
+            .map_err(uhorse_core::UHorseError::PluginError)
     }
 
     /// 关闭所有插件
