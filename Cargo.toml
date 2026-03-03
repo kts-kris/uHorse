@@ -78,7 +78,7 @@ async-trait = "0.1"
 semver = { version = "1.0", features = ["serde"] }
 
 # JSON Schema
-jsonschema = "0.20"
+jsonschema = "0.44"
 
 # Cron
 cron = "0.12"
