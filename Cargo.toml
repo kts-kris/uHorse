@@ -88,7 +88,7 @@ reqwest = { version = "0.12", features = ["json"] }
 
 # Utilities
 derive_more = { version = "1.0", features = ["from", "display"] }
-strum = { version = "0.26", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 
 # Dev dependencies
 tokio-test = "0.4"
