@@ -84,7 +84,7 @@ jsonschema = "0.20"
 cron = "0.12"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 # Utilities
 derive_more = { version = "1.0", features = ["from", "display"] }
