@@ -1,0 +1,75 @@
+name: ✨ Feature Request
+description: 建议一个新功能
+title: "[Feature] "
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你的建议！请描述你想要的功能。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 这个功能要解决什么问题？
+      placeholder: "我希望能够...，因为..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 建议的解决方案
+      description: 你希望这个功能如何工作？
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 你考虑过哪些替代方案？
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能区域
+      description: 这个功能涉及哪个模块？
+      options:
+        - Gateway / 网关
+        - Channel / 通道
+        - Agent / 智能体
+        - Skills / 技能
+        - Memory / 记忆
+        - LLM / 大语言模型
+        - Security / 安全
+        - Observability / 可观测性
+        - CLI / 命令行
+        - Documentation / 文档
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      description: 你认为这个功能的优先级是？
+      options:
+        - Low / 低 - 有了更好
+        - Medium / 中 - 很有用
+        - High / 高 - 非常需要
+        - Critical / 关键 - 没有它无法使用
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 附加信息
+      description: 任何其他相关信息、截图、示例等
+    validations:
+      required: false

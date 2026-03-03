@@ -1,0 +1,55 @@
+# CODEOWNERS - 代码所有者定义
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repositorys-code-owners
+
+# ==================== 核心维护者 ====================
+# 对整个仓库有最终决定权
+
+* @liuweigang
+
+# ==================== 按模块分配 ====================
+
+# 核心模块
+/crates/uhorse-core/ @liuweigang
+
+# 网关层
+/crates/uhorse-gateway/ @liuweigang
+
+# 通道适配器
+/crates/uhorse-channel/ @liuweigang
+
+# 智能体管理
+/crates/uhorse-agent/ @liuweigang
+
+# LLM 抽象
+/crates/uhorse-llm/ @liuweigang
+
+# 存储层
+/crates/uhorse-storage/ @liuweigang
+
+# 安全层
+/crates/uhorse-security/ @liuweigang
+
+# 工具执行
+/crates/uhorse-tool/ @liuweigang
+
+# 调度器
+/crates/uhorse-scheduler/ @liuweigang
+
+# 配置管理
+/crates/uhorse-config/ @liuweigang
+
+# 二进制入口
+/crates/uhorse-bin/ @liuweigang
+
+# ==================== 文档 ====================
+/docs/ @liuweigang
+/README.md @liuweigang
+/CONTRIBUTING.md @liuweigang
+
+# ==================== CI/CD ====================
+/.github/ @liuweigang
+
+# ==================== 部署配置 ====================
+/deployments/ @liuweigang
+/Dockerfile @liuweigang
+/docker-compose.yml @liuweigang
