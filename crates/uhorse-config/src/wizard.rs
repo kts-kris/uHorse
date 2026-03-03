@@ -17,6 +17,7 @@ struct ConfigData {
     server: ServerConfig,
     channels: ChannelsConfig,
     database: DatabaseConfig,
+    llm: LLMConfig,
     security: SecurityConfig,
 }
 
@@ -54,6 +55,17 @@ struct SecurityConfig {
     token_expiry: u64,
 }
 
+#[derive(Debug, Default)]
+struct LLMConfig {
+    enabled: bool,
+    provider: String,
+    api_key: String,
+    base_url: String,
+    model: String,
+    temperature: f32,
+    max_tokens: usize,
+}
+
 impl ConfigWizard {
     pub fn new(project_dir: String) -> Self {
         Self {
@@ -68,6 +80,7 @@ impl ConfigWizard {
         self.configure_server()?;
         self.configure_database()?;
         self.configure_channels()?;
+        self.configure_llm()?;
         self.configure_security()?;
         self.validate_config()?;
         self.save_config()?;
@@ -91,6 +104,7 @@ impl ConfigWizard {
         println!("  • 服务器地址和端口");
         println!("  • 数据库配置");
         println!("  • 通道凭证 (Telegram, Slack, Discord, WhatsApp)");
+        println!("  • 大语言模型配置 (可选)");
         println!("  • 安全设置");
         println!();
         self.press_enter_to_continue();
@@ -207,6 +221,117 @@ impl ConfigWizard {
             match choice.as_str() {
                 "重新配置" => {
                     return self.configure_database();
+                }
+                _ => return Ok(()),
+            }
+        }
+    }
+
+    /// 配置 LLM
+    fn configure_llm(&mut self) -> anyhow::Result<()> {
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("  🤖 大语言模型配置");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!();
+
+        let enable_llm = self.prompt_choice(
+            "是否启用大语言模型功能? ",
+            &["启用", "跳过"],
+        )?;
+
+        if enable_llm != "启用" {
+            self.config.llm.enabled = false;
+            println!("跳过 LLM 配置");
+            return Ok(());
+        }
+
+        self.config.llm.enabled = true;
+
+        // 选择服务商
+        let provider = self.prompt_choice(
+            "选择 LLM 服务商: ",
+            &["OpenAI", "Azure OpenAI", "Anthropic (Claude)", "Google Gemini", "自定义 (OpenAI 兼容)"],
+        )?;
+
+        self.config.llm.provider = match provider.as_str() {
+            "OpenAI" => {
+                self.config.llm.base_url = "https://api.openai.com/v1".to_string();
+                "openai".to_string()
+            }
+            "Azure OpenAI" => {
+                let endpoint = self.prompt_input("请输入 Azure Endpoint (如: https://your-resource.openai.azure.com): ", String::new())?;
+                self.config.llm.base_url = format!("{}/openai/deployments/your-deployment", endpoint.trim_end_matches('/'));
+                "azure_openai".to_string()
+            }
+            "Anthropic (Claude)" => {
+                self.config.llm.base_url = "https://api.anthropic.com/v1".to_string();
+                "anthropic".to_string()
+            }
+            "Google Gemini" => {
+                self.config.llm.base_url = "https://generativelanguage.googleapis.com/v1beta".to_string();
+                "gemini".to_string()
+            }
+            "自定义 (OpenAI 兼容)" => {
+                self.config.llm.base_url = self.prompt_input("请输入 API Base URL (如: https://api.example.com/v1): ", String::new())?;
+                "custom".to_string()
+            }
+            _ => unreachable!(),
+        };
+
+        // API Key
+        self.config.llm.api_key = self.prompt_input("请输入 API Key: ", String::new())?;
+
+        // 模型选择
+        let default_model = match self.config.llm.provider.as_str() {
+            "openai" => "gpt-3.5-turbo",
+            "azure_openai" => "gpt-35-turbo",
+            "anthropic" => "claude-3-sonnet-20240229",
+            "gemini" => "gemini-pro",
+            _ => "gpt-3.5-turbo",
+        };
+
+        self.config.llm.model = self.prompt_input(
+            &format!("模型名称 [{}]: ", default_model),
+            default_model.to_string(),
+        )?;
+
+        // Temperature
+        let temp_str = self.prompt_input("Temperature (0.0 - 2.0, 默认 0.7) [0.7]: ", "0.7".to_string())?;
+        self.config.llm.temperature = temp_str.parse::<f32>()
+            .map_err(|_| anyhow::anyhow!("无效的数值"))?;
+
+        // Max Tokens
+        let tokens_str = self.prompt_input("最大 Tokens 数 (默认 2000) [2000]: ", "2000".to_string())?;
+        self.config.llm.max_tokens = tokens_str.parse::<usize>()
+            .map_err(|_| anyhow::anyhow!("无效的数值"))?;
+
+        println!();
+        println!("LLM 配置:");
+        println!("  服务商: {}", self.config.llm.provider);
+        println!("  API Key: {}***", &self.config.llm.api_key[..self.config.llm.api_key.len().saturating_sub(8)]);
+        println!("  Base URL: {}", self.config.llm.base_url);
+        println!("  模型: {}", self.config.llm.model);
+        println!("  Temperature: {}", self.config.llm.temperature);
+        println!("  Max Tokens: {}", self.config.llm.max_tokens);
+        println!();
+
+        self.confirm_or_edit_llm()?;
+
+        Ok(())
+    }
+
+    /// 确认或编辑 LLM 配置
+    fn confirm_or_edit_llm(&mut self) -> anyhow::Result<()> {
+        loop {
+            let choice = self.prompt_choice("是否正确? ", &["确认", "重新配置", "禁用 LLM"])?;
+
+            match choice.as_str() {
+                "重新配置" => {
+                    return self.configure_llm();
+                }
+                "禁用 LLM" => {
+                    self.config.llm.enabled = false;
+                    return Ok(());
                 }
                 _ => return Ok(()),
             }
@@ -576,6 +701,18 @@ impl ConfigWizard {
         config.push_str(&format!("jwt_secret = \"{}\"\n", self.config.security.jwt_secret));
         config.push_str(&format!("token_expiry = {}\n\n", self.config.security.token_expiry));
 
+        // LLM 配置
+        if self.config.llm.enabled {
+            config.push_str("[llm]\n");
+            config.push_str(&format!("enabled = true\n"));
+            config.push_str(&format!("provider = \"{}\"\n", self.config.llm.provider));
+            config.push_str(&format!("api_key = \"{}\"\n", self.config.llm.api_key));
+            config.push_str(&format!("base_url = \"{}\"\n", self.config.llm.base_url));
+            config.push_str(&format!("model = \"{}\"\n", self.config.llm.model));
+            config.push_str(&format!("temperature = {}\n", self.config.llm.temperature));
+            config.push_str(&format!("max_tokens = {}\n\n", self.config.llm.max_tokens));
+        }
+
         Ok(config)
     }
 
@@ -608,6 +745,15 @@ impl ConfigWizard {
             if let Some(token) = &discord.bot_token {
                 env.push_str(&format!("UHORSE_DISCORD_BOT_TOKEN={}\n", token));
             }
+        }
+
+        // LLM 配置
+        if self.config.llm.enabled {
+            env.push_str(&format!("UHORSE_LLM_ENABLED=true\n"));
+            env.push_str(&format!("UHORSE_LLM_PROVIDER={}\n", self.config.llm.provider));
+            env.push_str(&format!("UHORSE_LLM_API_KEY={}\n", self.config.llm.api_key));
+            env.push_str(&format!("UHORSE_LLM_BASE_URL={}\n", self.config.llm.base_url));
+            env.push_str(&format!("UHORSE_LLM_MODEL={}\n", self.config.llm.model));
         }
 
         env.push_str(&format!("RUST_LOG=info\n"));

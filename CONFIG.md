@@ -7,6 +7,7 @@
 - [环境变量配置](#环境变量配置)
 - [各模块配置](#各模块配置)
 - [通道配置](#通道配置)
+- [LLM 配置](#llm-配置)
 - [API 配置](#api-配置)
 - [生产环境配置](#生产环境配置)
 
@@ -561,3 +562,115 @@ curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe
 - [API 使用指南](API.md)
 - [通道集成指南](CHANNELS.md)
 - [部署指南](deployments/DEPLOYMENT.md)
+
+## LLM 配置
+
+### 启用 LLM 功能
+
+uHorse 支持集成大语言模型（LLM）来处理用户消息。支持 OpenAI、Azure OpenAI、Anthropic Claude、Google Gemini 等多种服务商。
+
+### 配置方式
+
+#### 方式一：配置文件
+
+在 `config.toml` 中添加：
+
+```toml
+[llm]
+enabled = true
+provider = "openai"  # openai, azure_openai, anthropic, gemini, custom
+api_key = "your-api-key"
+base_url = "https://api.openai.com/v1"
+model = "gpt-3.5-turbo"
+temperature = 0.7
+max_tokens = 2000
+```
+
+#### 方式二：环境变量
+
+在 `.env` 文件中：
+
+```bash
+UHORSE_LLM_ENABLED=true
+UHORSE_LLM_PROVIDER=openai
+UHORSE_LLM_API_KEY=your-api-key
+UHORSE_LLM_BASE_URL=https://api.openai.com/v1
+UHORSE_LLM_MODEL=gpt-3.5-turbo
+```
+
+### 支持的服务商
+
+| 服务商 | provider 值 | base_url |
+|--------|------------|----------|
+| OpenAI | `openai` | `https://api.openai.com/v1` |
+| Azure OpenAI | `azure_openai` | `https://your-resource.openai.azure.com/openai/deployments/your-deployment` |
+| Anthropic Claude | `anthropic` | `https://api.anthropic.com/v1` |
+| Google Gemini | `gemini` | `https://generativelanguage.googleapis.com/v1beta` |
+| 自定义端点 | `custom` | 自定义 URL |
+
+### 配置向导
+
+运行交互式配置向导：
+
+```bash
+./target/release/uhorse wizard
+```
+
+### 使用效果
+
+启用 LLM 后，用户发送给 Bot 的消息会被转发给 LLM 进行处理，Bot 会将 LLM 的回复返回给用户。
+
+### 示例配置
+
+#### OpenAI GPT-4
+
+```toml
+[llm]
+enabled = true
+provider = "openai"
+api_key = "sk-..."
+base_url = "https://api.openai.com/v1"
+model = "gpt-4"
+temperature = 0.7
+max_tokens = 2000
+```
+
+#### Azure OpenAI
+
+```toml
+[llm]
+enabled = true
+provider = "azure_openai"
+api_key = "your-azure-api-key"
+base_url = "https://your-resource.openai.azure.com/openai/deployments/gpt-35-turbo"
+model = "gpt-35-turbo"
+temperature = 0.7
+max_tokens = 2000
+```
+
+#### Anthropic Claude
+
+```toml
+[llm]
+enabled = true
+provider = "anthropic"
+api_key = "sk-ant-..."
+base_url = "https://api.anthropic.com/v1"
+model = "claude-3-sonnet-20240229"
+temperature = 0.7
+max_tokens = 2000
+```
+
+#### 国内兼容服务
+
+```toml
+[llm]
+enabled = true
+provider = "custom"
+api_key = "your-api-key"
+base_url = "https://api.example.com/v1"
+model = "model-name"
+temperature = 0.7
+max_tokens = 2000
+```
+

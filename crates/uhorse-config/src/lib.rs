@@ -35,6 +35,9 @@ pub struct UHorseConfig {
     pub scheduler: SchedulerConfig,
     /// 工具配置
     pub tools: ToolsConfig,
+    /// LLM 配置
+    #[serde(default)]
+    pub llm: LLMConfig,
 }
 
 impl Default for UHorseConfig {
@@ -48,6 +51,7 @@ impl Default for UHorseConfig {
             observability: ObservabilityConfig::default(),
             scheduler: SchedulerConfig::default(),
             tools: ToolsConfig::default(),
+            llm: LLMConfig::default(),
         }
     }
 }
@@ -449,3 +453,58 @@ impl Default for ToolsConfig {
 
 fn default_sandbox_timeout() -> u64 { 30 }
 fn default_sandbox_max_memory() -> usize { 512 }
+
+/// LLM 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LLMConfig {
+    /// 是否启用 LLM
+    pub enabled: bool,
+
+    /// 服务商
+    pub provider: String,
+
+    /// API 密钥
+    pub api_key: String,
+
+    /// API 基础 URL
+    #[serde(default = "default_llm_base_url")]
+    pub base_url: String,
+
+    /// 模型名称
+    pub model: String,
+
+    /// 温度 (0.0 - 2.0)
+    #[serde(default = "default_llm_temperature")]
+    pub temperature: f32,
+
+    /// 最大 tokens
+    #[serde(default = "default_llm_max_tokens")]
+    pub max_tokens: usize,
+
+    /// 系统提示词
+    #[serde(default = "default_llm_system_prompt")]
+    pub system_prompt: String,
+}
+
+impl Default for LLMConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: "openai".to_string(),
+            api_key: String::new(),
+            base_url: default_llm_base_url(),
+            model: "gpt-3.5-turbo".to_string(),
+            temperature: default_llm_temperature(),
+            max_tokens: default_llm_max_tokens(),
+            system_prompt: default_llm_system_prompt(),
+        }
+    }
+}
+
+fn default_llm_base_url() -> String { "https://api.openai.com/v1".to_string() }
+fn default_llm_temperature() -> f32 { 0.7 }
+fn default_llm_max_tokens() -> usize { 2000 }
+fn default_llm_system_prompt() -> String {
+    "You are a helpful AI assistant for uHorse, a multi-channel AI gateway.".to_string()
+}

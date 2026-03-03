@@ -14,10 +14,12 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use uhorse_llm::{OpenAIClient, ChatMessage, LLMClient};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use uhorse_core::Channel;
 
 /// uHorse AI Gateway
 #[derive(Parser, Debug)]
@@ -58,6 +60,7 @@ enum Commands {
 /// 共享状态
 struct AppState {
     telegram_channel: Arc<RwLock<Option<uhorse_channel::TelegramChannel>>>,
+    llm_client: Arc<RwLock<Option<OpenAIClient>>>,
 }
 
 #[tokio::main]
@@ -86,9 +89,13 @@ async fn main() -> anyhow::Result<()> {
     // 初始化通道
     let telegram_channel = init_channels(&file_config).await?;
 
+    // 初始化 LLM 客户端
+    let llm_client = init_llm_client(&file_config).await?;
+
     // 创建共享状态
     let state = Arc::new(AppState {
         telegram_channel: Arc::new(RwLock::new(telegram_channel)),
+        llm_client: Arc::new(RwLock::new(llm_client)),
     });
 
     // 启动 Telegram polling 任务
@@ -165,6 +172,42 @@ async fn init_channels(config: &Config) -> anyhow::Result<Option<uhorse_channel:
     Ok(telegram_channel)
 }
 
+/// 初始化 LLM 客户端
+async fn init_llm_client(config: &Config) -> anyhow::Result<Option<OpenAIClient>> {
+    if !config.llm.enabled {
+        info!("🤖 LLM is disabled in configuration");
+        return Ok(None);
+    }
+
+    info!("🤖 Initializing LLM client...");
+    info!("  Provider: {}", config.llm.provider);
+    info!("  Model: {}", config.llm.model);
+
+    // 构建完整的 LLM 配置
+    let full_llm_config = uhorse_config::LLMConfig {
+        enabled: true,
+        provider: config.llm.provider.clone(),
+        api_key: config.llm.api_key.clone(),
+        base_url: config.llm.base_url.clone(),
+        model: config.llm.model.clone(),
+        temperature: config.llm.temperature,
+        max_tokens: config.llm.max_tokens,
+        system_prompt: "You are a helpful AI assistant for uHorse, a multi-channel AI gateway.".to_string(),
+    };
+
+    match OpenAIClient::from_uhorse_config(full_llm_config) {
+        Ok(client) => {
+            info!("  ✓ LLM client initialized successfully");
+            Ok(Some(client))
+        }
+        Err(e) => {
+            warn!("  ✗ Failed to initialize LLM client: {}", e);
+            warn!("  LLM features will be disabled");
+            Ok(None)
+        }
+    }
+}
+
 /// 启动 Telegram polling
 async fn start_telegram_polling(state: Arc<AppState>) -> anyhow::Result<Option<tokio::task::JoinHandle<()>>> {
     let channel_guard = state.telegram_channel.read().await;
@@ -188,10 +231,20 @@ async fn start_telegram_polling(state: Arc<AppState>) -> anyhow::Result<Option<t
             let channel_opt = channel_guard.as_ref().cloned();
             drop(channel_guard);
 
-            if let Some(channel) = channel_opt {
-                if let Err(e) = poll_telegram_updates(&channel, &mut offset).await {
-                    warn!("Telegram polling error: {}", e);
-                }
+            // 获取 LLM 客户端
+            let llm_guard = state.llm_client.read().await;
+            let llm_opt = llm_guard.as_ref();
+
+            let result = if let Some(channel) = channel_opt {
+                poll_telegram_updates(&channel, &mut offset, llm_opt).await
+            } else {
+                Ok(())
+            };
+
+            drop(llm_guard);
+
+            if let Err(e) = result {
+                warn!("Telegram polling error: {}", e);
             }
 
             // 每 3 秒轮询一次
@@ -206,6 +259,7 @@ async fn start_telegram_polling(state: Arc<AppState>) -> anyhow::Result<Option<t
 async fn poll_telegram_updates(
     channel: &uhorse_channel::TelegramChannel,
     offset: &mut i32,
+    llm_client: Option<&OpenAIClient>,
 ) -> anyhow::Result<()> {
     use reqwest::Client;
 
@@ -214,7 +268,7 @@ async fn poll_telegram_updates(
 
     let response = client
         .get(&url)
-        .query(&[("offset", offset), ("timeout", 10)])
+        .query(&[("offset", offset.to_string()), ("timeout", "10".to_string())])
         .send()
         .await?;
 
@@ -227,7 +281,7 @@ async fn poll_telegram_updates(
     if let Some(result) = json.get("result").and_then(|v| v.as_array()) {
         for update in result {
             // 处理更新
-            if let Err(e) = handle_telegram_update(channel, update).await {
+            if let Err(e) = handle_telegram_update(channel, update, llm_client).await {
                 error!("Error handling Telegram update: {}", e);
             }
 
@@ -245,31 +299,59 @@ async fn poll_telegram_updates(
 async fn handle_telegram_update(
     channel: &uhorse_channel::TelegramChannel,
     update: &Value,
+    llm_client: Option<&OpenAIClient>,
 ) -> anyhow::Result<()> {
     let update_json = serde_json::to_string(update)?;
 
     if let Some((session, message)) = channel.handle_update_raw(&update_json).await? {
-        info!("📨 Received message from {}: {:?}", session.id, message.content);
+        info!("📨 Received message from {}: {:?}", session.channel_user_id, message.content);
 
-        // 这里应该处理消息并发送回复
-        // 目前先简单回复一下
+        // 处理消息并发送回复
         match &message.content {
             uhorse_core::MessageContent::Text(text) => {
-                let reply = format!("收到你的消息: {}", text);
-                if let Err(e) = channel.send_message(&session.id.user_id, &uhorse_core::MessageContent::Text(reply)).await {
+                let reply = if let Some(client) = llm_client {
+                    // 使用 LLM 处理消息
+                    info!("🤖 Processing message with LLM...");
+                    match process_with_llm(client, text).await {
+                        Ok(llm_reply) => llm_reply,
+                        Err(e) => {
+                            error!("LLM processing failed: {}", e);
+                            format!("抱歉，处理消息时出错: {}", e)
+                        }
+                    }
+                } else {
+                    // 无 LLM 时的简单回复
+                    format!("收到你的消息: {}", text)
+                };
+
+                if let Err(e) = channel.send_message(&session.channel_user_id, &uhorse_core::MessageContent::Text(reply.clone())).await {
                     error!("Failed to send reply: {}", e);
+                } else {
+                    info!("✓ Reply sent: {}", reply);
                 }
             }
             _ => {
                 let reply = "收到你的消息！";
-                if let Err(e) = channel.send_message(&session.id.user_id, &uhorse_core::MessageContent::Text(reply.to_string())).await {
+                if let Err(e) = channel.send_message(&session.channel_user_id, &uhorse_core::MessageContent::Text(reply.to_string())).await {
                     error!("Failed to send reply: {}", e);
+                } else {
+                    info!("✓ Reply sent successfully");
                 }
             }
         }
     }
 
     Ok(())
+}
+
+/// 使用 LLM 处理消息
+async fn process_with_llm(client: &OpenAIClient, text: &str) -> anyhow::Result<String> {
+    let messages = vec![
+        ChatMessage::system("You are a helpful AI assistant for uHorse, a multi-channel AI gateway. Be concise and friendly.".to_string()),
+        ChatMessage::user(text.to_string()),
+    ];
+
+    client.chat_completion(messages).await
 }
 
 /// Telegram webhook 端点
@@ -280,13 +362,18 @@ async fn telegram_webhook(
     info!("📨 Received Telegram webhook");
 
     let channel_guard = state.telegram_channel.read().await;
+    let llm_guard = state.llm_client.read().await;
     if let Some(channel) = channel_guard.as_ref() {
+        let llm_opt = llm_guard.as_ref();
         // 处理 webhook payload
-        if let Err(e) = handle_telegram_update(channel, &serde_json::from_str(&payload).unwrap_or(Value::Null)).await {
+        if let Err(e) = handle_telegram_update(channel, &serde_json::from_str(&payload).unwrap_or(Value::Null), llm_opt).await {
             error!("Webhook error: {}", e);
+            drop(llm_guard);
+            drop(channel_guard);
             return Ok(Json(serde_json::json!({"status": "error", "message": e.to_string()})));
         }
     }
+    drop(llm_guard);
     drop(channel_guard);
 
     Ok(Json(serde_json::json!({"status": "ok"})))
@@ -334,6 +421,8 @@ struct Config {
     database: DatabaseConfig,
     #[serde(default)]
     security: SecurityConfig,
+    #[serde(default)]
+    llm: LLMConfig,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -380,6 +469,30 @@ struct SecurityConfig {
 }
 
 fn default_token_expiry() -> u64 { 86400 }
+
+#[derive(Debug, serde::Deserialize, Default)]
+struct LLMConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_llm_provider")]
+    provider: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default = "default_llm_base_url")]
+    base_url: String,
+    #[serde(default = "default_llm_model")]
+    model: String,
+    #[serde(default = "default_llm_temperature")]
+    temperature: f32,
+    #[serde(default = "default_llm_max_tokens")]
+    max_tokens: usize,
+}
+
+fn default_llm_provider() -> String { "openai".to_string() }
+fn default_llm_base_url() -> String { "https://api.openai.com/v1".to_string() }
+fn default_llm_model() -> String { "gpt-3.5-turbo".to_string() }
+fn default_llm_temperature() -> f32 { 0.7 }
+fn default_llm_max_tokens() -> usize { 2000 }
 
 /// 健康检查响应
 #[derive(Serialize)]

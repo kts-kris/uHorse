@@ -47,16 +47,25 @@ impl TelegramChannel {
         let chat = message_obj.get("chat")
             .ok_or_else(|| UHorseError::InternalError("No chat in message".to_string()))?;
 
-        let user_id = chat.get("username")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        // 获取 chat_id，支持数字 ID 和字符串 username
+        let chat_id = if let Some(id) = chat.get("id").and_then(|v| v.as_i64()) {
+            // 数字 ID（私聊）
+            id.to_string()
+        } else if let Some(username) = chat.get("username").and_then(|v| v.as_str()) {
+            // 字符串 username（公开群组或频道）
+            format!("@{}", username)
+        } else {
+            return Err(UHorseError::InternalError("No valid chat identifier".to_string()));
+        };
 
         // 创建会话
-        let session = Session::new(ChannelType::Telegram, user_id);
+        let session = Session::new(ChannelType::Telegram, chat_id.clone());
 
         // 提取消息内容
         let message_content = self.extract_content_raw(message_obj)?;
+
+        debug!("Processed Telegram message: chat_id={}, content={:?}", chat_id, message_content);
+
         let message = Message::new(session.id.clone(), MessageRole::User, message_content, 0);
 
         Ok(Some((session, message)))

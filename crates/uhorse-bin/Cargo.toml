@@ -23,6 +23,7 @@ uhorse-security = { path = "../uhorse-security" }
 uhorse-scheduler = { path = "../uhorse-scheduler" }
 uhorse-observability = { path = "../uhorse-observability" }
 uhorse-config = { path = "../uhorse-config" }
+uhorse-llm = { path = "../uhorse-llm" }
 
 tokio = { workspace = true, features = ["full"] }
 axum = { workspace = true }

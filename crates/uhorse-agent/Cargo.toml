@@ -1,0 +1,50 @@
+[package]
+name = "uhorse-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Workspace dependencies
+uhorse-core = { path = "../uhorse-core" }
+uhorse-llm = { path = "../uhorse-llm" }
+uhorse-tool = { path = "../uhorse-tool" }
+uhorse-storage = { path = "../uhorse-storage" }
+uhorse-observability = { path = "../uhorse-observability" }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Config
+toml = { workspace = true }
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Utilities
+strum = { workspace = true }
+derive_more = { workspace = true }
+shellexpand = "3.1"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tracing-subscriber = { workspace = true }
+shellexpand = "3.1"

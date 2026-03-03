@@ -10,6 +10,8 @@ members = [
     "crates/uhorse-scheduler",
     "crates/uhorse-observability",
     "crates/uhorse-config",
+    "crates/uhorse-llm",
+    "crates/uhorse-agent",
     "crates/uhorse-bin",
 ]
 resolver = "2"
