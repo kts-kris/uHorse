@@ -29,44 +29,44 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod gateway;
 pub mod agent;
-pub mod skill;
+pub mod agent_scope;
+pub mod bindings;
+pub mod error;
+pub mod gateway;
+pub mod mcp;
 pub mod memory;
 pub mod router;
-pub mod error;
-pub mod agent_scope;
 pub mod session_key;
-pub mod bindings;
-pub mod mcp;
+pub mod skill;
 pub mod skills;
 pub mod tools;
 
 // 重新导出核心类型
-pub use gateway::{Gateway, GatewayConfig, GatewayEvent};
 pub use agent::{Agent, AgentBuilder, AgentConfig, AgentResponse};
-pub use skill::{Skill, SkillRegistry, SkillManifest, SkillExecutor};
-pub use memory::{FileMemory, MemoryStore};
-pub use router::{Router, Route, RouteTarget};
+pub use agent_scope::{AgentManager, AgentScope, AgentScopeConfig, SessionState};
+pub use bindings::{Binding, BindingBuilder, BindingsConfig, BindingsRouter};
 pub use error::{AgentError, AgentResult};
-pub use agent_scope::{AgentScope, AgentScopeConfig, AgentManager, SessionState};
-pub use session_key::{SessionKey, ChannelType};
-pub use bindings::{Binding, BindingsConfig, BindingsRouter, BindingBuilder};
+pub use gateway::{Gateway, GatewayConfig, GatewayEvent};
+pub use memory::{FileMemory, MemoryStore};
+pub use router::{Route, RouteTarget, Router};
+pub use session_key::{ChannelType, SessionKey};
+pub use skill::{Skill, SkillExecutor, SkillManifest, SkillRegistry};
 
 // MCP 相关
 pub use mcp::{
-    types::{McpTool, McpToolCall, McpToolResult, McpContent, McpResource, McpPrompt},
     protocol::McpProtocol,
+    types::{McpContent, McpPrompt, McpResource, McpTool, McpToolCall, McpToolResult},
 };
 
 // Skills 相关
 pub use skills::{
-    SkillManifestParser, SkillConfig, SkillPermission,
-    Skill as McpSkill, SkillRegistry as McpSkillRegistry,
+    Skill as McpSkill, SkillConfig, SkillManifestParser, SkillPermission,
+    SkillRegistry as McpSkillRegistry,
 };
 
 // Tools 相关
-pub use tools::{Tool, ToolRegistry, ToolBuilder, builtin_tools};
+pub use tools::{builtin_tools, Tool, ToolBuilder, ToolRegistry};
 
 /// uHorse Agent 框架版本
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

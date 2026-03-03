@@ -2,14 +2,14 @@
 //!
 //! 基于 JWT 的令牌认证，支持自动刷新和令牌撤销。
 
-use uhorse_core::{AuthService, Result, DeviceId, AccessToken};
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
-use serde::{Serialize, Deserialize};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{Utc, Duration};
 use tracing::{debug, info, warn};
+use uhorse_core::{AccessToken, AuthService, DeviceId, Result};
 
 /// JWT 认证服务
 #[derive(Debug, Clone)]
@@ -42,8 +42,8 @@ impl JwtAuthService {
     pub fn new(secret: String) -> Self {
         Self {
             secret,
-            default_expiry: 3600,        // 1 小时
-            refresh_expiry: 2592000,     // 30 天
+            default_expiry: 3600,    // 1 小时
+            refresh_expiry: 2592000, // 30 天
             revoked: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -160,8 +160,8 @@ impl AuthService for JwtAuthService {
         scopes: Vec<String>,
         expires_in: u64,
     ) -> Result<String> {
-        let subject = user_id
-            .unwrap_or_else(|| device_id.as_ref().map(|d| d.0.clone()).unwrap_or_default());
+        let subject =
+            user_id.unwrap_or_else(|| device_id.as_ref().map(|d| d.0.clone()).unwrap_or_default());
 
         let device_id_str = device_id.map(|d| d.0);
 
@@ -311,9 +311,7 @@ impl JwtAuthService {
             .await?;
 
         // 创建刷新令牌
-        let refresh_token = self
-            .create_refresh_token(subject, device_id_str)
-            .await?;
+        let refresh_token = self.create_refresh_token(subject, device_id_str).await?;
 
         info!("Created token pair for: {}", user_id.unwrap_or_default());
 

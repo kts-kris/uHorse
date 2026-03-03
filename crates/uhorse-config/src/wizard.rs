@@ -5,8 +5,8 @@
 #![allow(clippy::never_loop)]
 #![allow(clippy::single_char_add_str)]
 
-use std::io::{self, Write};
 use std::fs;
+use std::io::{self, Write};
 use std::path::Path;
 
 /// 配置向导
@@ -134,11 +134,10 @@ impl ConfigWizard {
         )?;
 
         // 询问端口
-        let port_str = self.prompt_input(
-            &format!("监听端口 [{}]: ", default_port),
-            default_port,
-        )?;
-        self.config.server.port = port_str.parse::<u16>()
+        let port_str =
+            self.prompt_input(&format!("监听端口 [{}]: ", default_port), default_port)?;
+        self.config.server.port = port_str
+            .parse::<u16>()
             .map_err(|_| anyhow::anyhow!("无效的端口号"))?;
 
         // 显示配置
@@ -174,10 +173,7 @@ impl ConfigWizard {
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!();
 
-        let db_type = self.prompt_choice(
-            "选择数据库类型: ",
-            &["SQLite (推荐)", "PostgreSQL"],
-        )?;
+        let db_type = self.prompt_choice("选择数据库类型: ", &["SQLite (推荐)", "PostgreSQL"])?;
 
         match db_type.as_str() {
             "SQLite (推荐)" => {
@@ -240,10 +236,7 @@ impl ConfigWizard {
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!();
 
-        let enable_llm = self.prompt_choice(
-            "是否启用大语言模型功能? ",
-            &["启用", "跳过"],
-        )?;
+        let enable_llm = self.prompt_choice("是否启用大语言模型功能? ", &["启用", "跳过"])?;
 
         if enable_llm != "启用" {
             self.config.llm.enabled = false;
@@ -256,7 +249,13 @@ impl ConfigWizard {
         // 选择服务商
         let provider = self.prompt_choice(
             "选择 LLM 服务商: ",
-            &["OpenAI", "Azure OpenAI", "Anthropic (Claude)", "Google Gemini", "自定义 (OpenAI 兼容)"],
+            &[
+                "OpenAI",
+                "Azure OpenAI",
+                "Anthropic (Claude)",
+                "Google Gemini",
+                "自定义 (OpenAI 兼容)",
+            ],
         )?;
 
         self.config.llm.provider = match provider.as_str() {
@@ -265,8 +264,14 @@ impl ConfigWizard {
                 "openai".to_string()
             }
             "Azure OpenAI" => {
-                let endpoint = self.prompt_input("请输入 Azure Endpoint (如: https://your-resource.openai.azure.com): ", String::new())?;
-                self.config.llm.base_url = format!("{}/openai/deployments/your-deployment", endpoint.trim_end_matches('/'));
+                let endpoint = self.prompt_input(
+                    "请输入 Azure Endpoint (如: https://your-resource.openai.azure.com): ",
+                    String::new(),
+                )?;
+                self.config.llm.base_url = format!(
+                    "{}/openai/deployments/your-deployment",
+                    endpoint.trim_end_matches('/')
+                );
                 "azure_openai".to_string()
             }
             "Anthropic (Claude)" => {
@@ -274,11 +279,15 @@ impl ConfigWizard {
                 "anthropic".to_string()
             }
             "Google Gemini" => {
-                self.config.llm.base_url = "https://generativelanguage.googleapis.com/v1beta".to_string();
+                self.config.llm.base_url =
+                    "https://generativelanguage.googleapis.com/v1beta".to_string();
                 "gemini".to_string()
             }
             "自定义 (OpenAI 兼容)" => {
-                self.config.llm.base_url = self.prompt_input("请输入 API Base URL (如: https://api.example.com/v1): ", String::new())?;
+                self.config.llm.base_url = self.prompt_input(
+                    "请输入 API Base URL (如: https://api.example.com/v1): ",
+                    String::new(),
+                )?;
                 "custom".to_string()
             }
             _ => unreachable!(),
@@ -302,19 +311,28 @@ impl ConfigWizard {
         )?;
 
         // Temperature
-        let temp_str = self.prompt_input("Temperature (0.0 - 2.0, 默认 0.7) [0.7]: ", "0.7".to_string())?;
-        self.config.llm.temperature = temp_str.parse::<f32>()
+        let temp_str = self.prompt_input(
+            "Temperature (0.0 - 2.0, 默认 0.7) [0.7]: ",
+            "0.7".to_string(),
+        )?;
+        self.config.llm.temperature = temp_str
+            .parse::<f32>()
             .map_err(|_| anyhow::anyhow!("无效的数值"))?;
 
         // Max Tokens
-        let tokens_str = self.prompt_input("最大 Tokens 数 (默认 2000) [2000]: ", "2000".to_string())?;
-        self.config.llm.max_tokens = tokens_str.parse::<usize>()
+        let tokens_str =
+            self.prompt_input("最大 Tokens 数 (默认 2000) [2000]: ", "2000".to_string())?;
+        self.config.llm.max_tokens = tokens_str
+            .parse::<usize>()
             .map_err(|_| anyhow::anyhow!("无效的数值"))?;
 
         println!();
         println!("LLM 配置:");
         println!("  服务商: {}", self.config.llm.provider);
-        println!("  API Key: {}***", &self.config.llm.api_key[..self.config.llm.api_key.len().saturating_sub(8)]);
+        println!(
+            "  API Key: {}***",
+            &self.config.llm.api_key[..self.config.llm.api_key.len().saturating_sub(8)]
+        );
         println!("  Base URL: {}", self.config.llm.base_url);
         println!("  模型: {}", self.config.llm.model);
         println!("  Temperature: {}", self.config.llm.temperature);
@@ -408,10 +426,7 @@ impl ConfigWizard {
         println!();
 
         // 询问是否启用
-        let enabled = self.prompt_choice(
-            &format!("是否启用 {}? ", channel_name),
-            &["是", "否"],
-        )?;
+        let enabled = self.prompt_choice(&format!("是否启用 {}? ", channel_name), &["是", "否"])?;
 
         let config = if enabled == "是" {
             let bot_token = match channel_key {
@@ -426,27 +441,33 @@ impl ConfigWizard {
             // 根据通道类型询问额外配置
             match channel_key {
                 "telegram" => {
-                    let webhook_secret = self.prompt_input("请输入 Webhook Secret (可选): ", String::new())?;
+                    let webhook_secret =
+                        self.prompt_input("请输入 Webhook Secret (可选): ", String::new())?;
                     if !webhook_secret.is_empty() {
                         extra.insert("webhook_secret".to_string(), webhook_secret);
                     }
                 }
                 "slack" => {
-                    let signing_secret = self.prompt_input("请输入 Signing Secret: ", String::new())?;
+                    let signing_secret =
+                        self.prompt_input("请输入 Signing Secret: ", String::new())?;
                     extra.insert("signing_secret".to_string(), signing_secret);
                 }
                 "discord" => {
-                    let application_id = self.prompt_input("请输入 Application ID: ", String::new())?;
+                    let application_id =
+                        self.prompt_input("请输入 Application ID: ", String::new())?;
                     extra.insert("application_id".to_string(), application_id);
                 }
                 "whatsapp" => {
-                    let phone_number_id = self.prompt_input("请输入 Phone Number ID: ", String::new())?;
+                    let phone_number_id =
+                        self.prompt_input("请输入 Phone Number ID: ", String::new())?;
                     extra.insert("phone_number_id".to_string(), phone_number_id);
 
-                    let business_account_id = self.prompt_input("请输入 Business Account ID: ", String::new())?;
+                    let business_account_id =
+                        self.prompt_input("请输入 Business Account ID: ", String::new())?;
                     extra.insert("business_account_id".to_string(), business_account_id);
 
-                    let webhook_verify_token = self.prompt_input("请输入 Webhook Verify Token (可选): ", String::new())?;
+                    let webhook_verify_token =
+                        self.prompt_input("请输入 Webhook Verify Token (可选): ", String::new())?;
                     if !webhook_verify_token.is_empty() {
                         extra.insert("webhook_verify_token".to_string(), webhook_verify_token);
                     }
@@ -462,12 +483,14 @@ impl ConfigWizard {
                     let app_secret = self.prompt_input("请输入 App Secret: ", String::new())?;
                     extra.insert("app_secret".to_string(), app_secret);
 
-                    let encrypt_key = self.prompt_input("请输入 Encrypt Key (可选): ", String::new())?;
+                    let encrypt_key =
+                        self.prompt_input("请输入 Encrypt Key (可选): ", String::new())?;
                     if !encrypt_key.is_empty() {
                         extra.insert("encrypt_key".to_string(), encrypt_key);
                     }
 
-                    let verify_token = self.prompt_input("请输入 Verify Token (可选): ", String::new())?;
+                    let verify_token =
+                        self.prompt_input("请输入 Verify Token (可选): ", String::new())?;
                     if !verify_token.is_empty() {
                         extra.insert("verify_token".to_string(), verify_token);
                     }
@@ -484,7 +507,8 @@ impl ConfigWizard {
                         extra.insert("token".to_string(), token);
                     }
 
-                    let encoding_aes_key = self.prompt_input("请输入 Encoding AES Key (可选): ", String::new())?;
+                    let encoding_aes_key =
+                        self.prompt_input("请输入 Encoding AES Key (可选): ", String::new())?;
                     if !encoding_aes_key.is_empty() {
                         extra.insert("encoding_aes_key".to_string(), encoding_aes_key);
                     }
@@ -531,25 +555,23 @@ impl ConfigWizard {
         println!("请使用至少 32 个随机字符。");
         println!();
 
-        let generate_secret = self.prompt_choice(
-            "是否自动生成安全的 JWT 密钥? ",
-            &["自动生成", "手动输入"],
-        )?;
+        let generate_secret =
+            self.prompt_choice("是否自动生成安全的 JWT 密钥? ", &["自动生成", "手动输入"])?;
 
         self.config.security.jwt_secret = match generate_secret.as_str() {
             "自动生成" => {
-            // 使用 openssl 生成
-            use std::process::Command;
-            let output = Command::new("openssl")
-                .args(["rand", "-hex", "32"])
-                .output()
-                .map_err(|_| anyhow::anyhow!("生成密钥失败，请确保已安装 openssl"))?;
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        }
+                // 使用 openssl 生成
+                use std::process::Command;
+                let output = Command::new("openssl")
+                    .args(["rand", "-hex", "32"])
+                    .output()
+                    .map_err(|_| anyhow::anyhow!("生成密钥失败，请确保已安装 openssl"))?;
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
             "手动输入" => {
-            self.prompt_input("请输入 JWT 密钥 (至少 32 字符): ", String::new())?
-        }
-        _ => unreachable!(),
+                self.prompt_input("请输入 JWT 密钥 (至少 32 字符): ", String::new())?
+            }
+            _ => unreachable!(),
         };
 
         // Token 过期时间
@@ -558,7 +580,8 @@ impl ConfigWizard {
             &format!("访问令牌过期时间（秒）[{}]: ", default_expiry),
             default_expiry.to_string(),
         )?;
-        self.config.security.token_expiry = expiry_str.parse::<u64>()
+        self.config.security.token_expiry = expiry_str
+            .parse::<u64>()
             .map_err(|_| anyhow::anyhow!("无效的数字"))?;
 
         println!();
@@ -569,7 +592,8 @@ impl ConfigWizard {
             self.config.security.jwt_secret.clone()
         };
         println!("  JWT 密钥: {}", jwt_display);
-        println!("  过期时间: {} 秒 ({} 小时)",
+        println!(
+            "  过期时间: {} 秒 ({} 小时)",
             self.config.security.token_expiry,
             self.config.security.token_expiry / 3600
         );
@@ -612,7 +636,9 @@ impl ConfigWizard {
 
         // 验证端口范围 (u16 最大值为 65535，无需检查上限)
         if self.config.server.port < 1024 {
-            return Err(anyhow::anyhow!("端口号需要 root 权限 (< 1024)，建议使用 1024-65535"));
+            return Err(anyhow::anyhow!(
+                "端口号需要 root 权限 (< 1024)，建议使用 1024-65535"
+            ));
         }
 
         // 验证数据库路径
@@ -837,8 +863,14 @@ impl ConfigWizard {
 
         // 安全配置
         config.push_str("[security]\n");
-        config.push_str(&format!("jwt_secret = \"{}\"\n", self.config.security.jwt_secret));
-        config.push_str(&format!("token_expiry = {}\n\n", self.config.security.token_expiry));
+        config.push_str(&format!(
+            "jwt_secret = \"{}\"\n",
+            self.config.security.jwt_secret
+        ));
+        config.push_str(&format!(
+            "token_expiry = {}\n\n",
+            self.config.security.token_expiry
+        ));
 
         // LLM 配置
         if self.config.llm.enabled {
@@ -889,9 +921,15 @@ impl ConfigWizard {
         // LLM 配置
         if self.config.llm.enabled {
             env.push_str("UHORSE_LLM_ENABLED=true\n");
-            env.push_str(&format!("UHORSE_LLM_PROVIDER={}\n", self.config.llm.provider));
+            env.push_str(&format!(
+                "UHORSE_LLM_PROVIDER={}\n",
+                self.config.llm.provider
+            ));
             env.push_str(&format!("UHORSE_LLM_API_KEY={}\n", self.config.llm.api_key));
-            env.push_str(&format!("UHORSE_LLM_BASE_URL={}\n", self.config.llm.base_url));
+            env.push_str(&format!(
+                "UHORSE_LLM_BASE_URL={}\n",
+                self.config.llm.base_url
+            ));
             env.push_str(&format!("UHORSE_LLM_MODEL={}\n", self.config.llm.model));
         }
 
@@ -914,7 +952,8 @@ impl ConfigWizard {
         println!("     ./start.sh");
         println!();
         println!("  2️⃣  查看服务状态:");
-        println!("     curl http://{}:{}/health/live",
+        println!(
+            "     curl http://{}:{}/health/live",
             self.config.server.host, self.config.server.port
         );
         println!();

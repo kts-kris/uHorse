@@ -18,9 +18,9 @@
 //! - **Prompts**: 提示词模板
 //! - **Sessions**: 会话管理
 
-pub mod server;
 pub mod client;
 pub mod protocol;
+pub mod server;
 pub mod types;
 
 pub use protocol::*;

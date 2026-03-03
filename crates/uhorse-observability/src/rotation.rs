@@ -2,17 +2,25 @@
 //!
 //! 提供日志文件轮转和管理功能。
 
+use chrono::{DateTime, Duration, Utc};
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Utc, Duration};
 use tokio::fs;
 use tracing::{info, warn};
 
 /// 轮转策略
 #[derive(Debug, Clone, Copy)]
 pub enum RotationStrategy {
-    Size { max_size_mb: u64, max_files: usize },
-    Time { interval_hours: u64, max_files: usize },
-    Daily { max_files: usize },
+    Size {
+        max_size_mb: u64,
+        max_files: usize,
+    },
+    Time {
+        interval_hours: u64,
+        max_files: usize,
+    },
+    Daily {
+        max_files: usize,
+    },
 }
 
 impl RotationStrategy {

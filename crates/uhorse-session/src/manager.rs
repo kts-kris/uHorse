@@ -2,14 +2,14 @@
 //!
 //! 管理会话的创建、获取、更新和销毁。
 
-use uhorse_core::{
-    SessionStore, ConversationStore, Result, UHorseError,
-    Session, SessionId, ChannelType, Message, MessageContent, MessageRole,
-};
-use uhorse_storage::SqliteStore;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
+use uhorse_core::{
+    ChannelType, ConversationStore, Message, MessageContent, MessageRole, Result, Session,
+    SessionId, SessionStore, UHorseError,
+};
+use uhorse_storage::SqliteStore;
 
 /// 会话管理器
 #[derive(Debug, Clone)]
@@ -72,9 +72,17 @@ impl SessionManager {
 
     /// 获取或创建会话
     #[instrument(skip(self))]
-    pub async fn get_or_create(&self, channel: ChannelType, channel_user_id: String) -> Result<Session> {
+    pub async fn get_or_create(
+        &self,
+        channel: ChannelType,
+        channel_user_id: String,
+    ) -> Result<Session> {
         // 首先尝试从数据库获取
-        if let Some(session) = self.store.get_session_by_channel(channel, &channel_user_id).await? {
+        if let Some(session) = self
+            .store
+            .get_session_by_channel(channel, &channel_user_id)
+            .await?
+        {
             debug!("Found existing session: {}", session.id);
             return Ok(session);
         }
@@ -111,7 +119,10 @@ impl SessionManager {
         }
 
         // 从数据库获取
-        let session = self.store.get_session(id).await?
+        let session = self
+            .store
+            .get_session(id)
+            .await?
             .ok_or_else(|| UHorseError::SessionNotFound(id.clone()))?;
 
         // 更新缓存
@@ -152,9 +163,17 @@ impl SessionManager {
 
     /// 添加消息到会话历史
     #[instrument(skip(self))]
-    pub async fn add_message(&self, session_id: &SessionId, role: MessageRole, content: MessageContent) -> Result<Message> {
+    pub async fn add_message(
+        &self,
+        session_id: &SessionId,
+        role: MessageRole,
+        content: MessageContent,
+    ) -> Result<Message> {
         // 获取当前序号
-        let sequence = self.store.get_last_sequence(session_id).await?
+        let sequence = self
+            .store
+            .get_last_sequence(session_id)
+            .await?
             .map(|s| s + 1)
             .unwrap_or(0);
 

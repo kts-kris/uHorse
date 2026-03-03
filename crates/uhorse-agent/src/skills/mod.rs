@@ -16,7 +16,7 @@
 //! ```
 
 use crate::error::{AgentError, AgentResult};
-use crate::mcp::types::{McpTool, McpToolCall, McpToolResult, McpContent};
+use crate::mcp::types::{McpContent, McpTool, McpToolCall, McpToolResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -214,10 +214,7 @@ impl SkillManifestParser {
                 author = Some(extract_value(content, line));
             } else if line.to_lowercase().starts_with("## tags") {
                 let tags_str = extract_value(content, line);
-                tags = tags_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .collect();
+                tags = tags_str.split(',').map(|s| s.trim().to_string()).collect();
             } else if line.to_lowercase().starts_with("## tools") {
                 // 解析工具定义（JSON 格式）
                 // 找到当前行在整个 content 中的位置
@@ -341,10 +338,7 @@ impl SkillRegistry {
 
     /// 列出所有启用的技能
     pub fn list_enabled(&self) -> Vec<&Skill> {
-        self.skills
-            .values()
-            .filter(|s| s.is_enabled())
-            .collect()
+        self.skills.values().filter(|s| s.is_enabled()).collect()
     }
 
     /// 获取所有工具（来自所有启用的技能）
@@ -396,11 +390,7 @@ mod tests {
             rate_limit: None,
         };
 
-        let skill = Skill::new(
-            manifest,
-            config,
-            Arc::new(DummyExecutor),
-        );
+        let skill = Skill::new(manifest, config, Arc::new(DummyExecutor));
 
         registry.register(skill);
 

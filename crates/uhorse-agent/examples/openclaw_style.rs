@@ -2,11 +2,11 @@
 //!
 //! 展示 uHorse Agent 框架的 OpenClaw 四层架构使用方式。
 
-use uhorse_agent::{Gateway, GatewayConfig, Agent, AgentBuilder};
-use uhorse_agent::memory::FileMemory;
-use uhorse_llm::{OpenAIClient, LLMClient};
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
+use uhorse_agent::memory::FileMemory;
+use uhorse_agent::{Agent, AgentBuilder, Gateway, GatewayConfig};
+use uhorse_llm::{LLMClient, OpenAIClient};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
             .system_prompt(
                 "You are a helpful AI assistant for uHorse. \
                 You can answer questions and help users with various tasks. \
-                Please respond in Chinese."
+                Please respond in Chinese.",
             )
             .build()?;
 
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
             .system_prompt(
                 "You are a helpful AI assistant for uHorse. \
                 You can answer questions and help users with various tasks. \
-                Please respond in Chinese."
+                Please respond in Chinese.",
             )
             .build()?;
 
@@ -158,7 +158,10 @@ struct DemoLLMClient;
 
 #[async_trait::async_trait]
 impl LLMClient for DemoLLMClient {
-    async fn chat_completion(&self, messages: Vec<uhorse_llm::ChatMessage>) -> anyhow::Result<String> {
+    async fn chat_completion(
+        &self,
+        messages: Vec<uhorse_llm::ChatMessage>,
+    ) -> anyhow::Result<String> {
         let last_msg = messages.last().unwrap();
         let content = &last_msg.content;
 

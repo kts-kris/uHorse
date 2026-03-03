@@ -2,14 +2,12 @@
 //!
 //! 展示 uHorse Agent 框架的 OpenClaw Bindings 路由系统使用方式。
 
-use uhorse_agent::{
-    Agent, AgentBuilder,
-    AgentScope, AgentScopeConfig, AgentManager,
-    BindingsConfig, BindingsRouter, BindingBuilder,
-    SessionKey, ChannelType,
-};
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
+use uhorse_agent::{
+    Agent, AgentBuilder, AgentManager, AgentScope, AgentScopeConfig, BindingBuilder,
+    BindingsConfig, BindingsRouter, ChannelType, SessionKey,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -79,15 +77,10 @@ async fn main() -> Result<()> {
     // ============ 配置 Bindings 路由 ============
     println!("📋 Configuring Bindings Routing...\n");
 
-    let mut bindings_config = BindingsConfig::new()
-        .default_agent("main");
+    let mut bindings_config = BindingsConfig::new().default_agent("main");
 
     // Telegram 所有消息 -> Main Agent
-    bindings_config.add_binding(
-        BindingBuilder::new("main")
-            .channel("telegram")
-            .build()
-    );
+    bindings_config.add_binding(BindingBuilder::new("main").channel("telegram").build());
 
     // Slack 工作区 T123 (开发团队) -> Coder Agent
     bindings_config.add_binding(
@@ -95,7 +88,7 @@ async fn main() -> Result<()> {
             .channel("slack")
             .team_id("T123")
             .priority(10)
-            .build()
+            .build(),
     );
 
     // Slack 工作区 T456 (内容团队) -> Writer Agent
@@ -104,15 +97,11 @@ async fn main() -> Result<()> {
             .channel("slack")
             .team_id("T456")
             .priority(10)
-            .build()
+            .build(),
     );
 
     // Discord 所有消息 -> Main Agent
-    bindings_config.add_binding(
-        BindingBuilder::new("main")
-            .channel("discord")
-            .build()
-    );
+    bindings_config.add_binding(BindingBuilder::new("main").channel("discord").build());
 
     // 创建路由器
     let available_agents = vec![
@@ -134,19 +123,17 @@ async fn main() -> Result<()> {
     let test_cases = vec![
         // Telegram -> Main
         (SessionKey::new("telegram", "user123"), "main"),
-
         // Slack T123 -> Coder
         (SessionKey::with_team("slack", "dev_user", "T123"), "coder"),
-
         // Slack T456 -> Writer
-        (SessionKey::with_team("slack", "content_user", "T456"), "writer"),
-
+        (
+            SessionKey::with_team("slack", "content_user", "T456"),
+            "writer",
+        ),
         // Slack 其他 -> Main (默认)
         (SessionKey::new("slack", "other_user"), "main"),
-
         // Discord -> Main
         (SessionKey::new("discord", "user789"), "main"),
-
         // 未知 channel -> Main (默认)
         (SessionKey::new("whatsapp", "user999"), "main"),
     ];

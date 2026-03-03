@@ -2,10 +2,10 @@
 //!
 //! 保证请求的幂等性。
 
-use uhorse_core::{IdempotencyService, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uhorse_core::{IdempotencyService, Result};
 
 /// 幂等性记录
 #[derive(Debug, Clone)]
@@ -36,7 +36,11 @@ impl Default for IdempotencyCache {
 
 #[async_trait::async_trait]
 impl IdempotencyService for IdempotencyCache {
-    async fn check_or_record(&self, key: &str, ttl_seconds: u64) -> Result<Option<serde_json::Value>> {
+    async fn check_or_record(
+        &self,
+        key: &str,
+        ttl_seconds: u64,
+    ) -> Result<Option<serde_json::Value>> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -54,7 +58,12 @@ impl IdempotencyService for IdempotencyCache {
         Ok(None)
     }
 
-    async fn store_response(&self, key: &str, response: &serde_json::Value, ttl_seconds: u64) -> Result<()> {
+    async fn store_response(
+        &self,
+        key: &str,
+        response: &serde_json::Value,
+        ttl_seconds: u64,
+    ) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

@@ -12,80 +12,31 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod types;
-pub mod protocol;
 pub mod error;
+pub mod protocol;
 pub mod traits;
+pub mod types;
 
 // 重新导出常用类型
 pub use types::{
-    SessionId,
-    Session,
-    IsolationLevel,
-    ChannelType,
-    Message,
-    MessageContent,
-    MessageRole,
-    ToolId,
-    Tool,
-    ToolCall,
+    AccessToken, ChannelType, DeviceCapabilities, DeviceId, DeviceInfo, ErrorCategory, ErrorCode,
+    ExecutionContext, IsolationLevel, JobId, JobTarget, Message, MessageContent, MessageRole,
+    PermissionLevel, Schedule, ScheduledJob, Session, SessionId, Tool, ToolCall, ToolError, ToolId,
     ToolResult,
-    ToolError,
-    ExecutionContext,
-    JobId,
-    Schedule,
-    JobTarget,
-    ScheduledJob,
-    DeviceId,
-    DeviceInfo,
-    DeviceCapabilities,
-    AccessToken,
-    ErrorCode,
-    ErrorCategory,
-    PermissionLevel,
 };
 
 pub use protocol::{
-    ProtocolMessage,
-    HandshakeRequest,
-    HandshakeResponse,
-    Request,
-    Response,
-    Event,
-    ErrorDetail,
-    Ping,
-    Pong,
-    ClientCapabilities,
-    ServerCapabilities,
-    ServerFeatures,
-    AuthStatus,
-    events,
-    PROTOCOL_VERSION,
-    DEFAULT_HEARTBEAT_INTERVAL,
-    DEFAULT_HANDSHAKE_TIMEOUT,
-    DEFAULT_MAX_MESSAGE_SIZE,
+    events, AuthStatus, ClientCapabilities, ErrorDetail, Event, HandshakeRequest,
+    HandshakeResponse, Ping, Pong, ProtocolMessage, Request, Response, ServerCapabilities,
+    ServerFeatures, DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_HEARTBEAT_INTERVAL,
+    DEFAULT_MAX_MESSAGE_SIZE, PROTOCOL_VERSION,
 };
 
-pub use error::{
-    UHorseError,
-    Result,
-    ChannelError,
-    PluginError,
-    StorageError,
-};
+pub use error::{ChannelError, PluginError, Result, StorageError, UHorseError};
 
 pub use traits::{
-    Channel,
-    ToolExecutor,
-    Plugin,
-    SessionStore,
-    ConversationStore,
-    ToolRegistry,
-    DeviceManager,
-    Scheduler,
-    AuthService,
-    IdempotencyService,
-    EventBus,
+    AuthService, Channel, ConversationStore, DeviceManager, EventBus, IdempotencyService, Plugin,
+    Scheduler, SessionStore, ToolExecutor, ToolRegistry,
 };
 
 // 依赖版本检查

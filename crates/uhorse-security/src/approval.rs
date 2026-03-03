@@ -2,14 +2,14 @@
 //!
 //! 完整的审批流程系统，支持多级审批、条件审批和自动审批规则。
 
-use uhorse_core::{Result, UHorseError};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use serde::{Serialize, Deserialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
+use uhorse_core::{Result, UHorseError};
+use uuid::Uuid;
 
 /// 审批状态
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,9 +36,7 @@ pub enum ApprovalLevel {
     /// 多级审批（并行）
     Parallel { required: usize },
     /// 条件审批（根据金额/风险等级）
-    Conditional {
-        conditions: Vec<ApprovalCondition>,
-    },
+    Conditional { conditions: Vec<ApprovalCondition> },
 }
 
 /// 审批条件
@@ -139,9 +137,13 @@ impl ApprovalRequest {
     /// 添加审批决策
     pub fn add_decision(&mut self, decision: ApprovalDecision) -> Result<()> {
         // 检查是否已经审批过
-        if self.decisions.iter().any(|d| d.approver_id == decision.approver_id) {
+        if self
+            .decisions
+            .iter()
+            .any(|d| d.approver_id == decision.approver_id)
+        {
             return Err(UHorseError::InternalError(
-                "Approver has already decided".to_string()
+                "Approver has already decided".to_string(),
             ));
         }
 
@@ -261,12 +263,15 @@ impl ApprovalRuleEngine {
     }
 
     /// 检查条件是否匹配
-    fn matches_condition(&self, condition: &serde_json::Value, metadata: &serde_json::Value) -> bool {
+    fn matches_condition(
+        &self,
+        condition: &serde_json::Value,
+        metadata: &serde_json::Value,
+    ) -> bool {
         // 简化实现：检查元数据中是否包含所有条件
         if let Some(obj) = condition.as_object() {
-            obj.iter().all(|(key, value)| {
-                metadata.get(key) == Some(value)
-            })
+            obj.iter()
+                .all(|(key, value)| metadata.get(key) == Some(value))
         } else {
             false
         }
@@ -336,17 +341,22 @@ impl ApprovalManager {
             return Ok(request);
         }
 
-        let mut request = ApprovalRequest::new(action.clone(), requested_by, level, required_approvers);
+        let mut request =
+            ApprovalRequest::new(action.clone(), requested_by, level, required_approvers);
         request.metadata = metadata;
 
         // 存储请求
         let request_id = request.id.clone();
-        let approver_ids: Vec<String> = request.required_approvers
+        let approver_ids: Vec<String> = request
+            .required_approvers
             .iter()
             .map(|a| a.user_id.clone())
             .collect();
 
-        self.pending.write().await.insert(request_id.clone(), request.clone());
+        self.pending
+            .write()
+            .await
+            .insert(request_id.clone(), request.clone());
 
         // 更新用户请求映射
         let mut user_requests = self.user_requests.write().await;
@@ -357,7 +367,10 @@ impl ApprovalManager {
                 .push(request_id.clone());
         }
 
-        info!("Created approval request: {} for action: {}", request_id, action);
+        info!(
+            "Created approval request: {} for action: {}",
+            request_id, action
+        );
 
         // 启动过期任务
         let pending = Arc::clone(&self.pending);
@@ -397,12 +410,13 @@ impl ApprovalManager {
         comment: Option<String>,
     ) -> Result<ApprovalRequest> {
         let mut pending = self.pending.write().await;
-        let request = pending.get_mut(request_id)
+        let request = pending
+            .get_mut(request_id)
             .ok_or_else(|| UHorseError::InternalError("Request not found".to_string()))?;
 
         if !request.can_approve() {
             return Err(UHorseError::InternalError(
-                "Cannot approve at this stage".to_string()
+                "Cannot approve at this stage".to_string(),
             ));
         }
 
@@ -424,7 +438,10 @@ impl ApprovalManager {
         // 如果完成，移入历史
         if request.is_completed() {
             let req = pending.remove(request_id).unwrap();
-            self.history.write().await.insert(request_id.to_string(), req);
+            self.history
+                .write()
+                .await
+                .insert(request_id.to_string(), req);
 
             // 清理用户请求映射
             let mut user_requests = self.user_requests.write().await;
@@ -445,7 +462,8 @@ impl ApprovalManager {
         comment: Option<String>,
     ) -> Result<ApprovalRequest> {
         let mut pending = self.pending.write().await;
-        let request = pending.get_mut(request_id)
+        let request = pending
+            .get_mut(request_id)
             .ok_or_else(|| UHorseError::InternalError("Request not found".to_string()))?;
 
         let decision = ApprovalDecision {
@@ -465,7 +483,10 @@ impl ApprovalManager {
 
         // 拒绝后立即移入历史
         let req = pending.remove(request_id).unwrap();
-        self.history.write().await.insert(request_id.to_string(), req);
+        self.history
+            .write()
+            .await
+            .insert(request_id.to_string(), req);
 
         // 清理用户请求映射
         let mut user_requests = self.user_requests.write().await;
@@ -483,7 +504,10 @@ impl ApprovalManager {
         if let Some(mut request) = pending.get_mut(request_id) {
             request.status = ApprovalStatus::Cancelled;
             let req = pending.remove(request_id).unwrap();
-            self.history.write().await.insert(request_id.to_string(), req);
+            self.history
+                .write()
+                .await
+                .insert(request_id.to_string(), req);
             info!("Request cancelled: {}", request_id);
             Ok(true)
         } else {
@@ -513,7 +537,8 @@ impl ApprovalManager {
         let pending = self.pending.read().await;
         let history = self.history.read().await;
 
-        Ok(pending.get(request_id)
+        Ok(pending
+            .get(request_id)
             .or_else(|| history.get(request_id))
             .cloned())
     }

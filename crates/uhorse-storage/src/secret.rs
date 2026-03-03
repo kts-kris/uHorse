@@ -2,10 +2,10 @@
 //!
 //! 安全存储和管理敏感配置。
 
-use uhorse_core::Result;
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{info, warn};
+use uhorse_core::Result;
 
 /// 密钥存储
 #[derive(Debug)]
@@ -46,7 +46,8 @@ impl SecretStore {
             return Ok(());
         }
 
-        let content = tokio::fs::read_to_string(path).await
+        let content = tokio::fs::read_to_string(path)
+            .await
             .map_err(|e| uhorse_core::StorageError::ConnectionError(e.to_string()))?;
 
         // 简单的 key=value 格式
@@ -57,11 +58,16 @@ impl SecretStore {
             }
 
             if let Some((key, value)) = line.split_once('=') {
-                self.secrets.insert(key.trim().to_string(), value.trim().to_string());
+                self.secrets
+                    .insert(key.trim().to_string(), value.trim().to_string());
             }
         }
 
-        info!("Loaded {} secrets from file: {}", self.secrets.len(), path.display());
+        info!(
+            "Loaded {} secrets from file: {}",
+            self.secrets.len(),
+            path.display()
+        );
 
         Ok(())
     }

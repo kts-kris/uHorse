@@ -2,14 +2,14 @@
 //!
 //! 完整实现 Telegram Bot API 集成。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError, UHorseError,
-    ChannelType, Message, MessageRole, Session, SessionId, Result,
-};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
+use uhorse_core::{
+    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
+    SessionId, UHorseError,
+};
 
 /// Telegram 通道
 #[derive(Debug, Clone)]
@@ -40,11 +40,13 @@ impl TelegramChannel {
         let update: serde_json::Value = serde_json::from_str(update_json)?;
 
         // 提取基本信息
-        let message_obj = update.get("message")
+        let message_obj = update
+            .get("message")
             .or_else(|| update.get("edited_message"))
             .ok_or_else(|| UHorseError::InternalError("No message in update".to_string()))?;
 
-        let chat = message_obj.get("chat")
+        let chat = message_obj
+            .get("chat")
             .ok_or_else(|| UHorseError::InternalError("No chat in message".to_string()))?;
 
         // 获取 chat_id，支持数字 ID 和字符串 username
@@ -55,7 +57,9 @@ impl TelegramChannel {
             // 字符串 username（公开群组或频道）
             format!("@{}", username)
         } else {
-            return Err(UHorseError::InternalError("No valid chat identifier".to_string()));
+            return Err(UHorseError::InternalError(
+                "No valid chat identifier".to_string(),
+            ));
         };
 
         // 创建会话
@@ -64,7 +68,10 @@ impl TelegramChannel {
         // 提取消息内容
         let message_content = self.extract_content_raw(message_obj)?;
 
-        debug!("Processed Telegram message: chat_id={}, content={:?}", chat_id, message_content);
+        debug!(
+            "Processed Telegram message: chat_id={}, content={:?}",
+            chat_id, message_content
+        );
 
         let message = Message::new(session.id.clone(), MessageRole::User, message_content, 0);
 
@@ -81,11 +88,13 @@ impl TelegramChannel {
         // 图片消息
         if let Some(photo_array) = message_obj.get("photo").and_then(|v| v.as_array()) {
             if let Some(largest) = photo_array.last() {
-                let url = largest.get("file_id")
+                let url = largest
+                    .get("file_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let caption = message_obj.get("caption")
+                let caption = message_obj
+                    .get("caption")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 return Ok(MessageContent::Image { url, caption });
@@ -94,11 +103,13 @@ impl TelegramChannel {
 
         // 音频消息
         if let Some(audio) = message_obj.get("audio") {
-            let url = audio.get("file_id")
+            let url = audio
+                .get("file_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let duration = audio.get("duration")
+            let duration = audio
+                .get("duration")
                 .and_then(|v| v.as_i64())
                 .map(|d| d as u32);
             return Ok(MessageContent::Audio { url, duration });
@@ -109,7 +120,11 @@ impl TelegramChannel {
     }
 
     /// 发送消息到 Telegram API
-    async fn send_to_api(&self, chat_id: &str, payload: &serde_json::Value) -> Result<(), ChannelError> {
+    async fn send_to_api(
+        &self,
+        chat_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), ChannelError> {
         let client = reqwest::Client::new();
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
 
@@ -122,17 +137,17 @@ impl TelegramChannel {
 
         let response = client
             .post(&url)
-            .json(&RequestBody {
-                chat_id,
-                payload,
-            })
+            .json(&RequestBody { chat_id, payload })
             .send()
             .await
             .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!("Telegram API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "Telegram API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -147,7 +162,12 @@ impl TelegramChannel {
     }
 
     /// 发送图片
-    async fn send_photo(&self, chat_id: &str, url: &str, caption: Option<&str>) -> Result<(), ChannelError> {
+    async fn send_photo(
+        &self,
+        chat_id: &str,
+        url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), ChannelError> {
         let mut payload = serde_json::json!({
             "photo": url
         });
@@ -160,7 +180,12 @@ impl TelegramChannel {
     }
 
     /// 发送音频
-    async fn send_audio(&self, chat_id: &str, url: &str, duration: Option<u32>) -> Result<(), ChannelError> {
+    async fn send_audio(
+        &self,
+        chat_id: &str,
+        url: &str,
+        duration: Option<u32>,
+    ) -> Result<(), ChannelError> {
         let mut payload = serde_json::json!({
             "audio": url
         });
@@ -180,7 +205,11 @@ impl Channel for TelegramChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending Telegram message to {}: {:?}", user_id, message);
 
         match message {
@@ -194,7 +223,8 @@ impl Channel for TelegramChannel {
                 self.send_audio(user_id, url, *duration).await?;
             }
             MessageContent::Structured(data) => {
-                let json = serde_json::to_string(data).unwrap_or_else(|_| "Invalid JSON".to_string());
+                let json =
+                    serde_json::to_string(data).unwrap_or_else(|_| "Invalid JSON".to_string());
                 self.send_text(user_id, &json).await?;
             }
         }
@@ -203,7 +233,11 @@ impl Channel for TelegramChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], _signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        _signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         debug!("Verifying Telegram webhook");
         Ok(true)
     }
@@ -216,16 +250,19 @@ impl Channel for TelegramChannel {
         let client = reqwest::Client::new();
         let url = format!("https://api.telegram.org/bot{}/getMe", self.bot_token);
 
-        let response = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| UHorseError::ChannelError(ChannelError::ConfigError(format!("Failed to connect: {}", e))))?;
+        let response = client.get(&url).send().await.map_err(|e| {
+            UHorseError::ChannelError(ChannelError::ConfigError(format!(
+                "Failed to connect: {}",
+                e
+            )))
+        })?;
 
         if response.status().is_success() {
             info!("Telegram API connection successful");
         } else {
-            return Err(UHorseError::ChannelError(ChannelError::ConfigError("Telegram API auth failed".to_string())));
+            return Err(UHorseError::ChannelError(ChannelError::ConfigError(
+                "Telegram API auth failed".to_string(),
+            )));
         }
 
         *self.running.write().await = true;

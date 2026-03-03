@@ -3,12 +3,12 @@
 //! 展示 uHorse Agent 框架的 OpenClaw 多 Agent 架构使用方式。
 //! 每个 Agent 有独立的 workspace、SOUL.md、MEMORY.md。
 
-use uhorse_agent::{Gateway, GatewayConfig, Agent, AgentBuilder};
-use uhorse_agent::agent_scope::{AgentScope, AgentScopeConfig, AgentManager};
-use uhorse_agent::memory::FileMemory;
-use uhorse_llm::{OpenAIClient, LLMClient};
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
+use uhorse_agent::agent_scope::{AgentManager, AgentScope, AgentScopeConfig};
+use uhorse_agent::memory::FileMemory;
+use uhorse_agent::{Agent, AgentBuilder, Gateway, GatewayConfig};
+use uhorse_llm::{LLMClient, OpenAIClient};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         .system_prompt(
             "You are a helpful AI assistant for uHorse. \
             You can answer questions and help users with various tasks. \
-            Please respond in Chinese."
+            Please respond in Chinese.",
         )
         .set_default(true)
         .build()?;
@@ -82,8 +82,9 @@ async fn main() -> Result<()> {
          Your responses are:\n\
          - Technical and precise\n\
          - Include code examples when relevant\n\
-         - Focus on correctness and performance"
-    ).await?;
+         - Focus on correctness and performance",
+    )
+    .await?;
 
     agent_manager.register_scope(coder_scope.clone());
 
@@ -95,7 +96,7 @@ async fn main() -> Result<()> {
         .system_prompt(
             "You are an expert programmer. \
             Help users with code, architecture, and technical questions. \
-            Please respond in Chinese."
+            Please respond in Chinese.",
         )
         .build()?;
 
@@ -121,8 +122,9 @@ async fn main() -> Result<()> {
          Your responses are:\n\
          - Engaging and well-structured\n\
          - Clear and concise\n\
-         - Tailored to the target audience"
-    ).await?;
+         - Tailored to the target audience",
+    )
+    .await?;
 
     agent_manager.register_scope(writer_scope.clone());
 
@@ -134,7 +136,7 @@ async fn main() -> Result<()> {
         .system_prompt(
             "You are a creative writer. \
             Help users with writing, content creation, and documentation. \
-            Please respond in Chinese."
+            Please respond in Chinese.",
         )
         .build()?;
 
@@ -147,7 +149,14 @@ async fn main() -> Result<()> {
 
     // 显示每个 Agent 的 workspace 结构
     for scope in agent_manager.list_agents() {
-        println!("📂 {} Workspace:", scope.config().display_name.as_ref().unwrap_or(&scope.config().agent_id));
+        println!(
+            "📂 {} Workspace:",
+            scope
+                .config()
+                .display_name
+                .as_ref()
+                .unwrap_or(&scope.config().agent_id)
+        );
         println!("   Path: {}", scope.workspace_dir().display());
         println!("   Files:");
 
@@ -205,7 +214,10 @@ struct DemoLLMClient;
 
 #[async_trait::async_trait]
 impl LLMClient for DemoLLMClient {
-    async fn chat_completion(&self, messages: Vec<uhorse_llm::ChatMessage>) -> anyhow::Result<String> {
+    async fn chat_completion(
+        &self,
+        messages: Vec<uhorse_llm::ChatMessage>,
+    ) -> anyhow::Result<String> {
         let last_msg = messages.last().unwrap();
         let content = &last_msg.content;
 

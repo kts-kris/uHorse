@@ -4,10 +4,10 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tokio::signal;
+use tokio::sync::RwLock;
 use tokio::time::timeout;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// 关闭信号
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,7 +158,9 @@ impl GracefulShutdown {
         match timeout(self.drain_timeout, async {
             // 在实际实现中，这里应该等待所有活跃请求完成
             tokio::time::sleep(Duration::from_millis(100)).await;
-        }).await {
+        })
+        .await
+        {
             Ok(_) => {
                 info!("All connections drained successfully");
             }

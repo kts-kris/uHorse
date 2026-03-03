@@ -39,12 +39,12 @@
 //! | memory/YYYY-MM-DD.md | 每个会话 | Agent |
 
 use crate::error::{AgentError, AgentResult};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uhorse_core::SessionId;
-use chrono::{DateTime, Utc};
 
 /// Agent 作用域配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,22 +124,29 @@ impl AgentScope {
     /// 创建必要的目录和初始文件。
     pub async fn init_workspace(&self) -> AgentResult<()> {
         // 创建 workspace 目录
-        tokio::fs::create_dir_all(&self.workspace_dir).await
+        tokio::fs::create_dir_all(&self.workspace_dir)
+            .await
             .map_err(|e| AgentError::Memory(format!("Failed to create workspace: {}", e)))?;
 
         // 创建 agents 目录
-        tokio::fs::create_dir_all(&self.agents_dir).await
+        tokio::fs::create_dir_all(&self.agents_dir)
+            .await
             .map_err(|e| AgentError::Memory(format!("Failed to create agents dir: {}", e)))?;
 
         // 创建核心文件
         self.init_file("SOUL.md", "# Soul / Personality\n\nThis file defines the agent's personality and behavior patterns.\n").await?;
         self.init_file("MEMORY.md", "# Long-term Memory\n\nThis file stores long-term memories and important information.\n").await?;
         self.init_file("AGENTS.md", "# Agent Instructions\n\nThis file contains operating instructions and system rules. Only humans should modify this file.\n").await?;
-        self.init_file("USER.md", "# User Preferences\n\nThis file stores user preferences and settings.\n").await?;
+        self.init_file(
+            "USER.md",
+            "# User Preferences\n\nThis file stores user preferences and settings.\n",
+        )
+        .await?;
 
         // 创建 memory 目录
         let memory_dir = self.workspace_dir.join("memory");
-        tokio::fs::create_dir_all(&memory_dir).await
+        tokio::fs::create_dir_all(&memory_dir)
+            .await
             .map_err(|e| AgentError::Memory(format!("Failed to create memory dir: {}", e)))?;
 
         Ok(())
@@ -164,7 +171,9 @@ impl AgentScope {
     /// 获取今日 memory 文件
     pub fn today_memory_file(&self) -> PathBuf {
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        self.workspace_dir.join("memory").join(format!("{}.md", today))
+        self.workspace_dir
+            .join("memory")
+            .join(format!("{}.md", today))
     }
 
     /// 读取文件内容（按优先级）
@@ -198,7 +207,10 @@ impl AgentScope {
         let today_file = self.today_memory_file();
         if today_file.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&today_file).await {
-                files.insert(format!("memory/{}.md", Utc::now().format("%Y-%m-%d")), content);
+                files.insert(
+                    format!("memory/{}.md", Utc::now().format("%Y-%m-%d")),
+                    content,
+                );
             }
         }
 
@@ -219,7 +231,8 @@ impl AgentScope {
 
         // 确保目录存在
         if let Some(parent) = today_file.parent() {
-            tokio::fs::create_dir_all(parent).await
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| AgentError::Memory(format!("Failed to create memory dir: {}", e)))?;
         }
 
@@ -238,7 +251,8 @@ impl AgentScope {
         state: &SessionState,
     ) -> AgentResult<()> {
         let session_dir = self.session_dir(session_key);
-        tokio::fs::create_dir_all(&session_dir).await
+        tokio::fs::create_dir_all(&session_dir)
+            .await
             .map_err(|e| AgentError::Memory(format!("Failed to create session dir: {}", e)))?;
 
         let state_file = session_dir.join("state.jsonl");
@@ -347,7 +361,9 @@ impl AgentManager {
 
     /// 获取默认 Agent 作用域
     pub fn get_default_scope(&self) -> Option<&Arc<AgentScope>> {
-        self.scopes.values().find(|s: &&Arc<AgentScope>| s.config().is_default)
+        self.scopes
+            .values()
+            .find(|s: &&Arc<AgentScope>| s.config().is_default)
     }
 
     /// 列出所有 Agent

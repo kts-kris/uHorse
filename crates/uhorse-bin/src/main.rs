@@ -2,24 +2,24 @@
 //!
 //! 多渠道 AI 网关框架主程序。
 
-use clap::{Parser, Subcommand};
-use tokio::signal;
-use tracing::{info, error, warn};
 use axum::{
-    Router,
-    response::Json,
-    routing::{get, post},
     extract::State,
     http::StatusCode,
+    response::Json,
+    routing::{get, post},
+    Router,
 };
+use clap::{Parser, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
-use uhorse_llm::{OpenAIClient, ChatMessage, LLMClient};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::signal;
 use tokio::sync::RwLock;
+use tracing::{error, info, warn};
 use uhorse_core::Channel;
+use uhorse_llm::{ChatMessage, LLMClient, OpenAIClient};
 
 /// uHorse AI Gateway
 #[derive(Parser, Debug)]
@@ -80,7 +80,10 @@ async fn main() -> anyhow::Result<()> {
     // 初始化日志
     init_logging(&args.log_level)?;
 
-    info!("🦀 uHorse AI Gateway v{} starting...", env!("CARGO_PKG_VERSION"));
+    info!(
+        "🦀 uHorse AI Gateway v{} starting...",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // 加载配置
     info!("📄 Loading config from: {}", args.config);
@@ -107,7 +110,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/health/ready", get(health_ready))
         .route("/metrics", get(metrics))
         .route("/api/v1/channels/telegram/webhook", post(telegram_webhook))
-        .route("/api/v1/channels/telegram/webhook", get(telegram_webhook_verify))
+        .route(
+            "/api/v1/channels/telegram/webhook",
+            get(telegram_webhook_verify),
+        )
         .with_state(state.clone());
 
     // 启动服务器
@@ -118,12 +124,22 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(socket_addr).await?;
 
     info!("🚀 Server ready to accept connections");
-    info!("📱 Telegram channel: {}", if file_config.channels.enabled.contains(&"telegram".to_string()) { "enabled" } else { "disabled" });
+    info!(
+        "📱 Telegram channel: {}",
+        if file_config
+            .channels
+            .enabled
+            .contains(&"telegram".to_string())
+        {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     info!("💡 Tip: Send a message to your bot to test");
 
     // 启动服务器并等待关闭信号
-    let server_handle = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal());
+    let server_handle = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
 
     // 等待服务器完成
     if let Err(e) = server_handle.await {
@@ -192,7 +208,8 @@ async fn init_llm_client(config: &Config) -> anyhow::Result<Option<OpenAIClient>
         model: config.llm.model.clone(),
         temperature: config.llm.temperature,
         max_tokens: config.llm.max_tokens,
-        system_prompt: "You are a helpful AI assistant for uHorse, a multi-channel AI gateway.".to_string(),
+        system_prompt: "You are a helpful AI assistant for uHorse, a multi-channel AI gateway."
+            .to_string(),
     };
 
     match OpenAIClient::from_uhorse_config(full_llm_config) {
@@ -209,7 +226,9 @@ async fn init_llm_client(config: &Config) -> anyhow::Result<Option<OpenAIClient>
 }
 
 /// 启动 Telegram polling
-async fn start_telegram_polling(state: Arc<AppState>) -> anyhow::Result<Option<tokio::task::JoinHandle<()>>> {
+async fn start_telegram_polling(
+    state: Arc<AppState>,
+) -> anyhow::Result<Option<tokio::task::JoinHandle<()>>> {
     let channel_guard = state.telegram_channel.read().await;
 
     if channel_guard.is_none() {
@@ -264,11 +283,17 @@ async fn poll_telegram_updates(
     use reqwest::Client;
 
     let client = Client::new();
-    let url = format!("https://api.telegram.org/bot{}/getUpdates", channel.bot_token());
+    let url = format!(
+        "https://api.telegram.org/bot{}/getUpdates",
+        channel.bot_token()
+    );
 
     let response = client
         .get(&url)
-        .query(&[("offset", offset.to_string()), ("timeout", "10".to_string())])
+        .query(&[
+            ("offset", offset.to_string()),
+            ("timeout", "10".to_string()),
+        ])
         .send()
         .await?;
 
@@ -304,7 +329,10 @@ async fn handle_telegram_update(
     let update_json = serde_json::to_string(update)?;
 
     if let Some((session, message)) = channel.handle_update_raw(&update_json).await? {
-        info!("📨 Received message from {}: {:?}", session.channel_user_id, message.content);
+        info!(
+            "📨 Received message from {}: {:?}",
+            session.channel_user_id, message.content
+        );
 
         // 处理消息并发送回复
         match &message.content {
@@ -324,7 +352,13 @@ async fn handle_telegram_update(
                     format!("收到你的消息: {}", text)
                 };
 
-                if let Err(e) = channel.send_message(&session.channel_user_id, &uhorse_core::MessageContent::Text(reply.clone())).await {
+                if let Err(e) = channel
+                    .send_message(
+                        &session.channel_user_id,
+                        &uhorse_core::MessageContent::Text(reply.clone()),
+                    )
+                    .await
+                {
                     error!("Failed to send reply: {}", e);
                 } else {
                     info!("✓ Reply sent: {}", reply);
@@ -332,7 +366,13 @@ async fn handle_telegram_update(
             }
             _ => {
                 let reply = "收到你的消息！";
-                if let Err(e) = channel.send_message(&session.channel_user_id, &uhorse_core::MessageContent::Text(reply.to_string())).await {
+                if let Err(e) = channel
+                    .send_message(
+                        &session.channel_user_id,
+                        &uhorse_core::MessageContent::Text(reply.to_string()),
+                    )
+                    .await
+                {
                     error!("Failed to send reply: {}", e);
                 } else {
                     info!("✓ Reply sent successfully");
@@ -366,11 +406,19 @@ async fn telegram_webhook(
     if let Some(channel) = channel_guard.as_ref() {
         let llm_opt = llm_guard.as_ref();
         // 处理 webhook payload
-        if let Err(e) = handle_telegram_update(channel, &serde_json::from_str(&payload).unwrap_or(Value::Null), llm_opt).await {
+        if let Err(e) = handle_telegram_update(
+            channel,
+            &serde_json::from_str(&payload).unwrap_or(Value::Null),
+            llm_opt,
+        )
+        .await
+        {
             error!("Webhook error: {}", e);
             drop(llm_guard);
             drop(channel_guard);
-            return Ok(Json(serde_json::json!({"status": "error", "message": e.to_string()})));
+            return Ok(Json(
+                serde_json::json!({"status": "error", "message": e.to_string()}),
+            ));
         }
     }
     drop(llm_guard);
@@ -397,8 +445,7 @@ fn run_wizard(dir: String) -> anyhow::Result<()> {
 fn init_logging(level: &str) -> anyhow::Result<()> {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -435,9 +482,15 @@ struct ServerConfig {
     max_connections: usize,
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 8080 }
-fn default_max_connections() -> usize { 1000 }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    8080
+}
+fn default_max_connections() -> usize {
+    1000
+}
 
 #[derive(Debug, serde::Deserialize, Default)]
 struct ChannelsConfig {
@@ -458,7 +511,9 @@ struct DatabaseConfig {
     path: String,
 }
 
-fn default_db_path() -> String { "./data/uhorse.db".to_string() }
+fn default_db_path() -> String {
+    "./data/uhorse.db".to_string()
+}
 
 #[derive(Debug, serde::Deserialize, Default)]
 struct SecurityConfig {
@@ -468,7 +523,9 @@ struct SecurityConfig {
     token_expiry: u64,
 }
 
-fn default_token_expiry() -> u64 { 86400 }
+fn default_token_expiry() -> u64 {
+    86400
+}
 
 #[derive(Debug, serde::Deserialize, Default)]
 struct LLMConfig {
@@ -488,11 +545,21 @@ struct LLMConfig {
     max_tokens: usize,
 }
 
-fn default_llm_provider() -> String { "openai".to_string() }
-fn default_llm_base_url() -> String { "https://api.openai.com/v1".to_string() }
-fn default_llm_model() -> String { "gpt-3.5-turbo".to_string() }
-fn default_llm_temperature() -> f32 { 0.7 }
-fn default_llm_max_tokens() -> usize { 2000 }
+fn default_llm_provider() -> String {
+    "openai".to_string()
+}
+fn default_llm_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+fn default_llm_model() -> String {
+    "gpt-3.5-turbo".to_string()
+}
+fn default_llm_temperature() -> f32 {
+    0.7
+}
+fn default_llm_max_tokens() -> usize {
+    2000
+}
 
 /// 健康检查响应
 #[derive(Serialize)]

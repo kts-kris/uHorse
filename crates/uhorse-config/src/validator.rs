@@ -119,7 +119,10 @@ impl ConfigValidator for DatabaseValidator {
         let db_path = Path::new(&config.database.path);
         if let Some(parent) = db_path.parent() {
             if !parent.as_os_str().is_empty() && !parent.exists() {
-                errors.push(format!("Database parent directory does not exist: {:?}", parent));
+                errors.push(format!(
+                    "Database parent directory does not exist: {:?}",
+                    parent
+                ));
             }
         }
 
@@ -303,10 +306,7 @@ impl Default for CompositeValidator {
 
 impl ConfigValidator for CompositeValidator {
     fn validate(&self, config: &UHorseConfig) -> ValidationResult {
-        let results: Vec<_> = self.validators
-            .iter()
-            .map(|v| v.validate(config))
-            .collect();
+        let results: Vec<_> = self.validators.iter().map(|v| v.validate(config)).collect();
 
         ValidationResult::merge(results)
     }

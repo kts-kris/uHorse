@@ -122,7 +122,13 @@ pub struct LLMModel {
 
 impl LLMModel {
     /// 创建新模型
-    pub fn new(id: String, name: String, provider: LLMProvider, context_length: usize, supports_streaming: bool) -> Self {
+    pub fn new(
+        id: String,
+        name: String,
+        provider: LLMProvider,
+        context_length: usize,
+        supports_streaming: bool,
+    ) -> Self {
         Self {
             id,
             name,

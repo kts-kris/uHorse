@@ -2,7 +2,7 @@
 //!
 //! 定义系统所有错误类型。
 
-use crate::types::{SessionId, ToolId, DeviceId, ErrorCode, JobId};
+use crate::types::{DeviceId, ErrorCode, JobId, SessionId, ToolId};
 use thiserror::Error;
 
 /// uHorse 统一错误类型
@@ -177,7 +177,6 @@ impl ChannelError {
     }
 }
 
-
 /// 插件错误
 #[derive(Error, Debug)]
 pub enum PluginError {
@@ -250,4 +249,3 @@ impl StorageError {
 
 /// Result 类型别名
 pub type Result<T, E = UHorseError> = std::result::Result<T, E>;
-

@@ -5,5 +5,5 @@
 pub mod client;
 pub mod config;
 
-pub use client::{LLMClient, OpenAIClient, ChatMessage};
-pub use config::{LLMConfig, LLMProvider, LLMModel};
+pub use client::{ChatMessage, LLMClient, OpenAIClient};
+pub use config::{LLMConfig, LLMModel, LLMProvider};

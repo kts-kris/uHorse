@@ -2,9 +2,9 @@
 //!
 //! 定义会话之间的隔离策略。
 
-use uhorse_core::{SessionId, IsolationLevel, Session};
 use std::collections::{HashMap, HashSet};
 use tracing::debug;
+use uhorse_core::{IsolationLevel, Session, SessionId};
 
 /// 隔离策略
 #[derive(Debug, Clone)]

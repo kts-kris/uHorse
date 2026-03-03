@@ -2,7 +2,7 @@
 //!
 //! 配置分布式追踪和结构化日志。
 
-use super::telemetry::{OtelConfig, init_observability};
+use super::telemetry::{init_observability, OtelConfig};
 
 /// 初始化 tracing（简化接口）
 pub fn init_tracing(service_name: &str) -> anyhow::Result<()> {

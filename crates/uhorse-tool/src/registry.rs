@@ -2,10 +2,10 @@
 //!
 //! 管理工具的注册和调用。
 
-use uhorse_core::{ToolRegistry, ToolExecutor, ToolId, ExecutionContext, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uhorse_core::{ExecutionContext, Result, ToolExecutor, ToolId, ToolRegistry};
 
 /// 工具注册表实现
 #[derive(Debug)]
@@ -50,9 +50,15 @@ impl ToolRegistry for ToolRegistryImpl {
         Ok(Vec::new())
     }
 
-    async fn call_tool(&self, id: &ToolId, params: serde_json::Value, context: &ExecutionContext) -> Result<serde_json::Value> {
+    async fn call_tool(
+        &self,
+        id: &ToolId,
+        params: serde_json::Value,
+        context: &ExecutionContext,
+    ) -> Result<serde_json::Value> {
         let tools = self.tools.read().await;
-        let tool = tools.get(id)
+        let tool = tools
+            .get(id)
             .ok_or_else(|| uhorse_core::UHorseError::ToolNotFound(id.clone()))?;
 
         tool.execute(params, context).await

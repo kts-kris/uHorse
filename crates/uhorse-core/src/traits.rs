@@ -2,11 +2,10 @@
 //!
 //! 定义可扩展的接口，包括通道、工具执行器、插件等。
 
+use crate::error::{ChannelError, PluginError, Result, UHorseError};
 use crate::types::{
-    ChannelType, MessageContent, SessionId, ToolId, DeviceId, ExecutionContext,
-    PermissionLevel,
+    ChannelType, DeviceId, ExecutionContext, MessageContent, PermissionLevel, SessionId, ToolId,
 };
-use crate::error::{UHorseError, Result, ChannelError, PluginError};
 use async_trait::async_trait;
 
 // ============== 通道 Trait ==============
@@ -76,7 +75,9 @@ pub trait ToolExecutor: Send + Sync + std::fmt::Debug {
         if self.permission_level() > PermissionLevel::Public {
             // 需要认证
             if context.user_id.is_none() && context.device_id.is_none() {
-                return Err(UHorseError::AuthFailed("Authentication required".to_string()));
+                return Err(UHorseError::AuthFailed(
+                    "Authentication required".to_string(),
+                ));
             }
         }
         Ok(())
@@ -145,7 +146,11 @@ pub trait SessionStore: Send + Sync + std::fmt::Debug {
     async fn delete_session(&self, id: &SessionId) -> Result<()>;
 
     /// 列出所有会话
-    async fn list_sessions(&self, limit: usize, offset: usize) -> Result<Vec<crate::types::Session>>;
+    async fn list_sessions(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::types::Session>>;
 }
 
 // ============== 对话历史 Trait ==============
@@ -239,7 +244,8 @@ pub trait Scheduler: Send + Sync + std::fmt::Debug {
     async fn cancel_job(&mut self, id: &crate::types::JobId) -> Result<()>;
 
     /// 获取任务
-    async fn get_job(&self, id: &crate::types::JobId) -> Result<Option<crate::types::ScheduledJob>>;
+    async fn get_job(&self, id: &crate::types::JobId)
+        -> Result<Option<crate::types::ScheduledJob>>;
 
     /// 列出任务
     async fn list_jobs(&self) -> Result<Vec<crate::types::ScheduledJob>>;
@@ -291,7 +297,12 @@ pub trait IdempotencyService: Send + Sync + std::fmt::Debug {
     ) -> Result<Option<serde_json::Value>>;
 
     /// 存储响应
-    async fn store_response(&self, key: &str, response: &serde_json::Value, ttl_seconds: u64) -> Result<()>;
+    async fn store_response(
+        &self,
+        key: &str,
+        response: &serde_json::Value,
+        ttl_seconds: u64,
+    ) -> Result<()>;
 
     /// 清理过期记录
     async fn cleanup_expired(&self) -> Result<usize>;

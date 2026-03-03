@@ -2,21 +2,20 @@
 //!
 //! 实现 WebSocket 协议处理逻辑。
 
-use uhorse_core::{
-    ProtocolMessage, HandshakeRequest, HandshakeResponse,
-    Event, ErrorDetail, Ping, Pong, ErrorCode,
-    SessionId, Result, UHorseError,
-};
 use axum::{
     extract::{
-        ws::{WebSocket, Message as AxumMessage},
+        ws::{Message as AxumMessage, WebSocket},
         State, WebSocketUpgrade,
     },
     response::IntoResponse,
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error, instrument};
+use tracing::{debug, error, info, instrument, warn};
+use uhorse_core::{
+    ErrorCode, ErrorDetail, Event, HandshakeRequest, HandshakeResponse, Ping, Pong,
+    ProtocolMessage, Result, SessionId, UHorseError,
+};
 
 /// WebSocket 处理器状态
 #[derive(Debug, Clone)]
@@ -111,9 +110,7 @@ impl WebSocketHandler {
             .map_err(|e| UHorseError::InvalidMessage(format!("Invalid JSON: {}", e)))?;
 
         match msg {
-            ProtocolMessage::Handshake(req) => {
-                Self::handle_handshake(req).await
-            }
+            ProtocolMessage::Handshake(req) => Self::handle_handshake(req).await,
             ProtocolMessage::Ping(ping) => {
                 let pong = Pong::new(ping.timestamp);
                 let response = ProtocolMessage::Pong(pong);
@@ -161,7 +158,9 @@ impl WebSocketHandler {
         let response = uhorse_core::Response::err("error", error_detail);
         let msg = ProtocolMessage::Response(response);
 
-        serde_json::to_string(&msg).unwrap_or_else(|_| r#"{"type":"response","data":{"error":"Internal error"}}"#.to_string())
+        serde_json::to_string(&msg).unwrap_or_else(|_| {
+            r#"{"type":"response","data":{"error":"Internal error"}}"#.to_string()
+        })
     }
 }
 

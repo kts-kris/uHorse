@@ -34,19 +34,10 @@ pub trait MemoryStore: Send + Sync {
     async fn get_context(&self, session_id: &SessionId) -> AgentResult<String>;
 
     /// 存储键值对
-    async fn store_kv(
-        &self,
-        session_id: &SessionId,
-        key: &str,
-        value: &str,
-    ) -> AgentResult<()>;
+    async fn store_kv(&self, session_id: &SessionId, key: &str, value: &str) -> AgentResult<()>;
 
     /// 获取键值对
-    async fn get_kv(
-        &self,
-        session_id: &SessionId,
-        key: &str,
-    ) -> AgentResult<Option<String>>;
+    async fn get_kv(&self, session_id: &SessionId, key: &str) -> AgentResult<Option<String>>;
 }
 
 /// 文件系统记忆存储
@@ -65,7 +56,9 @@ impl FileMemory {
 
     /// 获取会话目录
     fn session_dir(&self, session_id: &SessionId) -> PathBuf {
-        self.workspace_dir.join("sessions").join(session_id.as_str())
+        self.workspace_dir
+            .join("sessions")
+            .join(session_id.as_str())
     }
 
     /// 初始化工作空间
@@ -166,7 +159,9 @@ impl MemoryStore for FileMemory {
         // 读取会话历史
         let history_path = session_dir.join("history.md");
         let session_history = if history_path.exists() {
-            tokio::fs::read_to_string(&history_path).await.unwrap_or_default()
+            tokio::fs::read_to_string(&history_path)
+                .await
+                .unwrap_or_default()
         } else {
             String::new()
         };
@@ -183,12 +178,7 @@ impl MemoryStore for FileMemory {
     }
 
     /// 存储键值对
-    async fn store_kv(
-        &self,
-        session_id: &SessionId,
-        key: &str,
-        value: &str,
-    ) -> AgentResult<()> {
+    async fn store_kv(&self, session_id: &SessionId, key: &str, value: &str) -> AgentResult<()> {
         let session_dir = self.session_dir(session_id);
         tokio::fs::create_dir_all(&session_dir).await?;
 
@@ -213,11 +203,7 @@ impl MemoryStore for FileMemory {
     }
 
     /// 获取键值对
-    async fn get_kv(
-        &self,
-        session_id: &SessionId,
-        key: &str,
-    ) -> AgentResult<Option<String>> {
+    async fn get_kv(&self, session_id: &SessionId, key: &str) -> AgentResult<Option<String>> {
         let session_dir = self.session_dir(session_id);
         let kv_path = session_dir.join("kv.json");
 

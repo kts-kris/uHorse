@@ -30,10 +30,8 @@ impl ConfigValue {
         match self {
             ConfigValue::Json(v) => Ok(v.clone()),
             ConfigValue::Toml(s) => {
-                let toml_value: toml::Value = toml::from_str(s)
-                    .context("Failed to parse TOML")?;
-                serde_json::to_value(toml_value)
-                    .context("Failed to convert TOML to JSON")
+                let toml_value: toml::Value = toml::from_str(s).context("Failed to parse TOML")?;
+                serde_json::to_value(toml_value).context("Failed to convert TOML to JSON")
             }
         }
     }
@@ -66,15 +64,13 @@ impl ConfigSource for FileSource {
         let content = std::fs::read_to_string(&self.path)
             .with_context(|| format!("Failed to read config file: {:?}", self.path))?;
 
-        let ext = self.path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match ext {
             "toml" => Ok(ConfigValue::Toml(content)),
             "json" => {
-                let value: Value = serde_json::from_str(&content)
-                    .context("Failed to parse JSON")?;
+                let value: Value =
+                    serde_json::from_str(&content).context("Failed to parse JSON")?;
                 Ok(ConfigValue::Json(value))
             }
             _ => Ok(ConfigValue::Toml(content)), // 默认 TOML
@@ -133,8 +129,8 @@ impl ConfigSource for EnvSource {
 
         for (key, value) in std::env::vars() {
             if let Some(path) = self.env_to_path(&key) {
-                let json_value = serde_json::to_value(value)
-                    .context("Failed to convert env value to JSON")?;
+                let json_value =
+                    serde_json::to_value(value).context("Failed to convert env value to JSON")?;
                 map = insert_nested(map, &path, json_value);
             }
         }
@@ -148,12 +144,17 @@ impl ConfigSource for EnvSource {
 }
 
 /// 在嵌套 Map 中插入值
-fn insert_nested(mut map: serde_json::Map<String, Value>, path: &[String], value: Value) -> serde_json::Map<String, Value> {
+fn insert_nested(
+    mut map: serde_json::Map<String, Value>,
+    path: &[String],
+    value: Value,
+) -> serde_json::Map<String, Value> {
     if path.len() == 1 {
         map.insert(path[0].clone(), value);
         map
     } else {
-        let nested = map.remove(&path[0])
+        let nested = map
+            .remove(&path[0])
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
 
@@ -196,8 +197,8 @@ impl ConfigSource for MemorySource {
 
         for (key, value) in &self.data {
             let path: Vec<String> = key.split('.').map(|s| s.to_string()).collect();
-            let json_value = serde_json::to_value(value)
-                .context("Failed to convert memory value to JSON")?;
+            let json_value =
+                serde_json::to_value(value).context("Failed to convert memory value to JSON")?;
             map = insert_nested(map, &path, json_value);
         }
 
@@ -220,10 +221,7 @@ mod tests {
             source.env_to_path("OPENCLAW_SERVER_HOST"),
             Some(vec!["server".to_string(), "host".to_string()])
         );
-        assert_eq!(
-            source.env_to_path("OTHER_VAR"),
-            None
-        );
+        assert_eq!(source.env_to_path("OTHER_VAR"), None);
     }
 
     #[test]

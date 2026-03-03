@@ -2,13 +2,12 @@
 //!
 //! 完整实现飞书机器人 API 集成。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError, UHorseError, Result,
-    ChannelType, Message,
-};
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
+use uhorse_core::{
+    Channel, ChannelError, ChannelType, Message, MessageContent, Result, UHorseError,
+};
 
 /// 飞书通道
 #[derive(Debug)]
@@ -55,7 +54,10 @@ impl FeishuChannel {
     }
 
     /// 处理飞书事件回调 (原始 JSON)
-    pub async fn handle_event_raw(&self, event_json: &str) -> Result<Option<(String, Message)>, ChannelError> {
+    pub async fn handle_event_raw(
+        &self,
+        event_json: &str,
+    ) -> Result<Option<(String, Message)>, ChannelError> {
         debug!("Handling Feishu event (raw)");
 
         // 解析 JSON
@@ -72,7 +74,8 @@ impl FeishuChannel {
         }
 
         // 提取基本信息
-        let event_type = event.get("type")
+        let event_type = event
+            .get("type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No type in event".to_string()))?;
 
@@ -81,15 +84,18 @@ impl FeishuChannel {
             return Ok(None);
         }
 
-        let event_data = event.get("event")
+        let event_data = event
+            .get("event")
             .ok_or_else(|| ChannelError::ConfigError("No event data".to_string()))?;
 
         // 获取会话信息
-        let chat_id = event_data.get("chat_id")
+        let chat_id = event_data
+            .get("chat_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No chat_id in event".to_string()))?;
 
-        let sender_id = event_data.get("sender")
+        let sender_id = event_data
+            .get("sender")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();
@@ -97,29 +103,37 @@ impl FeishuChannel {
         // 提取消息内容
         let message_content = self.extract_content_raw(event_data)?;
 
-        debug!("Processed Feishu message: chat_id={}, sender_id={}, content={:?}",
-            chat_id, sender_id, message_content);
+        debug!(
+            "Processed Feishu message: chat_id={}, sender_id={}, content={:?}",
+            chat_id, sender_id, message_content
+        );
 
         let message = Message::new(
             uhorse_core::SessionId::new(),
             uhorse_core::MessageRole::User,
             message_content,
-            0
+            0,
         );
 
         Ok(Some((chat_id.to_string(), message)))
     }
 
     /// 提取消息内容 (从 JSON)
-    fn extract_content_raw(&self, event_obj: &serde_json::Value) -> Result<MessageContent, ChannelError> {
-        let message = event_obj.get("message")
+    fn extract_content_raw(
+        &self,
+        event_obj: &serde_json::Value,
+    ) -> Result<MessageContent, ChannelError> {
+        let message = event_obj
+            .get("message")
             .ok_or_else(|| ChannelError::ConfigError("No message in event".to_string()))?;
 
-        let message_type = message.get("message_type")
+        let message_type = message
+            .get("message_type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No message_type".to_string()))?;
 
-        let content = message.get("content")
+        let content = message
+            .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No content in message".to_string()))?;
 
@@ -134,7 +148,8 @@ impl FeishuChannel {
                 }
             }
             "image" => {
-                let image_key = content_json.get("image_key")
+                let image_key = content_json
+                    .get("image_key")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 return Ok(MessageContent::Image {
@@ -143,7 +158,8 @@ impl FeishuChannel {
                 });
             }
             "audio" => {
-                let file_key = content_json.get("file_key")
+                let file_key = content_json
+                    .get("file_key")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let url = format!("feishu://audio?key={}", file_key);
@@ -153,7 +169,8 @@ impl FeishuChannel {
                 });
             }
             "file" => {
-                let file_key = content_json.get("file_key")
+                let file_key = content_json
+                    .get("file_key")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 return Ok(MessageContent::Text(format!("[文件] {}", file_key)));
@@ -196,7 +213,11 @@ impl Channel for FeishuChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending message to Feishu: user_id={}", user_id);
 
         // TODO: 实现实际的 HTTP 请求
@@ -219,7 +240,11 @@ impl Channel for FeishuChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], _signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        _signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         debug!("Verifying Feishu webhook");
         Ok(true)
     }
@@ -252,10 +277,7 @@ mod tests {
 
     #[test]
     fn test_feishu_channel_creation() {
-        let channel = FeishuChannel::new(
-            "test_app_id".to_string(),
-            "test_app_secret".to_string(),
-        );
+        let channel = FeishuChannel::new("test_app_id".to_string(), "test_app_secret".to_string());
 
         assert_eq!(channel.app_id(), "test_app_id");
         assert_eq!(channel.app_secret(), "test_app_secret");

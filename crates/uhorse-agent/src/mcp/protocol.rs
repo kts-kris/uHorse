@@ -117,8 +117,9 @@ impl McpProtocol {
 
     /// 序列化 MCP 响应
     pub fn serialize_response(response: &McpResponse) -> AgentResult<String> {
-        serde_json::to_string(response)
-            .map_err(|e| AgentError::InvalidConfig(format!("Failed to serialize MCP response: {}", e)))
+        serde_json::to_string(response).map_err(|e| {
+            AgentError::InvalidConfig(format!("Failed to serialize MCP response: {}", e))
+        })
     }
 }
 
@@ -157,7 +158,8 @@ mod tests {
 
     #[test]
     fn test_error_response() {
-        let response = McpProtocol::error(json!(1), error_codes::METHOD_NOT_FOUND, "Method not found");
+        let response =
+            McpProtocol::error(json!(1), error_codes::METHOD_NOT_FOUND, "Method not found");
 
         assert_eq!(response.id, json!(1));
         assert!(response.result.is_none());

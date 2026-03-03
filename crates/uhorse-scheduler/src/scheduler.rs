@@ -2,14 +2,14 @@
 //!
 //! 支持.at、.every、cron 表达式的任务调度，带有完整的执行循环。
 
-use uhorse_core::{Scheduler, ScheduledJob, JobId, Result, UHorseError};
+use super::cron::CronSchedule;
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration, interval};
-use chrono::{DateTime, Utc};
-use tracing::{debug, info, warn, error};
-use std::collections::HashMap;
-use super::cron::CronSchedule;
+use tokio::time::{interval, sleep, Duration};
+use tracing::{debug, error, info, warn};
+use uhorse_core::{JobId, Result, ScheduledJob, Scheduler, UHorseError};
 
 /// 任务执行器类型
 pub type JobExecutor = Arc<dyn Fn(ScheduledJob) + Send + Sync>;
@@ -119,12 +119,17 @@ impl JobScheduler {
                                     }
                                     Schedule::Every { duration_secs } => {
                                         // 更新下次执行时间
-                                        j.next_run = Some((now + chrono::Duration::seconds(*duration_secs as i64)).timestamp() as u64);
+                                        j.next_run = Some(
+                                            (now + chrono::Duration::seconds(*duration_secs as i64))
+                                                .timestamp()
+                                                as u64,
+                                        );
                                     }
                                     Schedule::Cron { expression } => {
                                         // 重新计算下次执行时间
                                         if let Ok(schedule) = super::cron::parse_cron(expression) {
-                                            j.next_run = Some(schedule.next_after(now).timestamp() as u64);
+                                            j.next_run =
+                                                Some(schedule.next_after(now).timestamp() as u64);
                                         }
                                     }
                                 }
@@ -147,7 +152,10 @@ impl Default for JobScheduler {
 impl Scheduler for JobScheduler {
     async fn schedule_job(&mut self, job: &ScheduledJob) -> Result<()> {
         // 计算首次执行时间
-        let next_run = self.calculate_next_run(job).await.map(|dt| dt.timestamp() as u64);
+        let next_run = self
+            .calculate_next_run(job)
+            .await
+            .map(|dt| dt.timestamp() as u64);
 
         let mut job = job.clone();
         job.next_run = next_run;

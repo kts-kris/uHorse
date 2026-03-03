@@ -2,9 +2,9 @@
 //!
 //! 完整的 cron 表达式解析和计算，支持标准 5 段和 6 段格式。
 
-use chrono::{DateTime, Utc, Timelike, Datelike};
-use uhorse_core::Result;
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::collections::HashSet;
+use uhorse_core::Result;
 
 /// Cron 表达式解析器
 #[derive(Debug, Clone)]
@@ -30,9 +30,7 @@ impl CronParser {
 
     /// 解析 cron 表达式
     pub fn parse(&self, expression: &str) -> Result<CronSchedule> {
-        let parts: Vec<&str> = expression
-            .split_whitespace()
-            .collect();
+        let parts: Vec<&str> = expression.split_whitespace().collect();
 
         let expected_len = if self.include_seconds { 6 } else { 5 };
 
@@ -47,14 +45,22 @@ impl CronParser {
         let mut iter = parts.into_iter();
 
         // 解析各字段
-        let (seconds, minutes, hours, days_of_month, months, days_of_week) = if self.include_seconds {
+        let (seconds, minutes, hours, days_of_month, months, days_of_week) = if self.include_seconds
+        {
             let seconds = Self::parse_field(iter.next().unwrap(), 0, 59)?;
             let minutes = Self::parse_field(iter.next().unwrap(), 0, 59)?;
             let hours = Self::parse_field(iter.next().unwrap(), 0, 23)?;
             let days_of_month = Self::parse_field(iter.next().unwrap(), 1, 31)?;
             let months = Self::parse_field(iter.next().unwrap(), 1, 12)?;
             let days_of_week = Self::parse_field(iter.next().unwrap(), 0, 6)?;
-            (Some(seconds), minutes, hours, days_of_month, months, days_of_week)
+            (
+                Some(seconds),
+                minutes,
+                hours,
+                days_of_month,
+                months,
+                days_of_week,
+            )
         } else {
             let minutes = Self::parse_field(iter.next().unwrap(), 0, 59)?;
             let hours = Self::parse_field(iter.next().unwrap(), 0, 23)?;
@@ -94,10 +100,9 @@ impl CronParser {
         // 处理步长 (如 */5, 1-10/2)
         if let Some(pos) = expr.find('/') {
             let base = &expr[..pos];
-            step = Some(expr[pos + 1..].parse::<u32>()
-                .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                    format!("Invalid step value: {}", expr)
-                ))?);
+            step = Some(expr[pos + 1..].parse::<u32>().map_err(|_| {
+                uhorse_core::UHorseError::ScheduleConflict(format!("Invalid step value: {}", expr))
+            })?);
 
             if base == "*" {
                 for i in (min..=max).step_by(step.unwrap() as usize) {
@@ -112,14 +117,18 @@ impl CronParser {
 
             // 处理范围步长 (如 1-10/2)
             if let Some(range_pos) = base.find('-') {
-                let start: u32 = base[..range_pos].parse()
-                    .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                        format!("Invalid range start: {}", base)
-                    ))?;
-                let end: u32 = base[range_pos + 1..].parse()
-                    .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                        format!("Invalid range end: {}", base)
-                    ))?;
+                let start: u32 = base[..range_pos].parse().map_err(|_| {
+                    uhorse_core::UHorseError::ScheduleConflict(format!(
+                        "Invalid range start: {}",
+                        base
+                    ))
+                })?;
+                let end: u32 = base[range_pos + 1..].parse().map_err(|_| {
+                    uhorse_core::UHorseError::ScheduleConflict(format!(
+                        "Invalid range end: {}",
+                        base
+                    ))
+                })?;
 
                 for i in (start..=end).step_by(step.unwrap() as usize) {
                     if i >= min && i <= max {
@@ -137,14 +146,12 @@ impl CronParser {
         // 处理范围 (如 1-5)
         if let Some(pos) = expr.find('-') {
             is_range = true;
-            let start: u32 = expr[..pos].parse()
-                .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                    format!("Invalid range start: {}", expr)
-                ))?;
-            let end: u32 = expr[pos + 1..].parse()
-                .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                    format!("Invalid range end: {}", expr)
-                ))?;
+            let start: u32 = expr[..pos].parse().map_err(|_| {
+                uhorse_core::UHorseError::ScheduleConflict(format!("Invalid range start: {}", expr))
+            })?;
+            let end: u32 = expr[pos + 1..].parse().map_err(|_| {
+                uhorse_core::UHorseError::ScheduleConflict(format!("Invalid range end: {}", expr))
+            })?;
 
             for i in start..=end {
                 if i >= min && i <= max {
@@ -162,14 +169,18 @@ impl CronParser {
         // 处理列表 (如 1,2,3 或 1,3-5,7)
         for part in expr.split(',') {
             if let Some(range_pos) = part.find('-') {
-                let start: u32 = part[..range_pos].parse()
-                    .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                        format!("Invalid list range start: {}", part)
-                    ))?;
-                let end: u32 = part[range_pos + 1..].parse()
-                    .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                        format!("Invalid list range end: {}", part)
-                    ))?;
+                let start: u32 = part[..range_pos].parse().map_err(|_| {
+                    uhorse_core::UHorseError::ScheduleConflict(format!(
+                        "Invalid list range start: {}",
+                        part
+                    ))
+                })?;
+                let end: u32 = part[range_pos + 1..].parse().map_err(|_| {
+                    uhorse_core::UHorseError::ScheduleConflict(format!(
+                        "Invalid list range end: {}",
+                        part
+                    ))
+                })?;
 
                 for i in start..=end {
                     if i >= min && i <= max {
@@ -177,15 +188,15 @@ impl CronParser {
                     }
                 }
             } else {
-                let val: u32 = part.parse()
-                    .map_err(|_| uhorse_core::UHorseError::ScheduleConflict(
-                        format!("Invalid value: {}", part)
-                    ))?;
+                let val: u32 = part.parse().map_err(|_| {
+                    uhorse_core::UHorseError::ScheduleConflict(format!("Invalid value: {}", part))
+                })?;
 
                 if val < min || val > max {
-                    return Err(uhorse_core::UHorseError::ScheduleConflict(
-                        format!("Value {} out of range ({}-{})", val, min, max)
-                    ));
+                    return Err(uhorse_core::UHorseError::ScheduleConflict(format!(
+                        "Value {} out of range ({}-{})",
+                        val, min, max
+                    )));
                 }
                 values.insert(val);
             }
@@ -272,7 +283,10 @@ impl CronSchedule {
 
         // 检查日和星期（逻辑或关系）
         let day_matches = self.days_of_month.values.contains(&dt.day());
-        let weekday_matches = self.days_of_week.values.contains(&(dt.weekday().num_days_from_monday()));
+        let weekday_matches = self
+            .days_of_week
+            .values
+            .contains(&(dt.weekday().num_days_from_monday()));
 
         // 特殊处理：如果都是 *，则每天都匹配
         let all_wildcard = self.days_of_month.is_wildcard && self.days_of_week.is_wildcard;

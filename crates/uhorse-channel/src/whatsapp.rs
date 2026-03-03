@@ -2,17 +2,16 @@
 //!
 //! 实现 WhatsApp Business API 集成。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError, UHorseError,
-    ChannelType, Message, MessageRole, Session, SessionId,
-    Result,
-};
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn, instrument};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info, instrument, warn};
+use uhorse_core::{
+    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
+    SessionId, UHorseError,
+};
 
 /// WhatsApp 通道
 #[derive(Debug, Clone)]
@@ -51,7 +50,10 @@ impl WhatsAppChannel {
     pub fn verify_webhook_token(&self, mode: &str, token: &str, _challenge: &str) -> Result<bool> {
         // TODO: 从配置中读取验证 token
         // WhatsApp webhook 验证
-        debug!("WhatsApp webhook verification: mode={}, token={}", mode, token);
+        debug!(
+            "WhatsApp webhook verification: mode={}, token={}",
+            mode, token
+        );
 
         if mode == "subscribe" {
             Ok(true)
@@ -88,17 +90,21 @@ impl WhatsAppChannel {
             },
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.access_token))
             .json(&message)
             .send()
             .await
-                                    .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!("WhatsApp API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "WhatsApp API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -126,23 +132,24 @@ impl WhatsAppChannel {
             messaging_product: "whatsapp",
             to,
             r#type: media_type,
-            media: MediaContent {
-                media_type,
-                url,
-            },
+            media: MediaContent { media_type, url },
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(&api_url)
             .header("Authorization", format!("Bearer {}", self.access_token))
             .json(&message)
             .send()
             .await
-                                    .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!("WhatsApp API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "WhatsApp API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -156,7 +163,11 @@ impl Channel for WhatsAppChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending WhatsApp message to {}: {:?}", user_id, message);
 
         // 确保手机号格式正确
@@ -187,7 +198,11 @@ impl Channel for WhatsAppChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], _signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        _signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         // WhatsApp 使用 HMAC-SHA256 签名
         // 这里简化处理
         Ok(true)
@@ -195,16 +210,25 @@ impl Channel for WhatsAppChannel {
 
     #[instrument(skip(self))]
     async fn start(&mut self) -> Result<()> {
-        info!("Starting WhatsApp channel (phone_number_id: {})", self.phone_number_id);
+        info!(
+            "Starting WhatsApp channel (phone_number_id: {})",
+            self.phone_number_id
+        );
 
         // 测试 API 连接
         let url = self.api_url(&format!("{}/?fields=name", self.phone_number_id));
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.access_token))
             .send()
             .await
-            .map_err(|e| UHorseError::ChannelError(ChannelError::ConfigError(format!("Failed to connect: {}", e))))?;
+            .map_err(|e| {
+                UHorseError::ChannelError(ChannelError::ConfigError(format!(
+                    "Failed to connect: {}",
+                    e
+                )))
+            })?;
 
         if response.status().is_success() {
             info!("WhatsApp API connection successful");
@@ -284,4 +308,3 @@ pub struct WhatsAppImage {
     pub caption: Option<String>,
     pub mime_type: Option<String>,
 }
-

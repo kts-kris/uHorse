@@ -2,11 +2,11 @@
 //!
 //! 提供健康检查端点和状态监控。
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::Duration;
-use chrono::{DateTime, Utc};
+use tokio::sync::RwLock;
 
 /// 健康状态
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,15 +63,12 @@ impl CheckerType {
     /// 执行检查
     pub async fn check(&self) -> CheckResult {
         match self {
-            CheckerType::Database { db_path } => {
-                check_database(db_path).await
-            }
-            CheckerType::Memory { threshold_mb: _ } => {
-                check_memory().await
-            }
-            CheckerType::Disk { path, threshold_gb: _ } => {
-                check_disk(path).await
-            }
+            CheckerType::Database { db_path } => check_database(db_path).await,
+            CheckerType::Memory { threshold_mb: _ } => check_memory().await,
+            CheckerType::Disk {
+                path,
+                threshold_gb: _,
+            } => check_disk(path).await,
         }
     }
 

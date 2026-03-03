@@ -4,14 +4,11 @@
 //!
 //! 注意：当前为简化实现，完整功能待后续完善。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError,
-    ChannelType, Result,
-};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
+use uhorse_core::{Channel, ChannelError, ChannelType, MessageContent, Result};
 
 /// Slack 通道
 #[derive(Debug, Clone)]
@@ -45,7 +42,11 @@ impl Channel for SlackChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending Slack message to {}: {:?}", user_id, message);
 
         // TODO: 实现完整的 Slack API 调用
@@ -62,14 +63,21 @@ impl Channel for SlackChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], _signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        _signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         debug!("Verifying Slack webhook");
         Ok(true)
     }
 
     #[instrument(skip(self))]
     async fn start(&mut self) -> Result<()> {
-        info!("Starting Slack channel (bot_token: {})", &self.bot_token[..8]);
+        info!(
+            "Starting Slack channel (bot_token: {})",
+            &self.bot_token[..8]
+        );
         // TODO: 实现 Slack API 连接测试
         *self.running.write().await = true;
         Ok(())

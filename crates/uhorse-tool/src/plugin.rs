@@ -2,16 +2,16 @@
 //!
 //! 支持外部进程插件的执行和沙箱隔离。
 
-use uhorse_core::{Plugin, PluginError, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::collections::HashMap;
-use tokio::process::{Command as TokioCommand, Child};
-use tokio::io::{AsyncBufReadExt, BufReader, AsyncWriteExt, AsyncReadExt};
-use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, info, warn, error};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command as TokioCommand};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
+use uhorse_core::{Plugin, PluginError, Result};
 
 /// 插件配置
 #[derive(Debug, Clone)]
@@ -77,7 +77,9 @@ impl ProcessPlugin {
     /// 从配置文件创建插件
     pub fn from_config_file(path: PathBuf) -> Result<Self> {
         // TODO: 实现从 JSON/TOML 文件加载配置
-        Err(uhorse_core::UHorseError::NotImplemented("Config file loading not implemented".to_string()))
+        Err(uhorse_core::UHorseError::NotImplemented(
+            "Config file loading not implemented".to_string(),
+        ))
     }
 }
 
@@ -112,8 +114,9 @@ impl Plugin for ProcessPlugin {
         cmd.stderr(Stdio::piped());
 
         // 启动进程
-        let child = cmd.spawn()
-            .map_err(|e| PluginError::InitFailed(format!("Failed to spawn plugin process: {}", e)))?;
+        let child = cmd.spawn().map_err(|e| {
+            PluginError::InitFailed(format!("Failed to spawn plugin process: {}", e))
+        })?;
 
         // 存储子进程
         *self.child.write().await = Some(child);
@@ -122,8 +125,15 @@ impl Plugin for ProcessPlugin {
         Ok(())
     }
 
-    async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, PluginError> {
-        debug!("Calling plugin method: {} with params: {:?}", method, params);
+    async fn call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        debug!(
+            "Calling plugin method: {} with params: {:?}",
+            method, params
+        );
 
         // 构建请求
         let request = PluginRequest {
@@ -133,8 +143,9 @@ impl Plugin for ProcessPlugin {
             params,
         };
 
-        let request_json = serde_json::to_string(&request)
-            .map_err(|e| PluginError::InvalidResponse(format!("Failed to serialize request: {}", e)))?;
+        let request_json = serde_json::to_string(&request).map_err(|e| {
+            PluginError::InvalidResponse(format!("Failed to serialize request: {}", e))
+        })?;
 
         // 为每次调用创建新进程（简化实现，生产环境应使用进程池）
         let mut cmd = TokioCommand::new(&self.config.executable);
@@ -156,25 +167,31 @@ impl Plugin for ProcessPlugin {
         cmd.arg("--request");
         cmd.arg(&request_json);
 
-        let output = cmd.output()
-            .await
-            .map_err(|e| PluginError::InvalidResponse(format!("Failed to execute plugin: {}", e)))?;
+        let output = cmd.output().await.map_err(|e| {
+            PluginError::InvalidResponse(format!("Failed to execute plugin: {}", e))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PluginError::InvalidResponse(format!("Plugin execution failed: {}", stderr)));
+            return Err(PluginError::InvalidResponse(format!(
+                "Plugin execution failed: {}",
+                stderr
+            )));
         }
 
         let response_str = String::from_utf8_lossy(&output.stdout);
 
         // 解析响应
-        let response: PluginResponse = serde_json::from_str(&response_str)
-            .map_err(|e| PluginError::InvalidResponse(format!("Failed to parse plugin response: {}", e)))?;
+        let response: PluginResponse = serde_json::from_str(&response_str).map_err(|e| {
+            PluginError::InvalidResponse(format!("Failed to parse plugin response: {}", e))
+        })?;
 
         if let Some(error) = response.error {
             Err(PluginError::InvalidResponse(error.message))
         } else {
-            response.result.ok_or_else(|| PluginError::InvalidResponse("Empty result".to_string()))
+            response
+                .result
+                .ok_or_else(|| PluginError::InvalidResponse("Empty result".to_string()))
         }
     }
 
@@ -265,20 +282,30 @@ impl PluginRuntime {
         for (name, plugin) in plugins.iter() {
             debug!("Initializing plugin: {}", name);
             let mut plugin = plugin.write().await;
-            plugin.initialize().await
+            plugin
+                .initialize()
+                .await
                 .map_err(uhorse_core::UHorseError::PluginError)?;
         }
         Ok(())
     }
 
     /// 调用插件方法
-    pub async fn call(&self, plugin_name: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn call(
+        &self,
+        plugin_name: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let plugins = self.plugins.read().await;
-        let plugin = plugins.get(plugin_name)
+        let plugin = plugins
+            .get(plugin_name)
             .ok_or_else(|| PluginError::NotFound(plugin_name.to_string()))?;
 
         let plugin = plugin.read().await;
-        plugin.call(method, params).await
+        plugin
+            .call(method, params)
+            .await
             .map_err(uhorse_core::UHorseError::PluginError)
     }
 
@@ -376,7 +403,7 @@ impl PluginSandbox {
         }
 
         Err(uhorse_core::UHorseError::InternalError(
-            "Network access denied by sandbox policy".to_string()
+            "Network access denied by sandbox policy".to_string(),
         ))
     }
 }

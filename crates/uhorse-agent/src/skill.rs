@@ -74,8 +74,12 @@ impl Default for SkillConfig {
     }
 }
 
-fn default_timeout() -> u64 { 30 }
-fn default_max_retries() -> usize { 3 }
+fn default_timeout() -> u64 {
+    30
+}
+fn default_max_retries() -> usize {
+    3
+}
 
 /// 技能执行器
 #[async_trait::async_trait]

@@ -190,7 +190,10 @@ impl OpenAIClient {
 impl LLMClient for OpenAIClient {
     #[instrument(skip(self, messages))]
     async fn chat_completion(&self, messages: Vec<ChatMessage>) -> Result<String> {
-        debug!("Sending chat completion request to {}", self.config.provider);
+        debug!(
+            "Sending chat completion request to {}",
+            self.config.provider
+        );
 
         let url = self.build_url();
         let body = self.build_request_body(messages);

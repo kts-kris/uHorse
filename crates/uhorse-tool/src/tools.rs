@@ -2,8 +2,8 @@
 //!
 //! 提供常用的内置工具实现。
 
-use uhorse_core::{ToolExecutor, ExecutionContext, Result, ToolId, PermissionLevel};
 use async_trait::async_trait;
+use uhorse_core::{ExecutionContext, PermissionLevel, Result, ToolExecutor, ToolId};
 
 // ============== 计算器工具 ==============
 
@@ -58,14 +58,21 @@ impl ToolExecutor for CalculatorTool {
         PermissionLevel::Public
     }
 
-    async fn execute(&self, params: serde_json::Value, _context: &ExecutionContext) -> Result<serde_json::Value> {
-        let expr = params["expression"]
-            .as_str()
-            .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'expression' parameter".to_string()))?;
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        _context: &ExecutionContext,
+    ) -> Result<serde_json::Value> {
+        let expr = params["expression"].as_str().ok_or_else(|| {
+            uhorse_core::UHorseError::ToolValidationFailed(
+                "Missing 'expression' parameter".to_string(),
+            )
+        })?;
 
         // 简单的计算器实现
-        let result = self.evaluate_expression(expr)
-            .map_err(|e| uhorse_core::UHorseError::ToolExecutionFailed(format!("Calculation error: {}", e)))?;
+        let result = self.evaluate_expression(expr).map_err(|e| {
+            uhorse_core::UHorseError::ToolExecutionFailed(format!("Calculation error: {}", e))
+        })?;
 
         Ok(serde_json::json!({
             "expression": expr,
@@ -82,23 +89,39 @@ impl CalculatorTool {
 
         // 简单解析：支持 a + b, a - b, a * b, a / b 格式
         if let Some(pos) = expr.find('+') {
-            let left: f64 = expr[..pos].parse().map_err(|_| "Invalid left operand".to_string())?;
-            let right: f64 = expr[pos+1..].parse().map_err(|_| "Invalid right operand".to_string())?;
+            let left: f64 = expr[..pos]
+                .parse()
+                .map_err(|_| "Invalid left operand".to_string())?;
+            let right: f64 = expr[pos + 1..]
+                .parse()
+                .map_err(|_| "Invalid right operand".to_string())?;
             return Ok(left + right);
         }
         if let Some(pos) = expr.find('-') {
-            let left: f64 = expr[..pos].parse().map_err(|_| "Invalid left operand".to_string())?;
-            let right: f64 = expr[pos+1..].parse().map_err(|_| "Invalid right operand".to_string())?;
+            let left: f64 = expr[..pos]
+                .parse()
+                .map_err(|_| "Invalid left operand".to_string())?;
+            let right: f64 = expr[pos + 1..]
+                .parse()
+                .map_err(|_| "Invalid right operand".to_string())?;
             return Ok(left - right);
         }
         if let Some(pos) = expr.find('*') {
-            let left: f64 = expr[..pos].parse().map_err(|_| "Invalid left operand".to_string())?;
-            let right: f64 = expr[pos+1..].parse().map_err(|_| "Invalid right operand".to_string())?;
+            let left: f64 = expr[..pos]
+                .parse()
+                .map_err(|_| "Invalid left operand".to_string())?;
+            let right: f64 = expr[pos + 1..]
+                .parse()
+                .map_err(|_| "Invalid right operand".to_string())?;
             return Ok(left * right);
         }
         if let Some(pos) = expr.find('/') {
-            let left: f64 = expr[..pos].parse().map_err(|_| "Invalid left operand".to_string())?;
-            let right: f64 = expr[pos+1..].parse().map_err(|_| "Invalid right operand".to_string())?;
+            let left: f64 = expr[..pos]
+                .parse()
+                .map_err(|_| "Invalid left operand".to_string())?;
+            let right: f64 = expr[pos + 1..]
+                .parse()
+                .map_err(|_| "Invalid right operand".to_string())?;
             if right == 0.0 {
                 return Err("Division by zero".to_string());
             }
@@ -106,7 +129,8 @@ impl CalculatorTool {
         }
 
         // 尝试直接解析为数字
-        expr.parse::<f64>().map_err(|_| "Invalid expression".to_string())
+        expr.parse::<f64>()
+            .map_err(|_| "Invalid expression".to_string())
     }
 }
 
@@ -185,21 +209,29 @@ impl ToolExecutor for HttpTool {
         PermissionLevel::Authenticated
     }
 
-    async fn execute(&self, params: serde_json::Value, _context: &ExecutionContext) -> Result<serde_json::Value> {
-        let url = params["url"]
-            .as_str()
-            .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'url' parameter".to_string()))?;
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        _context: &ExecutionContext,
+    ) -> Result<serde_json::Value> {
+        let url = params["url"].as_str().ok_or_else(|| {
+            uhorse_core::UHorseError::ToolValidationFailed("Missing 'url' parameter".to_string())
+        })?;
 
-        let method_str = params["method"]
-            .as_str()
-            .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'method' parameter".to_string()))?;
+        let method_str = params["method"].as_str().ok_or_else(|| {
+            uhorse_core::UHorseError::ToolValidationFailed("Missing 'method' parameter".to_string())
+        })?;
 
         let method = match method_str {
             "GET" => reqwest::Method::GET,
             "POST" => reqwest::Method::POST,
             "PUT" => reqwest::Method::PUT,
             "DELETE" => reqwest::Method::DELETE,
-            _ => return Err(uhorse_core::UHorseError::ToolValidationFailed("Invalid HTTP method".to_string())),
+            _ => {
+                return Err(uhorse_core::UHorseError::ToolValidationFailed(
+                    "Invalid HTTP method".to_string(),
+                ))
+            }
         };
 
         let mut request = self.client.request(method, url);
@@ -218,10 +250,9 @@ impl ToolExecutor for HttpTool {
             request = request.json(body);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| uhorse_core::UHorseError::ToolExecutionFailed(format!("HTTP request failed: {}", e)))?;
+        let response = request.send().await.map_err(|e| {
+            uhorse_core::UHorseError::ToolExecutionFailed(format!("HTTP request failed: {}", e))
+        })?;
 
         let status = response.status();
         let headers: std::collections::HashMap<String, String> = response
@@ -230,10 +261,9 @@ impl ToolExecutor for HttpTool {
             .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), v.to_string())))
             .collect();
 
-        let body_text = response
-            .text()
-            .await
-            .map_err(|e| uhorse_core::UHorseError::ToolExecutionFailed(format!("Failed to read response: {}", e)))?;
+        let body_text = response.text().await.map_err(|e| {
+            uhorse_core::UHorseError::ToolExecutionFailed(format!("Failed to read response: {}", e))
+        })?;
 
         Ok(serde_json::json!({
             "status": status.as_u16(),
@@ -301,14 +331,16 @@ impl ToolExecutor for SearchTool {
         PermissionLevel::Public
     }
 
-    async fn execute(&self, params: serde_json::Value, _context: &ExecutionContext) -> Result<serde_json::Value> {
-        let query = params["query"]
-            .as_str()
-            .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'query' parameter".to_string()))?;
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        _context: &ExecutionContext,
+    ) -> Result<serde_json::Value> {
+        let query = params["query"].as_str().ok_or_else(|| {
+            uhorse_core::UHorseError::ToolValidationFailed("Missing 'query' parameter".to_string())
+        })?;
 
-        let limit = params["limit"]
-            .as_u64()
-            .unwrap_or(5) as usize;
+        let limit = params["limit"].as_u64().unwrap_or(5) as usize;
 
         // TODO: 集成真实的搜索 API
         // 这里返回模拟结果
@@ -381,7 +413,11 @@ impl ToolExecutor for DatetimeTool {
         PermissionLevel::Public
     }
 
-    async fn execute(&self, params: serde_json::Value, _context: &ExecutionContext) -> Result<serde_json::Value> {
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        _context: &ExecutionContext,
+    ) -> Result<serde_json::Value> {
         let action = params["action"].as_str().unwrap_or("now");
 
         match action {
@@ -394,9 +430,11 @@ impl ToolExecutor for DatetimeTool {
                 }))
             }
             "parse" => {
-                let input = params["input"]
-                    .as_str()
-                    .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'input' for parse".to_string()))?;
+                let input = params["input"].as_str().ok_or_else(|| {
+                    uhorse_core::UHorseError::ToolValidationFailed(
+                        "Missing 'input' for parse".to_string(),
+                    )
+                })?;
 
                 // 尝试解析常见格式
                 if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(input) {
@@ -412,9 +450,11 @@ impl ToolExecutor for DatetimeTool {
                 }
             }
             "format" => {
-                let input = params["input"]
-                    .as_str()
-                    .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'input' for format".to_string()))?;
+                let input = params["input"].as_str().ok_or_else(|| {
+                    uhorse_core::UHorseError::ToolValidationFailed(
+                        "Missing 'input' for format".to_string(),
+                    )
+                })?;
 
                 let format_str = params["format"].as_str().unwrap_or("%Y-%m-%d %H:%M:%S");
 
@@ -428,7 +468,10 @@ impl ToolExecutor for DatetimeTool {
                     }))
                 }
             }
-            _ => Err(uhorse_core::UHorseError::ToolValidationFailed(format!("Unknown action: {}", action)))
+            _ => Err(uhorse_core::UHorseError::ToolValidationFailed(format!(
+                "Unknown action: {}",
+                action
+            ))),
         }
     }
 }
@@ -495,14 +538,18 @@ impl ToolExecutor for TextTool {
         PermissionLevel::Public
     }
 
-    async fn execute(&self, params: serde_json::Value, _context: &ExecutionContext) -> Result<serde_json::Value> {
-        let action = params["action"]
-            .as_str()
-            .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'action' parameter".to_string()))?;
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        _context: &ExecutionContext,
+    ) -> Result<serde_json::Value> {
+        let action = params["action"].as_str().ok_or_else(|| {
+            uhorse_core::UHorseError::ToolValidationFailed("Missing 'action' parameter".to_string())
+        })?;
 
-        let text = params["text"]
-            .as_str()
-            .ok_or_else(|| uhorse_core::UHorseError::ToolValidationFailed("Missing 'text' parameter".to_string()))?;
+        let text = params["text"].as_str().ok_or_else(|| {
+            uhorse_core::UHorseError::ToolValidationFailed("Missing 'text' parameter".to_string())
+        })?;
 
         let result = match action {
             "count" => serde_json::json!({ "count": text.chars().count() }),
@@ -523,7 +570,12 @@ impl ToolExecutor for TextTool {
             "upper" => serde_json::json!({ "result": text.to_uppercase() }),
             "lower" => serde_json::json!({ "result": text.to_lowercase() }),
             "reverse" => serde_json::json!({ "result": text.chars().rev().collect::<String>() }),
-            _ => return Err(uhorse_core::UHorseError::ToolValidationFailed(format!("Unknown action: {}", action)))
+            _ => {
+                return Err(uhorse_core::UHorseError::ToolValidationFailed(format!(
+                    "Unknown action: {}",
+                    action
+                )))
+            }
         };
 
         Ok(result)

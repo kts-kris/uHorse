@@ -39,10 +39,7 @@ pub struct SessionKey {
 
 impl SessionKey {
     /// 创建新的 Session Key
-    pub fn new(
-        channel_type: impl Into<String>,
-        channel_user_id: impl Into<String>,
-    ) -> Self {
+    pub fn new(channel_type: impl Into<String>, channel_user_id: impl Into<String>) -> Self {
         Self {
             channel_type: channel_type.into(),
             channel_user_id: channel_user_id.into(),

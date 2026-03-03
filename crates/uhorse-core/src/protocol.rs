@@ -2,8 +2,8 @@
 //!
 //! 定义 WebSocket 通信协议的消息格式和握手流程。
 
-use serde::{Deserialize, Serialize};
 use crate::types::ErrorCode;
+use serde::{Deserialize, Serialize};
 
 /// WebSocket 协议消息
 #[derive(Debug, Clone, Serialize, Deserialize)]

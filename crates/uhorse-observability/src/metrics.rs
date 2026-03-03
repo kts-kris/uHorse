@@ -2,12 +2,12 @@
 //!
 //! 收集和导出 Prometheus 指标。
 
-use metrics::{counter, histogram, gauge};
+use metrics::{counter, gauge, histogram};
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use serde::{Serialize, Deserialize};
 
 /// 指标收集器
 #[derive(Debug)]
@@ -103,7 +103,8 @@ impl MetricsCollector {
             "endpoint" => endpoint.to_string(),
             "method" => method.to_string(),
             "status" => status.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         self.api_requests.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -113,7 +114,8 @@ impl MetricsCollector {
             "uhorse_api_errors_total",
             "endpoint" => endpoint.to_string(),
             "error_type" => error_type.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         self.api_errors.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -244,11 +246,13 @@ impl ApiTimer {
 
     pub async fn complete_with_status(self, status: u16) {
         let duration = self.start.elapsed().as_millis() as u64;
-        self.collector.inc_api_requests(&self.endpoint, &self.method, status);
+        self.collector
+            .inc_api_requests(&self.endpoint, &self.method, status);
         self.collector.record_api_latency(&self.endpoint, duration);
 
         if status >= 400 {
-            self.collector.inc_api_errors(&self.endpoint, status.to_string().as_str());
+            self.collector
+                .inc_api_errors(&self.endpoint, status.to_string().as_str());
         }
     }
 }
@@ -371,10 +375,7 @@ impl AuditLogger {
     }
 
     /// 查询审计日志
-    pub async fn query_logs(
-        &self,
-        filter: AuditFilter,
-    ) -> Vec<AuditLog> {
+    pub async fn query_logs(&self, filter: AuditFilter) -> Vec<AuditLog> {
         let logs = self.logs.read().await;
 
         logs.iter()

@@ -7,7 +7,7 @@
 //! - 结果格式化
 
 use crate::error::{AgentError, AgentResult};
-use crate::mcp::types::{McpTool, McpToolCall, McpToolResult, McpContent};
+use crate::mcp::types::{McpContent, McpTool, McpToolCall, McpToolResult};
 use crate::skills::{Skill, SkillRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -235,9 +235,7 @@ impl ToolBuilder {
         required: bool,
     ) -> Self {
         let param_name = name.into();
-        let properties = self.input_schema["properties"]
-            .as_object_mut()
-            .unwrap();
+        let properties = self.input_schema["properties"].as_object_mut().unwrap();
 
         properties.insert(
             param_name.clone(),
@@ -248,9 +246,7 @@ impl ToolBuilder {
         );
 
         if required {
-            let required_array = self.input_schema["required"]
-                .as_array_mut()
-                .unwrap();
+            let required_array = self.input_schema["required"].as_array_mut().unwrap();
             required_array.push(serde_json::Value::String(param_name));
         }
 
@@ -295,11 +291,16 @@ pub mod builtin_tools {
     pub fn calculator_tool() -> Tool {
         ToolBuilder::new("calculator")
             .description("Perform basic arithmetic calculations")
-            .add_param("expression", "string", "Mathematical expression to evaluate", true)
+            .add_param(
+                "expression",
+                "string",
+                "Mathematical expression to evaluate",
+                true,
+            )
             .build(|args| {
-                let expression = args["expression"]
-                    .as_str()
-                    .ok_or_else(|| AgentError::InvalidConfig("Expression must be a string".to_string()))?;
+                let expression = args["expression"].as_str().ok_or_else(|| {
+                    AgentError::InvalidConfig("Expression must be a string".to_string())
+                })?;
 
                 // 简单的计算器（生产环境应该使用更安全的实现）
                 let result = eval_expression(expression)?;
@@ -346,30 +347,29 @@ fn eval_expression(expr: &str) -> AgentResult<f64> {
 
     // 简单的加法
     if let Some((left, right)) = expr.split_once('+') {
-        let left_val: f64 = left.parse().map_err(|_| {
-            AgentError::InvalidConfig(format!("Invalid number: {}", left))
-        })?;
-        let right_val: f64 = right.parse().map_err(|_| {
-            AgentError::InvalidConfig(format!("Invalid number: {}", right))
-        })?;
+        let left_val: f64 = left
+            .parse()
+            .map_err(|_| AgentError::InvalidConfig(format!("Invalid number: {}", left)))?;
+        let right_val: f64 = right
+            .parse()
+            .map_err(|_| AgentError::InvalidConfig(format!("Invalid number: {}", right)))?;
         return Ok(left_val + right_val);
     }
 
     // 简单的减法
     if let Some((left, right)) = expr.split_once('-') {
-        let left_val: f64 = left.parse().map_err(|_| {
-            AgentError::InvalidConfig(format!("Invalid number: {}", left))
-        })?;
-        let right_val: f64 = right.parse().map_err(|_| {
-            AgentError::InvalidConfig(format!("Invalid number: {}", right))
-        })?;
+        let left_val: f64 = left
+            .parse()
+            .map_err(|_| AgentError::InvalidConfig(format!("Invalid number: {}", left)))?;
+        let right_val: f64 = right
+            .parse()
+            .map_err(|_| AgentError::InvalidConfig(format!("Invalid number: {}", right)))?;
         return Ok(left_val - right_val);
     }
 
     // 尝试直接解析为数字
-    expr.parse().map_err(|_| {
-        AgentError::InvalidConfig(format!("Unsupported expression: {}", expr))
-    })
+    expr.parse()
+        .map_err(|_| AgentError::InvalidConfig(format!("Unsupported expression: {}", expr)))
 }
 
 #[cfg(test)]

@@ -21,7 +21,7 @@
 //! 3. **默认**: 使用默认 Agent
 
 use crate::error::{AgentError, AgentResult};
-use crate::session_key::{SessionKey, ChannelType};
+use crate::session_key::{ChannelType, SessionKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -307,16 +307,9 @@ mod tests {
                 .team_id("T123")
                 .build(),
         );
-        config.add_binding(
-            BindingBuilder::new("main")
-                .channel("telegram")
-                .build(),
-        );
+        config.add_binding(BindingBuilder::new("main").channel("telegram").build());
 
-        let router = BindingsRouter::new(
-            config,
-            vec!["main".to_string(), "coder".to_string()],
-        );
+        let router = BindingsRouter::new(config, vec!["main".to_string(), "coder".to_string()]);
 
         // 匹配 coder
         let session_key = SessionKey::with_team("slack", "user456", "T123");
@@ -347,10 +340,7 @@ mod tests {
                 .build(),
         );
 
-        let router = BindingsRouter::new(
-            config,
-            vec!["agent1".to_string(), "agent2".to_string()],
-        );
+        let router = BindingsRouter::new(config, vec!["agent1".to_string(), "agent2".to_string()]);
 
         let session_key = SessionKey::new("slack", "user123");
         // agent2 优先级更高

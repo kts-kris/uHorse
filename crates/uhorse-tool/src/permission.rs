@@ -2,7 +2,7 @@
 //!
 //! 检查工具调用权限。
 
-use uhorse_core::{Result, ExecutionContext, PermissionLevel};
+use uhorse_core::{ExecutionContext, PermissionLevel, Result};
 
 /// 权限检查器
 #[derive(Debug)]
@@ -24,7 +24,9 @@ impl PermissionChecker {
                 if context.user_id.is_some() || context.device_id.is_some() {
                     Ok(())
                 } else {
-                    Err(uhorse_core::UHorseError::AuthFailed("Authentication required".to_string()))
+                    Err(uhorse_core::UHorseError::AuthFailed(
+                        "Authentication required".to_string(),
+                    ))
                 }
             }
             PermissionLevel::Trusted => {

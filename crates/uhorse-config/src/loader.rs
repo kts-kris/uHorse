@@ -2,7 +2,7 @@
 //!
 //! 支持从文件、环境变量等多种来源加载配置。
 
-use super::{UHorseConfig, ConfigSource, ConfigValue, MergeStrategy};
+use super::{ConfigSource, ConfigValue, MergeStrategy, UHorseConfig};
 use anyhow::{Context, Result as AnyhowResult};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -215,7 +215,7 @@ impl ConfigWatch {
 
 /// 创建默认配置加载器
 pub fn create_default_loader(config_path: &Path) -> ConfigLoader {
-    use super::source::{FileSource, EnvSource};
+    use super::source::{EnvSource, FileSource};
 
     ConfigLoader::new()
         .add_source(Box::new(FileSource::new(config_path.to_path_buf())))

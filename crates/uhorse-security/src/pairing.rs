@@ -2,13 +2,13 @@
 //!
 //! 完整的设备配对流程，包括配对协议、状态管理和 UI 流程。
 
-use uhorse_core::{DeviceManager, Result, DeviceId, DeviceInfo, UHorseError};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use serde::{Serialize, Deserialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, info, warn, error};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
+use uhorse_core::{DeviceId, DeviceInfo, DeviceManager, Result, UHorseError};
 use uuid::Uuid;
 
 /// 配对状态
@@ -158,7 +158,10 @@ impl DevicePairingManager {
             capabilities: uhorse_core::DeviceCapabilities::default(),
         };
 
-        self.devices.write().await.insert(device_id.clone(), device_info);
+        self.devices
+            .write()
+            .await
+            .insert(device_id.clone(), device_info);
 
         // 存储配对请求
         let pairing_code = request.pairing_code.clone();
@@ -166,10 +169,19 @@ impl DevicePairingManager {
         let request_id_copy = request_id.clone();
         let request_id_copy2 = request_id.clone();
 
-        self.pairing_requests.write().await.insert(request_id.clone(), request.clone());
-        self.code_to_request.write().await.insert(pairing_code, request_id);
+        self.pairing_requests
+            .write()
+            .await
+            .insert(request_id.clone(), request.clone());
+        self.code_to_request
+            .write()
+            .await
+            .insert(pairing_code, request_id);
 
-        info!("Initiated pairing request: {} for device: {}", request_id_copy, device_id);
+        info!(
+            "Initiated pairing request: {} for device: {}",
+            request_id_copy, device_id
+        );
 
         // 启动过期清理任务
         let requests = Arc::clone(&self.pairing_requests);
@@ -189,7 +201,9 @@ impl DevicePairingManager {
 
             // 过期后清理
             if let Some(mut req) = requests.write().await.get_mut(&req_id) {
-                if req.status == PairingStatus::Pending || req.status == PairingStatus::AwaitingConfirmation {
+                if req.status == PairingStatus::Pending
+                    || req.status == PairingStatus::AwaitingConfirmation
+                {
                     req.status = PairingStatus::Expired;
                     // 清理代码映射
                     codes.write().await.remove(&req.pairing_code);
@@ -203,11 +217,13 @@ impl DevicePairingManager {
     /// 通过配对码获取配对请求
     pub async fn get_request_by_code(&self, code: &str) -> Result<PairingRequest> {
         let codes = self.code_to_request.read().await;
-        let request_id = codes.get(code)
+        let request_id = codes
+            .get(code)
             .ok_or_else(|| UHorseError::InternalError("Invalid pairing code".to_string()))?;
 
         let requests = self.pairing_requests.read().await;
-        let request = requests.get(request_id)
+        let request = requests
+            .get(request_id)
             .ok_or_else(|| UHorseError::InternalError("Pairing request not found".to_string()))?;
 
         Ok(request.clone())
@@ -216,17 +232,21 @@ impl DevicePairingManager {
     /// 确认配对
     pub async fn confirm_pairing(&self, code: &str, user_id: String) -> Result<DeviceInfo> {
         let codes = self.code_to_request.read().await;
-        let request_id = codes.get(code)
+        let request_id = codes
+            .get(code)
             .ok_or_else(|| UHorseError::InternalError("Invalid pairing code".to_string()))?
             .clone();
 
         let mut requests = self.pairing_requests.write().await;
-        let request = requests.get_mut(&request_id)
+        let request = requests
+            .get_mut(&request_id)
             .ok_or_else(|| UHorseError::InternalError("Pairing request not found".to_string()))?;
 
         if request.is_expired() {
             request.status = PairingStatus::Expired;
-            return Err(UHorseError::InternalError("Pairing request expired".to_string()));
+            return Err(UHorseError::InternalError(
+                "Pairing request expired".to_string(),
+            ));
         }
 
         request.confirm(user_id.clone());
@@ -235,12 +255,17 @@ impl DevicePairingManager {
         let mut devices = self.devices.write().await;
         if let Some(device) = devices.get_mut(&request.device_id) {
             device.paired = true;
-            device.paired_at = Some(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs());
+            device.paired_at = Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
 
-            info!("Device paired: {} for user: {}", request.device_id.0, user_id);
+            info!(
+                "Device paired: {} for user: {}",
+                request.device_id.0, user_id
+            );
 
             // 清理配对请求
             codes.clone(); // 释放锁
@@ -256,7 +281,8 @@ impl DevicePairingManager {
     /// 拒绝配对
     pub async fn reject_pairing(&self, code: &str) -> Result<()> {
         let codes = self.code_to_request.read().await;
-        let request_id = codes.get(code)
+        let request_id = codes
+            .get(code)
             .ok_or_else(|| UHorseError::InternalError("Invalid pairing code".to_string()))?
             .clone();
 
@@ -271,7 +297,9 @@ impl DevicePairingManager {
 
             Ok(())
         } else {
-            Err(UHorseError::InternalError("Pairing request not found".to_string()))
+            Err(UHorseError::InternalError(
+                "Pairing request not found".to_string(),
+            ))
         }
     }
 
@@ -282,19 +310,25 @@ impl DevicePairingManager {
             request.cancel();
 
             // 清理代码映射
-            self.code_to_request.write().await.remove(&request.pairing_code);
+            self.code_to_request
+                .write()
+                .await
+                .remove(&request.pairing_code);
 
             info!("Pairing cancelled: {}", request_id);
             Ok(())
         } else {
-            Err(UHorseError::InternalError("Pairing request not found".to_string()))
+            Err(UHorseError::InternalError(
+                "Pairing request not found".to_string(),
+            ))
         }
     }
 
     /// 获取配对请求
     pub async fn get_pairing_request(&self, request_id: &str) -> Result<PairingRequest> {
         let requests = self.pairing_requests.read().await;
-        requests.get(request_id)
+        requests
+            .get(request_id)
             .cloned()
             .ok_or_else(|| UHorseError::InternalError("Pairing request not found".to_string()))
     }
@@ -304,7 +338,10 @@ impl DevicePairingManager {
         let requests = self.pairing_requests.read().await;
         Ok(requests
             .values()
-            .filter(|r| r.status == PairingStatus::Pending || r.status == PairingStatus::AwaitingConfirmation)
+            .filter(|r| {
+                r.status == PairingStatus::Pending
+                    || r.status == PairingStatus::AwaitingConfirmation
+            })
             .cloned()
             .collect())
     }
@@ -316,7 +353,11 @@ impl DevicePairingManager {
 
         let expired: Vec<String> = requests
             .iter()
-            .filter(|(_, r)| r.is_expired() || r.status == PairingStatus::Rejected || r.status == PairingStatus::Cancelled)
+            .filter(|(_, r)| {
+                r.is_expired()
+                    || r.status == PairingStatus::Rejected
+                    || r.status == PairingStatus::Cancelled
+            })
             .map(|(id, _)| id.clone())
             .collect();
 
@@ -365,7 +406,10 @@ impl Default for DevicePairingManager {
 #[async_trait::async_trait]
 impl DeviceManager for DevicePairingManager {
     async fn register_device(&self, device: &DeviceInfo) -> Result<()> {
-        self.devices.write().await.insert(device.id.clone(), device.clone());
+        self.devices
+            .write()
+            .await
+            .insert(device.id.clone(), device.clone());
         Ok(())
     }
 
@@ -374,7 +418,10 @@ impl DeviceManager for DevicePairingManager {
     }
 
     async fn update_device(&self, device: &DeviceInfo) -> Result<()> {
-        self.devices.write().await.insert(device.id.clone(), device.clone());
+        self.devices
+            .write()
+            .await
+            .insert(device.id.clone(), device.clone());
         Ok(())
     }
 

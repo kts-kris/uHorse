@@ -103,7 +103,9 @@ impl Session {
 // ============== 通道类型 ==============
 
 /// 支持的消息通道类型
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, strum::Display, strum::EnumIter)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, strum::Display, strum::EnumIter,
+)]
 pub enum ChannelType {
     Telegram,
     Slack,
@@ -190,7 +192,12 @@ pub struct Message {
 
 impl Message {
     /// 创建新消息
-    pub fn new(session_id: SessionId, role: MessageRole, content: MessageContent, sequence: u64) -> Self {
+    pub fn new(
+        session_id: SessionId,
+        role: MessageRole,
+        content: MessageContent,
+        sequence: u64,
+    ) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -558,19 +565,46 @@ impl ErrorCode {
     /// 获取错误类别
     pub fn category(&self) -> ErrorCategory {
         match self {
-            ErrorCode::Unknown | ErrorCode::InternalError | ErrorCode::NotImplemented => ErrorCategory::General,
-            ErrorCode::InvalidMessage | ErrorCode::UnsupportedVersion | ErrorCode::HandshakeFailed => ErrorCategory::Protocol,
-            ErrorCode::Unauthorized | ErrorCode::TokenExpired | ErrorCode::InvalidToken | ErrorCode::DeviceNotPaired => ErrorCategory::Auth,
-            ErrorCode::SessionNotFound | ErrorCode::SessionExpired | ErrorCode::SessionIsolated => ErrorCategory::Session,
-            ErrorCode::ToolNotFound | ErrorCode::ToolPermissionDenied | ErrorCode::ToolValidationFailed | ErrorCode::ToolExecutionFailed => ErrorCategory::Tool,
-            ErrorCode::JobNotFound | ErrorCode::JobExecutionFailed | ErrorCode::ScheduleConflict => ErrorCategory::Scheduler,
-            ErrorCode::IdempotencyConflict | ErrorCode::IdempotencyKeyExpired => ErrorCategory::Idempotency,
+            ErrorCode::Unknown | ErrorCode::InternalError | ErrorCode::NotImplemented => {
+                ErrorCategory::General
+            }
+            ErrorCode::InvalidMessage
+            | ErrorCode::UnsupportedVersion
+            | ErrorCode::HandshakeFailed => ErrorCategory::Protocol,
+            ErrorCode::Unauthorized
+            | ErrorCode::TokenExpired
+            | ErrorCode::InvalidToken
+            | ErrorCode::DeviceNotPaired => ErrorCategory::Auth,
+            ErrorCode::SessionNotFound | ErrorCode::SessionExpired | ErrorCode::SessionIsolated => {
+                ErrorCategory::Session
+            }
+            ErrorCode::ToolNotFound
+            | ErrorCode::ToolPermissionDenied
+            | ErrorCode::ToolValidationFailed
+            | ErrorCode::ToolExecutionFailed => ErrorCategory::Tool,
+            ErrorCode::JobNotFound
+            | ErrorCode::JobExecutionFailed
+            | ErrorCode::ScheduleConflict => ErrorCategory::Scheduler,
+            ErrorCode::IdempotencyConflict | ErrorCode::IdempotencyKeyExpired => {
+                ErrorCategory::Idempotency
+            }
         }
     }
 
     /// 是否为客户端错误 (4xx)
     pub fn is_client_error(&self) -> bool {
-        matches!(self, ErrorCode::InvalidMessage | ErrorCode::Unauthorized | ErrorCode::TokenExpired | ErrorCode::InvalidToken | ErrorCode::DeviceNotPaired | ErrorCode::SessionNotFound | ErrorCode::ToolNotFound | ErrorCode::ToolPermissionDenied | ErrorCode::ToolValidationFailed)
+        matches!(
+            self,
+            ErrorCode::InvalidMessage
+                | ErrorCode::Unauthorized
+                | ErrorCode::TokenExpired
+                | ErrorCode::InvalidToken
+                | ErrorCode::DeviceNotPaired
+                | ErrorCode::SessionNotFound
+                | ErrorCode::ToolNotFound
+                | ErrorCode::ToolPermissionDenied
+                | ErrorCode::ToolValidationFailed
+        )
     }
 
     /// 是否为服务端错误 (5xx)

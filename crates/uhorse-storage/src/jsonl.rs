@@ -2,11 +2,11 @@
 //!
 //! JSON Lines 格式的日志记录，用于审计和调试。
 
-use uhorse_core::Result;
 use std::path::Path;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tracing::{debug, instrument};
+use uhorse_core::Result;
 
 /// JSONL 日志记录器
 #[derive(Debug)]
@@ -21,7 +21,8 @@ impl JsonlLogger {
 
         // 确保目录存在
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| uhorse_core::StorageError::ConnectionError(e.to_string()))?;
         }
 
@@ -43,11 +44,17 @@ impl JsonlLogger {
         let json = serde_json::to_string(entry)
             .map_err(|e| uhorse_core::StorageError::DatabaseError(e.to_string()))?;
 
-        self.writer.write_all(json.as_bytes()).await
+        self.writer
+            .write_all(json.as_bytes())
+            .await
             .map_err(|e| uhorse_core::StorageError::DatabaseError(e.to_string()))?;
-        self.writer.write_all(b"\n").await
+        self.writer
+            .write_all(b"\n")
+            .await
             .map_err(|e| uhorse_core::StorageError::DatabaseError(e.to_string()))?;
-        self.writer.flush().await
+        self.writer
+            .flush()
+            .await
             .map_err(|e| uhorse_core::StorageError::DatabaseError(e.to_string()))?;
 
         Ok(())
@@ -55,7 +62,9 @@ impl JsonlLogger {
 
     /// 刷新缓冲区
     pub async fn flush(&mut self) -> Result<()> {
-        self.writer.flush().await
+        self.writer
+            .flush()
+            .await
             .map_err(|e| uhorse_core::StorageError::DatabaseError(e.to_string()))?;
         Ok(())
     }

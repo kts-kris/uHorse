@@ -2,13 +2,12 @@
 //!
 //! 完整实现企业微信机器人 API 集成。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError, UHorseError, Result,
-    ChannelType, Message,
-};
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
+use uhorse_core::{
+    Channel, ChannelError, ChannelType, Message, MessageContent, Result, UHorseError,
+};
 
 /// 企业微信通道
 #[derive(Debug)]
@@ -62,7 +61,10 @@ impl WeWorkChannel {
     }
 
     /// 处理企业微信事件回调 (原始 JSON)
-    pub async fn handle_event_raw(&self, event_json: &str) -> Result<Option<(String, Message)>, ChannelError> {
+    pub async fn handle_event_raw(
+        &self,
+        event_json: &str,
+    ) -> Result<Option<(String, Message)>, ChannelError> {
         debug!("Handling WeWork event (raw)");
 
         // 解析 JSON
@@ -82,56 +84,71 @@ impl WeWorkChannel {
         }
 
         // 提取基本信息
-        let msg_type = event.get("MsgType")
+        let msg_type = event
+            .get("MsgType")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No MsgType in event".to_string()))?;
 
         // 只处理消息类型
-        if msg_type != "text" && msg_type != "image" && msg_type != "voice" &&
-           msg_type != "video" && msg_type != "file" {
+        if msg_type != "text"
+            && msg_type != "image"
+            && msg_type != "voice"
+            && msg_type != "video"
+            && msg_type != "file"
+        {
             debug!("Ignoring non-message event type: {}", msg_type);
             return Ok(None);
         }
 
-        let from_user_id = event.get("FromUserName")
+        let from_user_id = event
+            .get("FromUserName")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No FromUserName in event".to_string()))?;
 
-        let to_user_id = event.get("ToUserName")
+        let to_user_id = event
+            .get("ToUserName")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No ToUserName in event".to_string()))?;
 
         // 提取消息内容
         let message_content = self.extract_content_raw(&event)?;
 
-        debug!("Processed WeWork message: from_user_id={}, to_user_id={}, content={:?}",
-            from_user_id, to_user_id, message_content);
+        debug!(
+            "Processed WeWork message: from_user_id={}, to_user_id={}, content={:?}",
+            from_user_id, to_user_id, message_content
+        );
 
         let message = Message::new(
             uhorse_core::SessionId::new(),
             uhorse_core::MessageRole::User,
             message_content,
-            0
+            0,
         );
 
         Ok(Some((from_user_id.to_string(), message)))
     }
 
     /// 提取消息内容 (从 JSON)
-    fn extract_content_raw(&self, event_obj: &serde_json::Value) -> Result<MessageContent, ChannelError> {
-        let msg_type = event_obj.get("MsgType")
+    fn extract_content_raw(
+        &self,
+        event_obj: &serde_json::Value,
+    ) -> Result<MessageContent, ChannelError> {
+        let msg_type = event_obj
+            .get("MsgType")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No MsgType".to_string()))?;
 
         match msg_type {
             "text" => {
-                let content = event_obj.get("Content")
+                let content = event_obj
+                    .get("Content")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 return Ok(MessageContent::Text(content.to_string()));
             }
             "image" => {
-                let media_id = event_obj.get("MediaId")
+                let media_id = event_obj
+                    .get("MediaId")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 return Ok(MessageContent::Image {
@@ -140,7 +157,8 @@ impl WeWorkChannel {
                 });
             }
             "voice" => {
-                let media_id = event_obj.get("MediaId")
+                let media_id = event_obj
+                    .get("MediaId")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let url = format!("wework://voice?id={}", media_id);
@@ -150,13 +168,15 @@ impl WeWorkChannel {
                 });
             }
             "video" => {
-                let media_id = event_obj.get("MediaId")
+                let media_id = event_obj
+                    .get("MediaId")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 return Ok(MessageContent::Text(format!("[视频] {}", media_id)));
             }
             "file" => {
-                let file_name = event_obj.get("FileName")
+                let file_name = event_obj
+                    .get("FileName")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
                 return Ok(MessageContent::Text(format!("[文件] {}", file_name)));
@@ -178,7 +198,11 @@ impl WeWorkChannel {
     }
 
     /// 上传临时素材
-    pub async fn upload_media(&self, _media_type: &str, _file_path: &str) -> Result<String, ChannelError> {
+    pub async fn upload_media(
+        &self,
+        _media_type: &str,
+        _file_path: &str,
+    ) -> Result<String, ChannelError> {
         // TODO: 实现实际的文件上传
         // POST https://qyapi.weixin.qq.com/cgi-bin/media/upload?access_token={}&type={}
         Ok("media_id".to_string())
@@ -192,7 +216,11 @@ impl Channel for WeWorkChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending message to WeWork: user_id={}", user_id);
 
         // TODO: 实现实际的 HTTP 请求
@@ -215,7 +243,11 @@ impl Channel for WeWorkChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], _signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        _signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         debug!("Verifying WeWork webhook");
         Ok(true)
     }

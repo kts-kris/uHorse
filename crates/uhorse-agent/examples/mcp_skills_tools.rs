@@ -2,14 +2,16 @@
 //!
 //! 展示 uHorse Agent 框架的 MCP、Skills、Tools 集成使用。
 
+use anyhow::Result;
+use std::sync::Arc;
 use uhorse_agent::{
-    tools::{Tool, ToolRegistry, ToolBuilder, builtin_tools},
-    skills::{Skill, SkillConfig, SkillRegistry, SkillManifestParser, SkillExecutor, SkillPermission},
-    mcp::types::{McpToolCall, McpToolResult, McpContent},
+    mcp::types::{McpContent, McpToolCall, McpToolResult},
+    skills::{
+        Skill, SkillConfig, SkillExecutor, SkillManifestParser, SkillPermission, SkillRegistry,
+    },
+    tools::{builtin_tools, Tool, ToolBuilder, ToolRegistry},
     AgentError, AgentResult,
 };
-use std::sync::Arc;
-use anyhow::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,7 +27,10 @@ async fn main() -> Result<()> {
     tool_registry.register(builtin_tools::calculator_tool());
     tool_registry.register(builtin_tools::text_search_tool());
 
-    println!("✅ Registered {} builtin tools:", tool_registry.list_names().len());
+    println!(
+        "✅ Registered {} builtin tools:",
+        tool_registry.list_names().len()
+    );
     for name in tool_registry.list_names() {
         println!("   - {}", name);
     }
@@ -39,9 +44,7 @@ async fn main() -> Result<()> {
         .description("Get weather information for a city")
         .add_param("city", "string", "City name", true)
         .build(|args| {
-            let city = args["city"]
-                .as_str()
-                .unwrap_or("Unknown");
+            let city = args["city"].as_str().unwrap_or("Unknown");
 
             // 模拟天气数据
             let weather_data = match city.to_lowercase().as_str() {
@@ -154,8 +157,17 @@ weather,information
     println!("   Calling forecast tool...");
     let result = tool_registry.call(&forecast_call).await?;
     println!("   City: Shenzhen, Days: 3");
-    let result_text = result.content.first().and_then(|c| if let McpContent::Text { text } = c { Some(text) } else { None });
-    println!("   Result: {}\n", result_text.map(|s| s.as_str()).unwrap_or("No result"));
+    let result_text = result.content.first().and_then(|c| {
+        if let McpContent::Text { text } = c {
+            Some(text)
+        } else {
+            None
+        }
+    });
+    println!(
+        "   Result: {}\n",
+        result_text.map(|s| s.as_str()).unwrap_or("No result")
+    );
     println!("   ✅ Forecast test completed\n");
 
     // ============ 展示 MCP 协议支持 ============
@@ -217,17 +229,10 @@ impl SkillExecutor for WeatherSkillExecutor {
     async fn execute_tool(&self, call: &McpToolCall) -> AgentResult<McpToolResult> {
         match call.name.as_str() {
             "get_forecast" => {
-                let city = call.arguments["city"]
-                    .as_str()
-                    .unwrap_or("Unknown");
-                let days = call.arguments["days"]
-                    .as_u64()
-                    .unwrap_or(1);
+                let city = call.arguments["city"].as_str().unwrap_or("Unknown");
+                let days = call.arguments["days"].as_u64().unwrap_or(1);
 
-                let forecast = format!(
-                    "{}-day forecast for {}: Sunny, 20-25°C",
-                    days, city
-                );
+                let forecast = format!("{}-day forecast for {}: Sunny, 20-25°C", days, city);
 
                 Ok(McpToolResult {
                     name: call.name.clone(),
@@ -235,10 +240,7 @@ impl SkillExecutor for WeatherSkillExecutor {
                     is_error: false,
                 })
             }
-            _ => Err(AgentError::Skill(format!(
-                "Unknown tool: {}",
-                call.name
-            ))),
+            _ => Err(AgentError::Skill(format!("Unknown tool: {}", call.name))),
         }
     }
 

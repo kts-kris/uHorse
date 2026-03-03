@@ -2,13 +2,12 @@
 //!
 //! 完整实现钉钉机器人 API 集成。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError, UHorseError, Result,
-    ChannelType, Message,
-};
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
+use uhorse_core::{
+    Channel, ChannelError, ChannelType, Message, MessageContent, Result, UHorseError,
+};
 
 /// 钉钉通道
 #[derive(Debug)]
@@ -46,7 +45,10 @@ impl DingTalkChannel {
     }
 
     /// 处理钉钉事件回调 (原始 JSON)
-    pub async fn handle_event_raw(&self, event_json: &str) -> Result<Option<(String, Message)>, ChannelError> {
+    pub async fn handle_event_raw(
+        &self,
+        event_json: &str,
+    ) -> Result<Option<(String, Message)>, ChannelError> {
         debug!("Handling DingTalk event (raw)");
 
         // 解析 JSON
@@ -54,11 +56,13 @@ impl DingTalkChannel {
             .map_err(|e| ChannelError::ConfigError(format!("Failed to parse event JSON: {}", e)))?;
 
         // 提取基本信息
-        let conversation_id = event.get("conversationId")
+        let conversation_id = event
+            .get("conversationId")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ChannelError::ConfigError("No conversationId in event".to_string()))?;
 
-        let sender_id = event.get("sender")
+        let sender_id = event
+            .get("sender")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();
@@ -66,22 +70,28 @@ impl DingTalkChannel {
         // 提取消息内容
         let message_content = self.extract_content_raw(&event)?;
 
-        debug!("Processed DingTalk message: conversation_id={}, sender_id={}, content={:?}",
-            conversation_id, sender_id, message_content);
+        debug!(
+            "Processed DingTalk message: conversation_id={}, sender_id={}, content={:?}",
+            conversation_id, sender_id, message_content
+        );
 
         let message = Message::new(
             uhorse_core::SessionId::new(),
             uhorse_core::MessageRole::User,
             message_content,
-            0
+            0,
         );
 
         Ok(Some((conversation_id.to_string(), message)))
     }
 
     /// 提取消息内容 (从 JSON)
-    fn extract_content_raw(&self, event_obj: &serde_json::Value) -> Result<MessageContent, ChannelError> {
-        let content = event_obj.get("content")
+    fn extract_content_raw(
+        &self,
+        event_obj: &serde_json::Value,
+    ) -> Result<MessageContent, ChannelError> {
+        let content = event_obj
+            .get("content")
             .ok_or_else(|| ChannelError::ConfigError("No content in event".to_string()))?;
 
         // 文本消息
@@ -94,7 +104,8 @@ impl DingTalkChannel {
             let url = format!("dingtalk://image?key={}", image_key);
             return Ok(MessageContent::Image {
                 url,
-                caption: content.get("description")
+                caption: content
+                    .get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
             });
@@ -103,13 +114,11 @@ impl DingTalkChannel {
         // 音频消息
         if let Some(audio_key) = content.get("audioKey").and_then(|v| v.as_str()) {
             let url = format!("dingtalk://audio?key={}", audio_key);
-            let duration = content.get("duration")
+            let duration = content
+                .get("duration")
                 .and_then(|v| v.as_u64())
                 .map(|d| d as u32);
-            return Ok(MessageContent::Audio {
-                url,
-                duration,
-            });
+            return Ok(MessageContent::Audio { url, duration });
         }
 
         // Markdown 消息
@@ -136,7 +145,11 @@ impl Channel for DingTalkChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending message to DingTalk: user_id={}", user_id);
 
         // TODO: 实现实际的 HTTP 请求
@@ -159,7 +172,11 @@ impl Channel for DingTalkChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], _signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        _signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         debug!("Verifying DingTalk webhook");
         Ok(true)
     }
@@ -192,11 +209,8 @@ mod tests {
 
     #[test]
     fn test_dingtalk_channel_creation() {
-        let channel = DingTalkChannel::new(
-            "test_key".to_string(),
-            "test_secret".to_string(),
-            123456789,
-        );
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789);
 
         assert_eq!(channel.app_key(), "test_key");
         assert_eq!(channel.app_secret(), "test_secret");

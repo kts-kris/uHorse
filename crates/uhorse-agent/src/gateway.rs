@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uhorse_core::{Session, SessionId, Message, MessageContent, MessageRole};
+use uhorse_core::{Message, MessageContent, MessageRole, Session, SessionId};
 use uhorse_llm::LLMClient;
 use uuid::Uuid;
 
@@ -50,15 +50,9 @@ impl Default for GatewayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GatewayEvent {
     /// 消息接收
-    MessageReceived {
-        session_id: String,
-        message: String,
-    },
+    MessageReceived { session_id: String, message: String },
     /// 消息发送
-    MessageSent {
-        session_id: String,
-        message: String,
-    },
+    MessageSent { session_id: String, message: String },
     /// Agent 切换
     AgentSwitched {
         session_id: String,
@@ -66,15 +60,9 @@ pub enum GatewayEvent {
         to_agent: String,
     },
     /// 技能调用
-    SkillInvoked {
-        session_id: String,
-        skill: String,
-    },
+    SkillInvoked { session_id: String, skill: String },
     /// 错误
-    Error {
-        session_id: String,
-        error: String,
-    },
+    Error { session_id: String, error: String },
 }
 
 /// Gateway - 控制平面
@@ -182,7 +170,11 @@ where
         let mut sessions = self.sessions.write().await;
         sessions.insert(session_id.clone(), session);
 
-        tracing::info!("New session created: {} for user {}", session_id, channel_user_id);
+        tracing::info!(
+            "New session created: {} for user {}",
+            session_id,
+            channel_user_id
+        );
         Ok((session_id, true))
     }
 
@@ -220,7 +212,11 @@ where
             .cloned()
             .unwrap_or_else(|| {
                 // 如果没有设置，使用第一个可用的 agent
-                agents.keys().next().cloned().unwrap_or_else(|| "default".to_string())
+                agents
+                    .keys()
+                    .next()
+                    .cloned()
+                    .unwrap_or_else(|| "default".to_string())
             });
 
         let agent = agents

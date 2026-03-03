@@ -2,8 +2,8 @@
 //!
 //! 管理数据库 schema 版本和迁移。
 
-use uhorse_core::Result;
 use tracing::info;
+use uhorse_core::Result;
 
 /// 运行所有待处理的迁移
 pub async fn run_migrations(_db_path: &str) -> Result<()> {

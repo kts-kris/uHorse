@@ -16,7 +16,11 @@ pub enum RouteTarget {
     /// 多个 Agent（并行）
     Multiple(Vec<String>),
     /// 条件路由
-    Conditional { condition: String, then: String, r#else: String },
+    Conditional {
+        condition: String,
+        then: String,
+        r#else: String,
+    },
 }
 
 /// 路由规则
@@ -54,9 +58,7 @@ pub struct Router {
 impl Router {
     /// 创建新的路由器
     pub fn new() -> Self {
-        Self {
-            routes: Vec::new(),
-        }
+        Self { routes: Vec::new() }
     }
 
     /// 添加路由

@@ -2,17 +2,16 @@
 //!
 //! 实现 Discord Bot API 集成。
 
-use uhorse_core::{
-    Channel, MessageContent, ChannelError, UHorseError,
-    ChannelType, Message, MessageRole, Session, SessionId,
-    Result,
-};
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn, instrument};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info, instrument, warn};
+use uhorse_core::{
+    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
+    SessionId, UHorseError,
+};
 
 /// Discord 通道
 #[derive(Debug, Clone)]
@@ -36,7 +35,8 @@ impl DiscordChannel {
 
     /// 获取当前用户信息
     pub async fn get_current_user(&self) -> Result<DiscordUser, ChannelError> {
-        let response = self.client
+        let response = self
+            .client
             .get("https://discord.com/api/v10/users/@me")
             .header("Authorization", format!("Bot {}", self.bot_token))
             .send()
@@ -55,24 +55,31 @@ impl DiscordChannel {
 
     /// 发送消息到 Discord
     async fn send_to_discord(&self, channel_id: &str, content: &str) -> Result<(), ChannelError> {
-        let url = format!("https://discord.com/api/v10/channels/{}/messages", channel_id);
+        let url = format!(
+            "https://discord.com/api/v10/channels/{}/messages",
+            channel_id
+        );
 
         #[derive(Serialize)]
         struct SendMessage<'a> {
             content: &'a str,
         }
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bot {}", self.bot_token))
             .json(&SendMessage { content })
             .send()
             .await
-                        .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!("Discord API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "Discord API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -80,24 +87,31 @@ impl DiscordChannel {
 
     /// 发送嵌入消息
     async fn send_embed(&self, channel_id: &str, embed: &DiscordEmbed) -> Result<(), ChannelError> {
-        let url = format!("https://discord.com/api/v10/channels/{}/messages", channel_id);
+        let url = format!(
+            "https://discord.com/api/v10/channels/{}/messages",
+            channel_id
+        );
 
         #[derive(Serialize)]
         struct SendMessage<'a> {
             embed: &'a DiscordEmbed,
         }
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bot {}", self.bot_token))
             .json(&SendMessage { embed })
             .send()
             .await
-                        .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!("Discord API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "Discord API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -112,7 +126,8 @@ impl DiscordChannel {
             recipient_id: String,
         }
 
-        let response = self.client
+        let response = self
+            .client
             .post(url)
             .header("Authorization", format!("Bot {}", self.bot_token))
             .json(&CreateDm {
@@ -120,7 +135,7 @@ impl DiscordChannel {
             })
             .send()
             .await
-                        .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
         if !response.status().is_success() {
             return Err(ChannelError::SendFailed("Failed to create DM".to_string()));
@@ -142,7 +157,11 @@ impl Channel for DiscordChannel {
     }
 
     #[instrument(skip(self, message))]
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError> {
+    async fn send_message(
+        &self,
+        user_id: &str,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError> {
         debug!("Sending Discord message to {}: {:?}", user_id, message);
 
         // Discord 需要先创建 DM 通道
@@ -162,7 +181,11 @@ impl Channel for DiscordChannel {
     }
 
     #[instrument(skip(self))]
-    async fn verify_webhook(&self, _payload: &[u8], signature: Option<&str>) -> Result<bool, ChannelError> {
+    async fn verify_webhook(
+        &self,
+        _payload: &[u8],
+        signature: Option<&str>,
+    ) -> Result<bool, ChannelError> {
         if signature.is_some() {
             debug!("Discord webhook signature present");
         }
@@ -173,7 +196,9 @@ impl Channel for DiscordChannel {
     async fn start(&mut self) -> Result<()> {
         info!("Starting Discord channel");
 
-        let user = self.get_current_user().await
+        let user = self
+            .get_current_user()
+            .await
             .map_err(UHorseError::ChannelError)?;
         info!("Connected as Discord bot: {}", user.username);
 
@@ -255,4 +280,3 @@ pub struct DiscordAttachment {
     pub content_type: Option<String>,
     pub size: u64,
 }
-

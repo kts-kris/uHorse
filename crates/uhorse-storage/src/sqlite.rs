@@ -2,10 +2,10 @@
 //!
 //! 基于 SQLite 的持久化实现。
 
-use sqlx::{sqlite::SqliteConnectOptions, SqlitePool, Pool, Row};
-use uhorse_core::{SessionStore, ConversationStore, Result, StorageError, UHorseError};
-use uhorse_core::types::{Session, Message, SessionId, ChannelType, MessageContent, MessageRole};
+use sqlx::{sqlite::SqliteConnectOptions, Pool, Row, SqlitePool};
 use tracing::{debug, info, instrument};
+use uhorse_core::types::{ChannelType, Message, MessageContent, MessageRole, Session, SessionId};
+use uhorse_core::{ConversationStore, Result, SessionStore, StorageError, UHorseError};
 
 /// SQLite 存储实现
 #[derive(Debug, Clone)]
@@ -20,7 +20,8 @@ impl SqliteStore {
 
         // 确保数据库目录存在
         if let Some(parent) = std::path::Path::new(database_url).parent() {
-            tokio::fs::create_dir_all(parent).await
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| StorageError::ConnectionError(e.to_string()))?;
         }
 
@@ -79,7 +80,7 @@ impl SqliteStore {
             );
 
             CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_cache(expires_at);
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await
@@ -141,8 +142,15 @@ impl SessionStore for SqliteStore {
     }
 
     #[instrument(skip(self))]
-    async fn get_session_by_channel(&self, channel: ChannelType, channel_user_id: &str) -> Result<Option<Session>> {
-        debug!("Getting session by channel: {:?} / {}", channel, channel_user_id);
+    async fn get_session_by_channel(
+        &self,
+        channel: ChannelType,
+        channel_user_id: &str,
+    ) -> Result<Option<Session>> {
+        debug!(
+            "Getting session by channel: {:?} / {}",
+            channel, channel_user_id
+        );
 
         let row = sqlx::query(
             "SELECT id, channel, channel_user_id, created_at, updated_at, metadata, isolation_level FROM sessions WHERE channel = ? AND channel_user_id = ? ORDER BY updated_at DESC LIMIT 1"
@@ -168,7 +176,7 @@ impl SessionStore for SqliteStore {
             UPDATE sessions
             SET channel = ?, channel_user_id = ?, updated_at = ?, metadata = ?, isolation_level = ?
             WHERE id = ?
-            "#
+            "#,
         )
         .bind(channel_to_string(session.channel))
         .bind(&session.channel_user_id)
@@ -217,7 +225,10 @@ impl SessionStore for SqliteStore {
 impl ConversationStore for SqliteStore {
     #[instrument(skip(self))]
     async fn add_message(&self, message: &Message) -> Result<()> {
-        debug!("Adding message: {} to session: {}", message.id, message.session_id);
+        debug!(
+            "Adding message: {} to session: {}",
+            message.id, message.session_id
+        );
 
         let content_json = serde_json::to_string(&message.content)
             .map_err(|e| StorageError::DatabaseError(e.to_string()))?;
@@ -226,7 +237,7 @@ impl ConversationStore for SqliteStore {
             r#"
             INSERT INTO conversation_history (id, session_id, sequence, role, content, timestamp)
             VALUES (?, ?, ?, ?, ?, ?)
-            "#
+            "#,
         )
         .bind(&message.id)
         .bind(message.session_id.as_str())
@@ -242,8 +253,16 @@ impl ConversationStore for SqliteStore {
     }
 
     #[instrument(skip(self))]
-    async fn get_history(&self, session_id: &SessionId, limit: usize, before_sequence: Option<u64>) -> Result<Vec<Message>> {
-        debug!("Getting history for session: {} limit: {} before: {:?}", session_id, limit, before_sequence);
+    async fn get_history(
+        &self,
+        session_id: &SessionId,
+        limit: usize,
+        before_sequence: Option<u64>,
+    ) -> Result<Vec<Message>> {
+        debug!(
+            "Getting history for session: {} limit: {} before: {:?}",
+            session_id, limit, before_sequence
+        );
 
         let rows = if let Some(before) = before_sequence {
             sqlx::query(
@@ -265,10 +284,7 @@ impl ConversationStore for SqliteStore {
         }.map_err(|e| StorageError::QueryError(e.to_string()))?;
 
         // 反转顺序（因为查询是 DESC）
-        let messages: Vec<Message> = rows.into_iter()
-            .rev()
-            .map(row_to_message)
-            .collect();
+        let messages: Vec<Message> = rows.into_iter().rev().map(row_to_message).collect();
 
         Ok(messages)
     }
@@ -277,13 +293,12 @@ impl ConversationStore for SqliteStore {
     async fn get_last_sequence(&self, session_id: &SessionId) -> Result<Option<u64>> {
         debug!("Getting last sequence for session: {}", session_id);
 
-        let row: Option<(i64,)> = sqlx::query_as(
-            "SELECT MAX(sequence) FROM conversation_history WHERE session_id = ?"
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| StorageError::QueryError(e.to_string()))?;
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT MAX(sequence) FROM conversation_history WHERE session_id = ?")
+                .bind(session_id.as_str())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| StorageError::QueryError(e.to_string()))?;
 
         Ok(row.map(|(s,)| s as u64))
     }

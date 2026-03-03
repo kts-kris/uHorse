@@ -137,10 +137,7 @@ impl Agent {
         C: LLMClient + Send + Sync,
     {
         // 1. 从内存获取上下文
-        let memory_context = memory
-            .get_context(&session_id)
-            .await
-            .unwrap_or_default();
+        let memory_context = memory.get_context(&session_id).await.unwrap_or_default();
 
         // 2. 从 scope 获取注入的文件（如果有）
         let injected_context = if let Some(scope) = &self.scope {
@@ -163,9 +160,7 @@ impl Agent {
         };
 
         // 3. 构建消息历史
-        let mut messages = vec![ChatMessage::system(
-            self.config.system_prompt.clone(),
-        )];
+        let mut messages = vec![ChatMessage::system(self.config.system_prompt.clone())];
 
         // 添加 workspace 注入的上下文
         if !injected_context.is_empty() {
@@ -343,9 +338,9 @@ impl AgentBuilder {
                 .unwrap_or_else(|| "main".to_string())
         });
 
-        let name = self.name.ok_or_else(|| {
-            AgentError::InvalidConfig("Agent name is required".to_string())
-        })?;
+        let name = self
+            .name
+            .ok_or_else(|| AgentError::InvalidConfig("Agent name is required".to_string()))?;
 
         let description = self.description.unwrap_or_default();
         let system_prompt = self

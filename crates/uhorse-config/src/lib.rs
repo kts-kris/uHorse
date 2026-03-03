@@ -10,7 +10,7 @@ pub mod wizard;
 pub use loader::{ConfigLoader, ConfigWatch};
 pub use source::{ConfigSource, ConfigValue, MergeStrategy};
 pub use validator::{ConfigValidator, ValidationResult};
-pub use wizard::{ConfigWizard, CliWizard};
+pub use wizard::{CliWizard, ConfigWizard};
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -101,12 +101,24 @@ impl Default for ServerConfig {
     }
 }
 
-fn default_server_host() -> String { "0.0.0.0".to_string() }
-fn default_server_port() -> u16 { 8080 }
-fn default_max_connections() -> usize { 1000 }
-fn default_request_timeout() -> u64 { 30 }
-fn default_read_timeout() -> u64 { 10 }
-fn default_write_timeout() -> u64 { 10 }
+fn default_server_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_server_port() -> u16 {
+    8080
+}
+fn default_max_connections() -> usize {
+    1000
+}
+fn default_request_timeout() -> u64 {
+    30
+}
+fn default_read_timeout() -> u64 {
+    10
+}
+fn default_write_timeout() -> u64 {
+    10
+}
 
 /// TLS 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,11 +185,21 @@ impl Default for DatabaseConfig {
     }
 }
 
-fn default_db_path() -> String { "./data/uhorse.db".to_string() }
-fn default_pool_size() -> usize { 10 }
-fn default_conn_timeout() -> u64 { 30 }
-fn default_wal_enabled() -> bool { true }
-fn default_fk_enabled() -> bool { true }
+fn default_db_path() -> String {
+    "./data/uhorse.db".to_string()
+}
+fn default_pool_size() -> usize {
+    10
+}
+fn default_conn_timeout() -> u64 {
+    30
+}
+fn default_wal_enabled() -> bool {
+    true
+}
+fn default_fk_enabled() -> bool {
+    true
+}
 
 /// 通道配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,7 +242,9 @@ pub struct TelegramConfig {
     pub max_connections: usize,
 }
 
-fn default_telegram_max_connections() -> usize { 100 }
+fn default_telegram_max_connections() -> usize {
+    100
+}
 
 /// Slack 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,7 +269,9 @@ pub struct DiscordConfig {
     pub max_shards: u32,
 }
 
-fn default_discord_shards() -> u32 { 1 }
+fn default_discord_shards() -> u32 {
+    1
+}
 
 /// WhatsApp 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,11 +322,21 @@ impl Default for SecurityConfig {
     }
 }
 
-fn default_token_expiry() -> u64 { 86400 } // 24 小时
-fn default_refresh_expiry() -> u64 { 2592000 } // 30 天
-fn default_pairing_expiry() -> u64 { 300 } // 5 分钟
-fn default_approval_enabled() -> bool { true }
-fn default_pairing_enabled() -> bool { true }
+fn default_token_expiry() -> u64 {
+    86400
+} // 24 小时
+fn default_refresh_expiry() -> u64 {
+    2592000
+} // 30 天
+fn default_pairing_expiry() -> u64 {
+    300
+} // 5 分钟
+fn default_approval_enabled() -> bool {
+    true
+}
+fn default_pairing_enabled() -> bool {
+    true
+}
 
 /// 日志配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -401,7 +437,9 @@ impl Default for ObservabilityConfig {
     }
 }
 
-fn default_metrics_port() -> u16 { 9090 }
+fn default_metrics_port() -> u16 {
+    9090
+}
 
 /// 调度器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -427,8 +465,12 @@ impl Default for SchedulerConfig {
     }
 }
 
-fn default_scheduler_threads() -> usize { 2 }
-fn default_max_concurrent_jobs() -> usize { 100 }
+fn default_scheduler_threads() -> usize {
+    2
+}
+fn default_max_concurrent_jobs() -> usize {
+    100
+}
 
 /// 工具配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,8 +496,12 @@ impl Default for ToolsConfig {
     }
 }
 
-fn default_sandbox_timeout() -> u64 { 30 }
-fn default_sandbox_max_memory() -> usize { 512 }
+fn default_sandbox_timeout() -> u64 {
+    30
+}
+fn default_sandbox_max_memory() -> usize {
+    512
+}
 
 /// LLM 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -505,9 +551,15 @@ impl Default for LLMConfig {
     }
 }
 
-fn default_llm_base_url() -> String { "https://api.openai.com/v1".to_string() }
-fn default_llm_temperature() -> f32 { 0.7 }
-fn default_llm_max_tokens() -> usize { 2000 }
+fn default_llm_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+fn default_llm_temperature() -> f32 {
+    0.7
+}
+fn default_llm_max_tokens() -> usize {
+    2000
+}
 fn default_llm_system_prompt() -> String {
     "You are a helpful AI assistant for uHorse, a multi-channel AI gateway.".to_string()
 }

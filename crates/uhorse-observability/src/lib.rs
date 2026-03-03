@@ -2,30 +2,24 @@
 //!
 //! 可观测性层，提供 tracing、metrics 和审计日志。
 
-pub mod tracing_setup;
-pub mod telemetry;
-pub mod metrics;
 pub mod audit;
 pub mod health;
-pub mod shutdown;
+pub mod metrics;
 pub mod rotation;
+pub mod shutdown;
+pub mod telemetry;
+pub mod tracing_setup;
 
-pub use tracing_setup::{init_tracing, init_dev_observability, init_full_observability};
-pub use telemetry::{OtelConfig, init_observability, SpanContext, current_trace_id};
-pub use metrics::{
-    MetricsCollector, MetricsExporter, ToolTimer, ApiTimer,
-    AuditLogger, AuditLog, AuditResult, AuditFilter,
-    HealthMetrics, SystemMonitor,
-};
 pub use health::{
-    HealthStatus, HealthCheck, CheckResult,
-    HealthService, CheckerType,
-    liveness, readiness,
+    liveness, readiness, CheckResult, CheckerType, HealthCheck, HealthService, HealthStatus,
 };
+pub use metrics::{
+    ApiTimer, AuditFilter, AuditLog, AuditLogger, AuditResult, HealthMetrics, MetricsCollector,
+    MetricsExporter, SystemMonitor, ToolTimer,
+};
+pub use rotation::{LogArchiver, LogRotator, RotationStrategy};
 pub use shutdown::{
-    ShutdownSignal, ShutdownPhase, ShutdownHandle,
-    GracefulShutdown, ShutdownManager, ShutdownTask,
+    GracefulShutdown, ShutdownHandle, ShutdownManager, ShutdownPhase, ShutdownSignal, ShutdownTask,
 };
-pub use rotation::{
-    LogRotator, LogArchiver, RotationStrategy,
-};
+pub use telemetry::{current_trace_id, init_observability, OtelConfig, SpanContext};
+pub use tracing_setup::{init_dev_observability, init_full_observability, init_tracing};

@@ -2,8 +2,8 @@
 //!
 //! 完整的分布式追踪、metrics 和日志集成。
 
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use std::io;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// OpenTelemetry 配置
 #[derive(Debug, Clone)]
