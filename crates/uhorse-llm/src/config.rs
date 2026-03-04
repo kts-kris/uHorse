@@ -175,8 +175,73 @@ impl LLMModel {
 /// 常用模型列表
 pub fn popular_models() -> Vec<LLMModel> {
     vec![
+        // OpenAI
         LLMModel::gpt35_turbo(),
         LLMModel::gpt4_turbo(),
         LLMModel::gpt4(),
+        // Anthropic Claude
+        LLMModel::claude_3_opus(),
+        LLMModel::claude_3_sonnet(),
+        LLMModel::claude_3_haiku(),
+        // Google Gemini
+        LLMModel::gemini_pro(),
+        LLMModel::gemini_ultra(),
     ]
+}
+
+impl LLMModel {
+    /// Anthropic Claude 3 Opus
+    pub fn claude_3_opus() -> Self {
+        Self::new(
+            "claude-3-opus-20240229".to_string(),
+            "Claude 3 Opus".to_string(),
+            LLMProvider::Anthropic,
+            200000,
+            true,
+        )
+    }
+
+    /// Anthropic Claude 3 Sonnet
+    pub fn claude_3_sonnet() -> Self {
+        Self::new(
+            "claude-3-sonnet-20240229".to_string(),
+            "Claude 3 Sonnet".to_string(),
+            LLMProvider::Anthropic,
+            200000,
+            true,
+        )
+    }
+
+    /// Anthropic Claude 3 Haiku
+    pub fn claude_3_haiku() -> Self {
+        Self::new(
+            "claude-3-haiku-20240307".to_string(),
+            "Claude 3 Haiku".to_string(),
+            LLMProvider::Anthropic,
+            200000,
+            true,
+        )
+    }
+
+    /// Google Gemini Pro
+    pub fn gemini_pro() -> Self {
+        Self::new(
+            "gemini-pro".to_string(),
+            "Gemini Pro".to_string(),
+            LLMProvider::Gemini,
+            32760,
+            true,
+        )
+    }
+
+    /// Google Gemini Ultra
+    pub fn gemini_ultra() -> Self {
+        Self::new(
+            "gemini-ultra".to_string(),
+            "Gemini Ultra".to_string(),
+            LLMProvider::Gemini,
+            32760,
+            true,
+        )
+    }
 }

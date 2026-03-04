@@ -1,9 +1,13 @@
 //! # uHorse LLM 适配器
 //!
-//! 提供 OpenAI 兼容的大语言模型集成。
+//! 提供多 LLM 提供商集成（OpenAI、Anthropic、Gemini）。
 
+pub mod anthropic;
 pub mod client;
 pub mod config;
+pub mod gemini;
 
-pub use client::{ChatMessage, LLMClient, OpenAIClient};
+pub use anthropic::AnthropicClient;
+pub use client::{ChatMessage, ChatCompletion, Choice, Usage, LLMClient, OpenAIClient};
 pub use config::{LLMConfig, LLMModel, LLMProvider};
+pub use gemini::GeminiClient;

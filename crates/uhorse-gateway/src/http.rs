@@ -4,7 +4,6 @@
 
 use axum::{
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Json},
     routing::get,
     Router,
@@ -12,19 +11,41 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::api;
+use crate::auth::AuthService;
+
 /// HTTP 处理器状态
 #[derive(Debug, Clone)]
 pub struct HttpState {
-    // TODO: 添加需要共享的状态
+    /// 认证服务
+    pub auth: Arc<AuthService>,
+}
+
+impl HttpState {
+    /// 创建新的 HTTP 状态
+    pub fn new() -> Self {
+        Self {
+            auth: Arc::new(AuthService::default()),
+        }
+    }
+}
+
+impl Default for HttpState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// 创建 HTTP 路由
 pub fn create_router() -> Router {
-    let state = Arc::new(HttpState {});
+    let state = Arc::new(HttpState::new());
+
+    // 合并 API 路由和基础路由
+    let api_router = api::create_api_router(state.clone());
 
     Router::new()
         .route("/health", get(health_check))
-        .route("/api/v1/info", get(get_info))
+        .merge(api_router)
         .with_state(state)
 }
 
@@ -33,15 +54,6 @@ async fn health_check() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
-    }))
-}
-
-/// 获取信息
-async fn get_info(State(_state): State<Arc<HttpState>>) -> impl IntoResponse {
-    Json(serde_json::json!({
-        "name": "uHorse AI Gateway",
-        "version": env!("CARGO_PKG_VERSION"),
-        "description": "Multi-channel AI Gateway Framework",
     }))
 }
 
