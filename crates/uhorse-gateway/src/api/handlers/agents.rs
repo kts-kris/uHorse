@@ -31,7 +31,10 @@ pub async fn get_agent(
     // TODO: 实现获取 Agent 详情
     (
         StatusCode::NOT_FOUND,
-        Json(ApiResponse::<AgentDto>::error("NOT_FOUND", "Agent not found")),
+        Json(ApiResponse::<AgentDto>::error(
+            "NOT_FOUND",
+            "Agent not found",
+        )),
     )
 }
 
@@ -43,7 +46,10 @@ pub async fn create_agent(
     // TODO: 实现创建 Agent
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<AgentDto>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<AgentDto>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }
 
@@ -56,7 +62,10 @@ pub async fn update_agent(
     // TODO: 实现更新 Agent
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<AgentDto>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<AgentDto>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }
 
@@ -68,6 +77,9 @@ pub async fn delete_agent(
     // TODO: 实现删除 Agent
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<()>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<()>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }

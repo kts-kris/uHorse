@@ -82,7 +82,10 @@ impl GeminiClient {
     }
 
     /// 将 ChatMessage 转换为 Gemini 格式
-    fn convert_messages(&self, messages: Vec<ChatMessage>) -> (Option<String>, Vec<serde_json::Value>) {
+    fn convert_messages(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> (Option<String>, Vec<serde_json::Value>) {
         let mut system_instruction = None;
         let mut gemini_messages = Vec::new();
 
@@ -142,7 +145,8 @@ impl LLMClient for GeminiClient {
 
         debug!("Request body: {}", serde_json::to_string_pretty(&body)?);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -156,11 +160,15 @@ impl LLMClient for GeminiClient {
 
         let completion: GeminiResponse = response.json().await?;
 
-        debug!("Received response from Gemini: {} candidates", completion.candidates.len());
+        debug!(
+            "Received response from Gemini: {} candidates",
+            completion.candidates.len()
+        );
 
         // 提取文本内容
         if let Some(candidate) = completion.candidates.first() {
-            let text = candidate.content
+            let text = candidate
+                .content
                 .parts
                 .iter()
                 .filter_map(|part| part.text.clone())

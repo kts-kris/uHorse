@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use super::jwt::{JwtService, Claims};
+use super::jwt::{Claims, JwtService};
 
 /// 用户信息
 #[derive(Debug, Clone)]
@@ -112,10 +112,12 @@ impl AuthService {
         let role = &user.role;
 
         // 生成令牌
-        let access_token = self.jwt_service
+        let access_token = self
+            .jwt_service
             .generate_access_token(user_id, username, role)
             .ok()?;
-        let refresh_token = self.jwt_service
+        let refresh_token = self
+            .jwt_service
             .generate_refresh_token(user_id, username, role)
             .ok()?;
 
@@ -144,10 +146,12 @@ impl AuthService {
         }
 
         // 生成新令牌
-        let access_token = self.jwt_service
+        let access_token = self
+            .jwt_service
             .generate_access_token(&claims.sub, &claims.username, &claims.role)
             .ok()?;
-        let new_refresh_token = self.jwt_service
+        let new_refresh_token = self
+            .jwt_service
             .generate_refresh_token(&claims.sub, &claims.username, &claims.role)
             .ok()?;
 

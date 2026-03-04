@@ -31,7 +31,10 @@ pub async fn get_session(
     // TODO: 实现获取 Session 详情
     (
         StatusCode::NOT_FOUND,
-        Json(ApiResponse::<SessionDto>::error("NOT_FOUND", "Session not found")),
+        Json(ApiResponse::<SessionDto>::error(
+            "NOT_FOUND",
+            "Session not found",
+        )),
     )
 }
 
@@ -43,7 +46,10 @@ pub async fn delete_session(
     // TODO: 实现删除 Session
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<()>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<()>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }
 

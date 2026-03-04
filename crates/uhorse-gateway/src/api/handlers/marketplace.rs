@@ -30,7 +30,10 @@ pub async fn get_marketplace_skill(
     // TODO: 实现获取技能详情
     (
         StatusCode::NOT_FOUND,
-        Json(ApiResponse::<MarketplaceSkill>::error("NOT_FOUND", "Skill not found in marketplace")),
+        Json(ApiResponse::<MarketplaceSkill>::error(
+            "NOT_FOUND",
+            "Skill not found in marketplace",
+        )),
     )
 }
 
@@ -43,6 +46,9 @@ pub async fn install_skill(
     // TODO: 实现安装技能
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<SkillDto>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<SkillDto>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }

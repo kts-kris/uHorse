@@ -31,7 +31,10 @@ pub async fn get_file(
     // TODO: 实现获取文件内容
     (
         StatusCode::NOT_FOUND,
-        Json(ApiResponse::<FileContent>::error("NOT_FOUND", "File not found")),
+        Json(ApiResponse::<FileContent>::error(
+            "NOT_FOUND",
+            "File not found",
+        )),
     )
 }
 
@@ -44,6 +47,9 @@ pub async fn update_file(
     // TODO: 实现更新文件
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<()>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<()>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }

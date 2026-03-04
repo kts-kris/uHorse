@@ -31,7 +31,10 @@ pub async fn get_skill(
     // TODO: 实现获取 Skill 详情
     (
         StatusCode::NOT_FOUND,
-        Json(ApiResponse::<SkillDto>::error("NOT_FOUND", "Skill not found")),
+        Json(ApiResponse::<SkillDto>::error(
+            "NOT_FOUND",
+            "Skill not found",
+        )),
     )
 }
 
@@ -43,7 +46,10 @@ pub async fn create_skill(
     // TODO: 实现创建 Skill
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<SkillDto>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<SkillDto>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }
 
@@ -56,7 +62,10 @@ pub async fn update_skill(
     // TODO: 实现更新 Skill
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<SkillDto>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<SkillDto>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }
 
@@ -68,6 +77,9 @@ pub async fn delete_skill(
     // TODO: 实现删除 Skill
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiResponse::<()>::error("NOT_IMPLEMENTED", "Not implemented yet")),
+        Json(ApiResponse::<()>::error(
+            "NOT_IMPLEMENTED",
+            "Not implemented yet",
+        )),
     )
 }

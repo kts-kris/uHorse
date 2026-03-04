@@ -22,8 +22,8 @@ impl Default for JwtConfig {
     fn default() -> Self {
         Self {
             secret: "uhorse-default-secret-change-in-production".to_string(),
-            access_token_expiry: 86400,      // 24 小时
-            refresh_token_expiry: 604800,    // 7 天
+            access_token_expiry: 86400,   // 24 小时
+            refresh_token_expiry: 604800, // 7 天
         }
     }
 }
@@ -107,7 +107,13 @@ impl JwtService {
         username: &str,
         role: &str,
     ) -> Result<String, jsonwebtoken::errors::Error> {
-        let claims = Claims::new(user_id, username, role, "access", self.config.access_token_expiry);
+        let claims = Claims::new(
+            user_id,
+            username,
+            role,
+            "access",
+            self.config.access_token_expiry,
+        );
         encode(&Header::default(), &claims, &self.encoding_key)
     }
 
@@ -118,7 +124,13 @@ impl JwtService {
         username: &str,
         role: &str,
     ) -> Result<String, jsonwebtoken::errors::Error> {
-        let claims = Claims::new(user_id, username, role, "refresh", self.config.refresh_token_expiry);
+        let claims = Claims::new(
+            user_id,
+            username,
+            role,
+            "refresh",
+            self.config.refresh_token_expiry,
+        );
         encode(&Header::default(), &claims, &self.encoding_key)
     }
 
@@ -147,7 +159,9 @@ mod tests {
     #[test]
     fn test_generate_and_verify_token() {
         let service = JwtService::default();
-        let token = service.generate_access_token("user-1", "admin", "admin").unwrap();
+        let token = service
+            .generate_access_token("user-1", "admin", "admin")
+            .unwrap();
         let claims = service.verify_token(&token).unwrap();
 
         assert_eq!(claims.sub, "user-1");
@@ -159,7 +173,9 @@ mod tests {
     #[test]
     fn test_refresh_token() {
         let service = JwtService::default();
-        let token = service.generate_refresh_token("user-1", "admin", "admin").unwrap();
+        let token = service
+            .generate_refresh_token("user-1", "admin", "admin")
+            .unwrap();
         let claims = service.verify_token(&token).unwrap();
 
         assert_eq!(claims.token_type, "refresh");

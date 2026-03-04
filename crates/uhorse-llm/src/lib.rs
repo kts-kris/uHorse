@@ -8,6 +8,6 @@ pub mod config;
 pub mod gemini;
 
 pub use anthropic::AnthropicClient;
-pub use client::{ChatMessage, ChatCompletion, Choice, Usage, LLMClient, OpenAIClient};
+pub use client::{ChatCompletion, ChatMessage, Choice, LLMClient, OpenAIClient, Usage};
 pub use config::{LLMConfig, LLMModel, LLMProvider};
 pub use gemini::GeminiClient;
