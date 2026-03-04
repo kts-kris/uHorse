@@ -83,11 +83,11 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-          # Linux ARM64 (使用 cross)
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-            use_cross: true
+          # Linux ARM64 - temporarily disabled due to cross-compilation issues
+          # - target: aarch64-unknown-linux-gnu
+          #   os: ubuntu-latest
+          #   archive: tar.gz
+          #   use_cross: true
 
     steps:
       - name: Checkout repository
