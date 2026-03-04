@@ -3,20 +3,64 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'  # 匹配 v1.0.0, v1.0.0-beta.1, v1.0.0-rc.1 等
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v1.0.0)'
-        required: false
-        default: ''
+        description: '版本号 (例如: 1.0.0, 1.0.0-beta.1)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
+  # ==================== 版本解析 ====================
+  resolve-version:
+    name: Resolve Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Resolve version from tag or input
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # 手动触发：使用输入的版本号
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Tag 触发：从 tag 解析版本号
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          fi
+
+          # 移除可能存在的 v 前缀
+          VERSION="${VERSION#v}"
+
+          # 检测是否为预发布版本 (包含 -alpha, -beta, -rc 等)
+          if [[ "$VERSION" =~ -(alpha|beta|rc|pre|dev|test)\.?[0-9]*$ ]]; then
+            PRERELEASE="true"
+          else
+            PRERELEASE="false"
+          fi
+
+          # 生成 tag
+          TAG="v${VERSION}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "prerelease=${PRERELEASE}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+          echo "::notice title=版本::${VERSION}"
+          echo "::notice title=预发布::${PRERELEASE}"
+          echo "::notice title=Tag::${TAG}"
+
   # ==================== 构建多平台二进制 ====================
   build:
+    needs: resolve-version
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -80,101 +124,164 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} -p uhorse-bin
 
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
+          # 重命名为统一名称
+          mv uhorse-bin uhorse 2>/dev/null || true
           strip uhorse 2>/dev/null || true
           chmod +x uhorse
+
+      - name: Prepare binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          mv uhorse-bin.exe uhorse.exe 2>/dev/null || true
 
       - name: Create archive (Unix)
         if: runner.os != 'Windows'
         run: |
-          cd target/${{ matrix.target }}/release
-          tar -czvf uhorse-${{ matrix.target }}.tar.gz uhorse
-          mv uhorse-${{ matrix.target }}.tar.gz ${{ github.workspace }}/
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          ARCHIVE_NAME="uhorse-${VERSION}-${{ matrix.target }}"
+
+          mkdir -p package
+          cp target/${{ matrix.target }}/release/uhorse package/
+          cp README.md package/ 2>/dev/null || true
+          cp LICENSE* package/ 2>/dev/null || true
+
+          tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
+          echo "archive_name=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
 
       - name: Create archive (Windows)
         if: runner.os == 'Windows'
         run: |
-          cd target/${{ matrix.target }}/release
-          7z a uhorse-${{ matrix.target }}.zip uhorse.exe
-          mv uhorse-${{ matrix.target }}.zip ${{ github.workspace }}/
+          $VERSION = "${{ needs.resolve-version.outputs.version }}"
+          $ARCHIVE_NAME = "uhorse-${VERSION}-${{ matrix.target }}"
+
+          New-Item -ItemType Directory -Path package -Force
+          Copy-Item target/${{ matrix.target }}/release/uhorse.exe package/
+          Copy-Item README.md package/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
+          echo "archive_name=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: uhorse-${{ matrix.target }}
+          name: uhorse-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
           path: |
-            ${{ github.workspace }}/uhorse-${{ matrix.target }}.*
+            ${{ github.workspace }}/uhorse-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
 
   # ==================== 发布到 GitHub Releases ====================
   release:
     name: Create Release
-    needs: build
+    needs: [resolve-version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: uhorse-${{ needs.resolve-version.outputs.version }}-*
 
       - name: Display structure of downloaded files
-        run: ls -R artifacts
+        run: find artifacts -type f -ls
 
-      - name: Get version
-        id: version
+      - name: Prepare release assets
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
+          ls -la release-assets/
 
       - name: Generate changelog
         id: changelog
         run: |
-          # 尝试从 CHANGELOG.md 提取当前版本的变更日志
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+
+          # 尝试从 CHANGELOG.md 提取
           if [ -f CHANGELOG.md ]; then
-            VERSION=$(echo ${{ steps.version.outputs.VERSION }} | sed 's/v//')
-            CHANGELOG=$(sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d' | head -50)
-            if [ -n "$CHANGELOG" ]; then
-              echo "CONTENT<<EOF" >> $GITHUB_OUTPUT
-              echo "$CHANGELOG" >> $GITHUB_OUTPUT
-              echo "EOF" >> $GITHUB_OUTPUT
-            else
-              echo "CONTENT=Release ${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "CONTENT=Release ${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+            CHANGELOG=$(sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')
           fi
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+          # 如果没有 CHANGELOG.md 或未找到，从 git log 生成
+          if [ -z "$CHANGELOG" ]; then
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+            echo "## What's Changed" > /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+
+            if [ -n "$PREV_TAG" ]; then
+              echo "### Commits since $PREV_TAG" >> /tmp/changelog.md
+              echo "" >> /tmp/changelog.md
+              git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges >> /tmp/changelog.md
+            else
+              echo "### Initial Release" >> /tmp/changelog.md
+              echo "" >> /tmp/changelog.md
+              git log --pretty=format:"- %s (%h)" --no-merges -20 >> /tmp/changelog.md
+            fi
+
+            CHANGELOG=$(cat /tmp/changelog.md)
+          fi
+
+          {
+            echo 'content<<EOF'
+            echo "$CHANGELOG"
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
+      - name: Create tag (manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.resolve-version.outputs.tag }}" -m "Release ${{ needs.resolve-version.outputs.version }}"
+          git push origin "${{ needs.resolve-version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: uHorse ${{ steps.version.outputs.VERSION }}
-          body: ${{ steps.changelog.outputs.CONTENT }}
+          tag_name: ${{ needs.resolve-version.outputs.tag }}
+          name: uHorse ${{ needs.resolve-version.outputs.version }}
+          body: ${{ steps.changelog.outputs.content }}
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
-          files: |
-            artifacts/**/uhorse-*
+          prerelease: ${{ needs.resolve-version.outputs.prerelease }}
+          generate_release_notes: true
+          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Release Created!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 属性 | 值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| **版本** | ${{ needs.resolve-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag** | ${{ needs.resolve-version.outputs.tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **预发布** | ${{ needs.resolve-version.outputs.prerelease }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 发布文件" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          ls -la release-assets/ >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # ==================== 发布到 crates.io ====================
   publish-crate:
     name: Publish to crates.io
-    needs: release
+    needs: [resolve-version, release]
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.ref, '-') }}  # 不发布预发布版本
+    if: needs.resolve-version.outputs.prerelease != 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -184,12 +291,12 @@ jobs:
 
       - name: Publish to crates.io
         run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
-        continue-on-error: true  # 如果已发布则跳过
+        continue-on-error: true
 
   # ==================== Docker 镜像 ====================
   docker:
     name: Build Docker Image
-    needs: build
+    needs: [resolve-version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -215,15 +322,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Get version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -232,10 +330,10 @@ jobs:
             ${{ github.repository_owner }}/uhorse
             ghcr.io/${{ github.repository_owner }}/uhorse
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+            type=semver,pattern={{version}},value=${{ needs.resolve-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.resolve-version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.resolve-version.outputs.version }},enable=${{ !startsWith(needs.resolve-version.outputs.version, '0.') }}
+            type=raw,value=latest,enable=${{ needs.resolve-version.outputs.prerelease != 'true' }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -248,4 +346,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            VERSION=${{ steps.version.outputs.VERSION }}
+            VERSION=${{ needs.resolve-version.outputs.version }}
