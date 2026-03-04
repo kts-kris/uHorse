@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📚 Documentation
+    url: https://github.com/kts-kris/uHorse#📚-文档
+    about: Check the documentation before opening an issue
+  - name: 💬 Discussions
+    url: https://github.com/kts-kris/uHorse/discussions
+    about: Ask questions and discuss with the community
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/kts-kris/uHorse/security/policy
+    about: Report security vulnerabilities privately

@@ -364,7 +364,7 @@ cargo watch -x run
 
 ## 📄 许可证
 
-双许可：MIT OR Apache-2.0
+双许可：[MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE)
 
 ---
 
