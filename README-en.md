@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="uHorse Logo" width="200">
+  <img src="assets/logo-wide.png" alt="uHorse Logo" style="background-color: white; padding: 20px; border-radius: 10px;" width="400">
 </p>
 
 <h1 align="center">uHorse</h1>
