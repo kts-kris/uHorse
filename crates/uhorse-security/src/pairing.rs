@@ -403,6 +403,273 @@ impl Default for DevicePairingManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pairing_request_creation() {
+        let request = PairingRequest::new(
+            DeviceId("device-001".to_string()),
+            "Test Device".to_string(),
+            "sensor".to_string(),
+        );
+
+        assert!(!request.request_id.is_empty());
+        assert_eq!(request.device_id.0, "device-001");
+        assert_eq!(request.device_name, "Test Device");
+        assert_eq!(request.device_type, "sensor");
+        assert_eq!(request.status, PairingStatus::Pending);
+        assert_eq!(request.pairing_code.len(), 6);
+        assert!(!request.is_expired());
+    }
+
+    #[test]
+    fn test_pairing_request_expiration() {
+        let mut request = PairingRequest::new(
+            DeviceId("device-001".to_string()),
+            "Test".to_string(),
+            "type".to_string(),
+        );
+
+        // 设置过期时间为过去
+        request.expires_at = 0;
+        assert!(request.is_expired());
+    }
+
+    #[test]
+    fn test_pairing_request_confirm() {
+        let mut request = PairingRequest::new(
+            DeviceId("device-001".to_string()),
+            "Test".to_string(),
+            "type".to_string(),
+        );
+
+        request.confirm("user-123".to_string());
+
+        assert_eq!(request.status, PairingStatus::Paired);
+        assert_eq!(request.user_id, Some("user-123".to_string()));
+    }
+
+    #[test]
+    fn test_pairing_request_reject() {
+        let mut request = PairingRequest::new(
+            DeviceId("device-001".to_string()),
+            "Test".to_string(),
+            "type".to_string(),
+        );
+
+        request.reject();
+        assert_eq!(request.status, PairingStatus::Rejected);
+    }
+
+    #[test]
+    fn test_pairing_request_cancel() {
+        let mut request = PairingRequest::new(
+            DeviceId("device-001".to_string()),
+            "Test".to_string(),
+            "type".to_string(),
+        );
+
+        request.cancel();
+        assert_eq!(request.status, PairingStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn test_initiate_pairing() {
+        let manager = DevicePairingManager::new();
+
+        let request = manager
+            .initiate_pairing(
+                DeviceId("device-001".to_string()),
+                "My Device".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(!request.request_id.is_empty());
+        assert_eq!(request.device_id.0, "device-001");
+        assert_eq!(request.status, PairingStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn test_get_request_by_code() {
+        let manager = DevicePairingManager::new();
+
+        let request = manager
+            .initiate_pairing(
+                DeviceId("device-001".to_string()),
+                "My Device".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let code = request.pairing_code.clone();
+        let retrieved = manager.get_request_by_code(&code).await.unwrap();
+
+        assert_eq!(retrieved.request_id, request.request_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_request_by_invalid_code_fails() {
+        let manager = DevicePairingManager::new();
+
+        let result = manager.get_request_by_code("invalid").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_confirm_pairing() {
+        let manager = DevicePairingManager::new();
+
+        let request = manager
+            .initiate_pairing(
+                DeviceId("device-001".to_string()),
+                "My Device".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let code = request.pairing_code.clone();
+        let device = manager
+            .confirm_pairing(&code, "user-123".to_string())
+            .await
+            .unwrap();
+
+        assert!(device.paired);
+        assert!(device.paired_at.is_some());
+
+        // 验证配对码已被清除
+        let result = manager.get_request_by_code(&code).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_reject_pairing() {
+        let manager = DevicePairingManager::new();
+
+        let request = manager
+            .initiate_pairing(
+                DeviceId("device-001".to_string()),
+                "My Device".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let code = request.pairing_code.clone();
+        manager.reject_pairing(&code).await.unwrap();
+
+        // 验证配对码已被清除
+        let result = manager.get_request_by_code(&code).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_pairing() {
+        let manager = DevicePairingManager::new();
+
+        let request = manager
+            .initiate_pairing(
+                DeviceId("device-001".to_string()),
+                "My Device".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let request_id = request.request_id.clone();
+        manager.cancel_pairing(&request_id).await.unwrap();
+
+        let retrieved = manager.get_pairing_request(&request_id).await.unwrap();
+        assert_eq!(retrieved.status, PairingStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn test_list_pending_requests() {
+        let manager = DevicePairingManager::new();
+
+        // 创建多个配对请求
+        manager
+            .initiate_pairing(
+                DeviceId("device-001".to_string()),
+                "Device 1".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+        manager
+            .initiate_pairing(
+                DeviceId("device-002".to_string()),
+                "Device 2".to_string(),
+                "actuator".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let pending = manager.list_pending_requests().await.unwrap();
+        assert_eq!(pending.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_pairing_status() {
+        let manager = DevicePairingManager::new();
+
+        let device_id = DeviceId("device-001".to_string());
+        manager
+            .initiate_pairing(
+                device_id.clone(),
+                "Device 1".to_string(),
+                "sensor".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let status = manager.get_pairing_status(&device_id).await.unwrap();
+        assert_eq!(status, PairingStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn test_device_manager_trait_register() {
+        let manager = DevicePairingManager::new();
+        let device = DeviceInfo {
+            id: DeviceId("device-001".to_string()),
+            name: "Test Device".to_string(),
+            paired: false,
+            paired_at: None,
+            last_seen: 0,
+            capabilities: uhorse_core::DeviceCapabilities::default(),
+        };
+
+        manager.register_device(&device).await.unwrap();
+        let retrieved = manager.get_device(&device.id).await.unwrap();
+        assert!(retrieved.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_device_manager_trait_pair_device() {
+        let manager = DevicePairingManager::new();
+        let device_id = DeviceId("device-001".to_string());
+        let device = DeviceInfo {
+            id: device_id.clone(),
+            name: "Test Device".to_string(),
+            paired: false,
+            paired_at: None,
+            last_seen: 0,
+            capabilities: uhorse_core::DeviceCapabilities::default(),
+        };
+
+        manager.register_device(&device).await.unwrap();
+        manager.pair_device(&device_id).await.unwrap();
+
+        let paired = manager.get_device(&device_id).await.unwrap().unwrap();
+        assert!(paired.paired);
+    }
+}
+
 #[async_trait::async_trait]
 impl DeviceManager for DevicePairingManager {
     async fn register_device(&self, device: &DeviceInfo) -> Result<()> {

@@ -582,3 +582,411 @@ impl Default for ApprovalManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_approval_request_creation() {
+        let request = ApprovalRequest::new(
+            "deploy".to_string(),
+            "user-001".to_string(),
+            ApprovalLevel::Single,
+            vec![Approver {
+                user_id: "admin-001".to_string(),
+                name: "Admin".to_string(),
+                role: "admin".to_string(),
+            }],
+        );
+
+        assert!(!request.id.is_empty());
+        assert_eq!(request.action, "deploy");
+        assert_eq!(request.requested_by, "user-001");
+        assert_eq!(request.status, ApprovalStatus::Pending);
+        assert_eq!(request.approved_count, 0);
+        assert_eq!(request.rejected_count, 0);
+        assert!(!request.is_expired());
+    }
+
+    #[test]
+    fn test_approval_request_expiration() {
+        let mut request = ApprovalRequest::new(
+            "test".to_string(),
+            "user-001".to_string(),
+            ApprovalLevel::Single,
+            vec![],
+        );
+
+        request.expires_at = 0;
+        assert!(request.is_expired());
+    }
+
+    #[test]
+    fn test_single_level_approval_completion() {
+        let mut request = ApprovalRequest::new(
+            "test".to_string(),
+            "user-001".to_string(),
+            ApprovalLevel::Single,
+            vec![Approver {
+                user_id: "admin-001".to_string(),
+                name: "Admin".to_string(),
+                role: "admin".to_string(),
+            }],
+        );
+
+        assert!(!request.is_completed());
+
+        // 添加批准决策
+        request
+            .add_decision(ApprovalDecision {
+                approver_id: "admin-001".to_string(),
+                approved: true,
+                comment: None,
+                decided_at: 0,
+            })
+            .unwrap();
+
+        assert!(request.is_completed());
+        assert_eq!(request.approved_count, 1);
+    }
+
+    #[test]
+    fn test_single_level_rejection() {
+        let mut request = ApprovalRequest::new(
+            "test".to_string(),
+            "user-001".to_string(),
+            ApprovalLevel::Single,
+            vec![Approver {
+                user_id: "admin-001".to_string(),
+                name: "Admin".to_string(),
+                role: "admin".to_string(),
+            }],
+        );
+
+        request
+            .add_decision(ApprovalDecision {
+                approver_id: "admin-001".to_string(),
+                approved: false,
+                comment: Some("Rejected".to_string()),
+                decided_at: 0,
+            })
+            .unwrap();
+
+        assert!(request.is_completed());
+        request.update_status();
+        assert_eq!(request.status, ApprovalStatus::Rejected);
+    }
+
+    #[test]
+    fn test_parallel_approval_completion() {
+        let mut request = ApprovalRequest::new(
+            "test".to_string(),
+            "user-001".to_string(),
+            ApprovalLevel::Parallel { required: 2 },
+            vec![
+                Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin 1".to_string(),
+                    role: "admin".to_string(),
+                },
+                Approver {
+                    user_id: "admin-002".to_string(),
+                    name: "Admin 2".to_string(),
+                    role: "admin".to_string(),
+                },
+            ],
+        );
+
+        // 第一个批准
+        request
+            .add_decision(ApprovalDecision {
+                approver_id: "admin-001".to_string(),
+                approved: true,
+                comment: None,
+                decided_at: 0,
+            })
+            .unwrap();
+
+        assert!(!request.is_completed());
+
+        // 第二个批准
+        request
+            .add_decision(ApprovalDecision {
+                approver_id: "admin-002".to_string(),
+                approved: true,
+                comment: None,
+                decided_at: 0,
+            })
+            .unwrap();
+
+        assert!(request.is_completed());
+        assert_eq!(request.approved_count, 2);
+    }
+
+    #[test]
+    fn test_duplicate_decision_rejected() {
+        let mut request = ApprovalRequest::new(
+            "test".to_string(),
+            "user-001".to_string(),
+            ApprovalLevel::Single,
+            vec![Approver {
+                user_id: "admin-001".to_string(),
+                name: "Admin".to_string(),
+                role: "admin".to_string(),
+            }],
+        );
+
+        request
+            .add_decision(ApprovalDecision {
+                approver_id: "admin-001".to_string(),
+                approved: true,
+                comment: None,
+                decided_at: 0,
+            })
+            .unwrap();
+
+        // 同一审批人不能重复决策
+        let result = request.add_decision(ApprovalDecision {
+            approver_id: "admin-001".to_string(),
+            approved: false,
+            comment: None,
+            decided_at: 0,
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rule_engine_auto_approve() {
+        let mut engine = ApprovalRuleEngine::new();
+
+        engine.add_auto_approve_rule(ApprovalRule {
+            rule_name: "low_risk".to_string(),
+            condition: serde_json::json!({ "risk_level": "low" }),
+            action: "auto_approve".to_string(),
+        });
+
+        let metadata = serde_json::json!({ "risk_level": "low" });
+        assert!(engine.evaluate_auto_approve(&metadata));
+
+        let other_metadata = serde_json::json!({ "risk_level": "high" });
+        assert!(!engine.evaluate_auto_approve(&other_metadata));
+    }
+
+    #[test]
+    fn test_rule_engine_auto_reject() {
+        let mut engine = ApprovalRuleEngine::new();
+
+        engine.add_auto_reject_rule(ApprovalRule {
+            rule_name: "blacklist".to_string(),
+            condition: serde_json::json!({ "user": "blocked_user" }),
+            action: "auto_reject".to_string(),
+        });
+
+        let metadata = serde_json::json!({ "user": "blocked_user" });
+        assert!(engine.evaluate_auto_reject(&metadata));
+
+        let other_metadata = serde_json::json!({ "user": "good_user" });
+        assert!(!engine.evaluate_auto_reject(&other_metadata));
+    }
+
+    #[tokio::test]
+    async fn test_manager_create_request() {
+        let manager = ApprovalManager::new();
+
+        let request = manager
+            .create_request(
+                "deploy".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin".to_string(),
+                    role: "admin".to_string(),
+                }],
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(request.action, "deploy");
+        assert_eq!(request.status, ApprovalStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn test_manager_approve_request() {
+        let manager = ApprovalManager::new();
+
+        let request = manager
+            .create_request(
+                "deploy".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin".to_string(),
+                    role: "admin".to_string(),
+                }],
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        let approved = manager
+            .approve_request(&request.id, "admin-001".to_string(), Some("OK".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(approved.status, ApprovalStatus::Approved);
+        assert_eq!(approved.approved_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_manager_reject_request() {
+        let manager = ApprovalManager::new();
+
+        let request = manager
+            .create_request(
+                "deploy".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin".to_string(),
+                    role: "admin".to_string(),
+                }],
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        let rejected = manager
+            .reject_request(
+                &request.id,
+                "admin-001".to_string(),
+                Some("Not allowed".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(rejected.status, ApprovalStatus::Rejected);
+    }
+
+    #[tokio::test]
+    async fn test_manager_cancel_request() {
+        let manager = ApprovalManager::new();
+
+        let request = manager
+            .create_request(
+                "deploy".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin".to_string(),
+                    role: "admin".to_string(),
+                }],
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        let cancelled = manager.cancel_request(&request.id).await.unwrap();
+        assert!(cancelled);
+
+        let retrieved = manager.get_request(&request.id).await.unwrap().unwrap();
+        assert_eq!(retrieved.status, ApprovalStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn test_manager_get_user_pending_requests() {
+        let manager = ApprovalManager::new();
+
+        manager
+            .create_request(
+                "action1".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin".to_string(),
+                    role: "admin".to_string(),
+                }],
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        manager
+            .create_request(
+                "action2".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![Approver {
+                    user_id: "admin-001".to_string(),
+                    name: "Admin".to_string(),
+                    role: "admin".to_string(),
+                }],
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        let pending = manager
+            .get_user_pending_requests("admin-001")
+            .await
+            .unwrap();
+        assert_eq!(pending.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_manager_with_auto_approve_rule() {
+        let mut engine = ApprovalRuleEngine::new();
+        engine.add_auto_approve_rule(ApprovalRule {
+            rule_name: "auto".to_string(),
+            condition: serde_json::json!({ "auto": true }),
+            action: "auto_approve".to_string(),
+        });
+
+        let manager = ApprovalManager::new().with_rule_engine(engine);
+
+        let request = manager
+            .create_request(
+                "deploy".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![],
+                serde_json::json!({ "auto": true }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(request.status, ApprovalStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn test_manager_with_auto_reject_rule() {
+        let mut engine = ApprovalRuleEngine::new();
+        engine.add_auto_reject_rule(ApprovalRule {
+            rule_name: "block".to_string(),
+            condition: serde_json::json!({ "blocked": true }),
+            action: "auto_reject".to_string(),
+        });
+
+        let manager = ApprovalManager::new().with_rule_engine(engine);
+
+        let request = manager
+            .create_request(
+                "deploy".to_string(),
+                "user-001".to_string(),
+                ApprovalLevel::Single,
+                vec![],
+                serde_json::json!({ "blocked": true }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(request.status, ApprovalStatus::Rejected);
+    }
+}

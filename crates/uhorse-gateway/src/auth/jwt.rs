@@ -157,7 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_and_verify_token() {
+    fn test_generate_and_verify_access_token() {
         let service = JwtService::default();
         let token = service
             .generate_access_token("user-1", "admin", "admin")
@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn test_refresh_token() {
+    fn test_generate_and_verify_refresh_token() {
         let service = JwtService::default();
         let token = service
             .generate_refresh_token("user-1", "admin", "admin")
@@ -179,5 +179,80 @@ mod tests {
         let claims = service.verify_token(&token).unwrap();
 
         assert_eq!(claims.token_type, "refresh");
+        assert_eq!(claims.sub, "user-1");
+    }
+
+    #[test]
+    fn test_verify_invalid_token() {
+        let service = JwtService::default();
+        let result = service.verify_token("invalid-token");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_verify_token_with_wrong_secret() {
+        let service1 = JwtService::new(JwtConfig {
+            secret: "secret1".to_string(),
+            ..Default::default()
+        });
+        let service2 = JwtService::new(JwtConfig {
+            secret: "secret2".to_string(),
+            ..Default::default()
+        });
+
+        let token = service1
+            .generate_access_token("user-1", "admin", "admin")
+            .unwrap();
+        let result = service2.verify_token(&token);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = JwtConfig {
+            secret: "my-custom-secret".to_string(),
+            access_token_expiry: 3600,
+            refresh_token_expiry: 86400,
+        };
+        let service = JwtService::new(config);
+
+        let token = service
+            .generate_access_token("user-1", "test", "user")
+            .unwrap();
+        let claims = service.verify_token(&token).unwrap();
+
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(service.access_token_expiry(), 3600);
+    }
+
+    #[test]
+    fn test_claims_creation() {
+        let claims = Claims::new("user-123", "testuser", "admin", "access", 3600);
+
+        assert_eq!(claims.sub, "user-123");
+        assert_eq!(claims.username, "testuser");
+        assert_eq!(claims.role, "admin");
+        assert_eq!(claims.token_type, "access");
+        // 验证 exp > iat
+        assert!(claims.exp > claims.iat);
+    }
+
+    #[test]
+    fn test_different_users_generate_different_tokens() {
+        let service = JwtService::default();
+
+        let token1 = service
+            .generate_access_token("user-1", "alice", "user")
+            .unwrap();
+        let token2 = service
+            .generate_access_token("user-2", "bob", "user")
+            .unwrap();
+
+        assert_ne!(token1, token2);
+
+        let claims1 = service.verify_token(&token1).unwrap();
+        let claims2 = service.verify_token(&token2).unwrap();
+
+        assert_ne!(claims1.sub, claims2.sub);
     }
 }

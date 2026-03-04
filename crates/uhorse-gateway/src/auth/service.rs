@@ -49,28 +49,13 @@ impl AuthService {
         let users = Arc::new(RwLock::new(HashMap::new()));
         let token_blacklist = Arc::new(RwLock::new(Vec::new()));
 
-        let service = Self {
+        info!("AuthService initialized");
+
+        Self {
             jwt_service,
             users,
             token_blacklist,
-        };
-
-        // 初始化默认管理员用户
-        service.initialize_default_users();
-
-        service
-    }
-
-    /// 初始化默认用户
-    fn initialize_default_users(&self) {
-        // 使用 tokio::task::block_in_place 来同步初始化
-        let users = self.users.blocking_write();
-        // 这里不能直接修改，因为 blocking_write 返回的是 guard
-        drop(users);
-
-        // 使用 async 方式初始化
-        // 由于我们在构造函数中，使用简化的方式
-        info!("AuthService initialized with default users");
+        }
     }
 
     /// 添加用户（异步版本）
@@ -189,5 +174,242 @@ impl AuthService {
 impl Default for AuthService {
     fn default() -> Self {
         Self::new(JwtService::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_login_success() {
+        let service = AuthService::default();
+
+        // 添加测试用户
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "password123".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        // 测试登录
+        let result = service.login("testuser", "password123").await;
+        assert!(result.is_some());
+
+        let auth_result = result.unwrap();
+        assert!(!auth_result.access_token.is_empty());
+        assert!(!auth_result.refresh_token.is_empty());
+        assert_eq!(auth_result.expires_in, 86400); // 默认 24 小时
+    }
+
+    #[tokio::test]
+    async fn test_login_wrong_password() {
+        let service = AuthService::default();
+
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "correct_password".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        let result = service.login("testuser", "wrong_password").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_login_nonexistent_user() {
+        let service = AuthService::default();
+
+        let result = service.login("nonexistent", "password").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_token() {
+        let service = AuthService::default();
+
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "password123".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        // 先登录获取 refresh token
+        let login_result = service.login("testuser", "password123").await.unwrap();
+
+        // 等待 1 秒确保时间戳不同（JWT 使用秒级时间戳）
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // 使用 refresh token 刷新
+        let refresh_result = service.refresh_token(&login_result.refresh_token).await;
+        assert!(refresh_result.is_some());
+
+        let new_auth = refresh_result.unwrap();
+
+        // 验证新 token 与旧 token 不同（由于时间戳不同）
+        assert_ne!(new_auth.access_token, login_result.access_token);
+        assert_ne!(new_auth.refresh_token, login_result.refresh_token);
+
+        // 验证新 access token 可以正确解析
+        let claims = service.verify_access_token(&new_auth.access_token);
+        assert!(claims.is_some());
+        let claims = claims.unwrap();
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.username, "testuser");
+        assert_eq!(claims.token_type, "access");
+    }
+
+    #[tokio::test]
+    async fn test_refresh_with_access_token_fails() {
+        let service = AuthService::default();
+
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "password123".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        let login_result = service.login("testuser", "password123").await.unwrap();
+
+        // 尝试使用 access token 刷新应该失败
+        let result = service.refresh_token(&login_result.access_token).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_logout_invalidates_refresh_token() {
+        let service = AuthService::default();
+
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "password123".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        let login_result = service.login("testuser", "password123").await.unwrap();
+
+        // 登出
+        service.logout(&login_result.refresh_token).await;
+
+        // 使用已登出的 refresh token 刷新应该失败
+        let result = service.refresh_token(&login_result.refresh_token).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_verify_access_token() {
+        let service = AuthService::default();
+
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "password123".to_string(),
+                role: "admin".to_string(),
+            })
+            .await;
+
+        let login_result = service.login("testuser", "password123").await.unwrap();
+
+        // 验证 access token
+        let claims = service.verify_access_token(&login_result.access_token);
+        assert!(claims.is_some());
+
+        let claims = claims.unwrap();
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.username, "testuser");
+        assert_eq!(claims.role, "admin");
+    }
+
+    #[tokio::test]
+    async fn test_verify_refresh_token_as_access_fails() {
+        let service = AuthService::default();
+
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "testuser".to_string(),
+                password_hash: "password123".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        let login_result = service.login("testuser", "password123").await.unwrap();
+
+        // 使用 refresh token 作为 access token 验证应该失败
+        let result = service.verify_access_token(&login_result.refresh_token);
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_default_admin_user() {
+        let service = AuthService::default();
+
+        // 首次登录会创建默认管理员
+        let result = service.login("admin", "admin123").await;
+        assert!(result.is_some());
+
+        let claims = service
+            .verify_access_token(&result.unwrap().access_token)
+            .unwrap();
+        assert_eq!(claims.role, "admin");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_users() {
+        let service = AuthService::default();
+
+        // 添加多个用户
+        service
+            .add_user(User {
+                id: "user-1".to_string(),
+                username: "alice".to_string(),
+                password_hash: "pass1".to_string(),
+                role: "admin".to_string(),
+            })
+            .await;
+
+        service
+            .add_user(User {
+                id: "user-2".to_string(),
+                username: "bob".to_string(),
+                password_hash: "pass2".to_string(),
+                role: "user".to_string(),
+            })
+            .await;
+
+        // 测试两个用户都能登录
+        let result1 = service.login("alice", "pass1").await;
+        let result2 = service.login("bob", "pass2").await;
+
+        assert!(result1.is_some());
+        assert!(result2.is_some());
+
+        // 验证不同的 token
+        let claims1 = service
+            .verify_access_token(&result1.unwrap().access_token)
+            .unwrap();
+        let claims2 = service
+            .verify_access_token(&result2.unwrap().access_token)
+            .unwrap();
+
+        assert_ne!(claims1.sub, claims2.sub);
+        assert_eq!(claims1.role, "admin");
+        assert_eq!(claims2.role, "user");
     }
 }
