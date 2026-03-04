@@ -1,0 +1,249 @@
+name: Daily Build
+
+on:
+  schedule:
+    # 每天 UTC 00:00 (北京时间 08:00) 运行
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ==================== 检查是否有变更 ====================
+  check-changes:
+    name: Check Changes
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+      commit_sha: ${{ steps.check.outputs.commit_sha }}
+      commit_message: ${{ steps.check.outputs.commit_message }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes since last daily build
+        id: check
+        run: |
+          # 获取当前 HEAD 的 commit SHA
+          CURRENT_SHA=$(git rev-parse HEAD)
+          CURRENT_MSG=$(git log -1 --pretty=%s HEAD)
+
+          echo "commit_sha=${CURRENT_SHA}" >> $GITHUB_OUTPUT
+          echo "commit_message=${CURRENT_MSG}" >> $GITHUB_OUTPUT
+
+          # 查找最后一次成功的每日构建
+          LAST_BUILD_SHA=$(gh api repos/${{ github.repository }}/actions/workflows/daily-build.yml/runs \
+            --jq '.workflow_runs | map(select(.status == "completed" and .conclusion == "success")) | .[0].head_sha' 2>/dev/null || echo "")
+
+          if [ -z "$LAST_BUILD_SHA" ]; then
+            # 没有找到之前的构建，需要构建
+            echo "No previous daily build found, will build"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          elif [ "$CURRENT_SHA" = "$LAST_BUILD_SHA" ]; then
+            # 相同的 commit，不需要构建
+            echo "No changes since last daily build (${CURRENT_SHA:0:7})"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            # 有新的 commit，需要构建
+            COMMITS_SINCE=$(git rev-list ${LAST_BUILD_SHA}..HEAD --count)
+            echo "Found ${COMMITS_SINCE} new commits since last build"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==================== 每日构建 ====================
+  build:
+    name: Build ${{ matrix.target }}
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Configure cross-compilation (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p ~/.cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-daily-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-daily-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }} -p uhorse-bin
+
+      - name: Prepare binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          mv uhorse-bin uhorse 2>/dev/null || true
+          strip uhorse 2>/dev/null || true
+          chmod +x uhorse
+
+      - name: Prepare binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          mv uhorse-bin.exe uhorse.exe 2>/dev/null || true
+
+      - name: Get date
+        id: date
+        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          DATE="${{ steps.date.outputs.date }}"
+          ARCHIVE_NAME="uhorse-nightly-${DATE}-${{ matrix.target }}"
+
+          mkdir -p package
+          cp target/${{ matrix.target }}/release/uhorse package/
+          cp README.md package/ 2>/dev/null || true
+          cp LICENSE* package/ 2>/dev/null || true
+
+          tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $DATE = "${{ steps.date.outputs.date }}"
+          $ARCHIVE_NAME = "uhorse-nightly-${DATE}-${{ matrix.target }}"
+
+          New-Item -ItemType Directory -Path package -Force
+          Copy-Item target/${{ matrix.target }}/release/uhorse.exe package/
+          Copy-Item README.md package/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhorse-nightly-${{ steps.date.outputs.date }}-${{ matrix.target }}
+          path: uhorse-nightly-*
+
+  # ==================== 更新 Nightly Release ====================
+  nightly-release:
+    name: Update Nightly Release
+    needs: [check-changes, build]
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: uhorse-nightly-*
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Get date
+        id: date
+        run: |
+          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+          echo "display_date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Delete old nightly release
+        run: |
+          # 删除旧的 nightly tag 和 release
+          gh release delete nightly --yes 2>/dev/null || true
+          git push origin --delete refs/tags/nightly 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Nightly Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: uHorse Nightly (${{ steps.date.outputs.display_date }})
+          body: |
+            ## 每日构建 (Nightly Build)
+
+            **构建日期**: ${{ steps.date.outputs.display_date }}
+            **Commit**: ${{ needs.check-changes.outputs.commit_sha }}
+            **消息**: ${{ needs.check-changes.outputs.commit_message }}
+
+            > ⚠️ 这是开发版本，可能不稳定。生产环境请使用正式发布版本。
+
+            ### 变更内容
+            查看 [commit 历史](https://github.com/${{ github.repository }}/commits/main) 获取详细信息。
+          prerelease: true
+          draft: false
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## 🌙 Nightly Build Updated!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 属性 | 值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| **日期** | ${{ steps.date.outputs.display_date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ needs.check-changes.outputs.commit_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 下载: https://github.com/${{ github.repository }}/releases/tag/nightly" >> $GITHUB_STEP_SUMMARY
+
+  # ==================== 无变更时跳过 ====================
+  skip-notify:
+    name: Skip Notification
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log skip reason
+        run: |
+          echo "## ⏭️ 每日构建已跳过" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "主干分支自上次构建以来没有新的变更。" >> $GITHUB_STEP_SUMMARY
