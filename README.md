@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/uhorse-logo.png" alt="uHorse Logo" width="200">
+  <img src="assets/logo.png" alt="uHorse Logo" width="200">
 </p>
 
 <h1 align="center">uHorse</h1>
