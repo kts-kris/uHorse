@@ -71,10 +71,6 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-          # Linux ARM64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
           # macOS x86_64 (Intel)
           - target: x86_64-apple-darwin
             os: macos-latest
@@ -87,6 +83,11 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
+          # Linux ARM64 (使用 cross)
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            use_cross: true
 
     steps:
       - name: Checkout repository
@@ -98,17 +99,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-      - name: Configure cross-compilation (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          mkdir -p ~/.cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -123,8 +115,13 @@ jobs:
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
 
-      - name: Build binary
+      - name: Build binary (native)
+        if: ${{ !matrix.use_cross }}
         run: cargo build --release --target ${{ matrix.target }} -p uhorse
+
+      - name: Build binary (cross)
+        if: matrix.use_cross
+        run: cross build --release --target ${{ matrix.target }} -p uhorse
 
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
