@@ -111,13 +111,12 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }} -p uhorse-bin
+        run: cargo build --release --target ${{ matrix.target }} -p uhorse
 
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          mv uhorse-bin uhorse 2>/dev/null || true
           strip uhorse 2>/dev/null || true
           chmod +x uhorse
 
@@ -125,7 +124,6 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          mv uhorse-bin.exe uhorse.exe 2>/dev/null || true
 
       - name: Get date
         id: date
