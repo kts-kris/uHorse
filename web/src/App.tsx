@@ -7,6 +7,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import MainLayout from './components/Layout/MainLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Agents from './pages/Agents';
+import Skills from './pages/Skills';
+import Sessions from './pages/Sessions';
+import Channels from './pages/Channels';
+import Settings from './pages/Settings';
 
 const queryClient = new QueryClient();
 
@@ -33,11 +38,11 @@ function App() {
             >
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              <Route path="agents" element={<div>Agent 管理页面（开发中）</div>} />
-              <Route path="skills" element={<div>技能管理页面（开发中）</div>} />
-              <Route path="sessions" element={<div>Session 管理页面（开发中）</div>} />
-              <Route path="channels" element={<div>通道管理页面（开发中）</div>} />
-              <Route path="settings" element={<div>系统设置页面（开发中）</div>} />
+              <Route path="agents" element={<Agents />} />
+              <Route path="skills" element={<Skills />} />
+              <Route path="sessions" element={<Sessions />} />
+              <Route path="channels" element={<Channels />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>
         </BrowserRouter>

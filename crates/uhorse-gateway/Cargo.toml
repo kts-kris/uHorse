@@ -20,6 +20,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 futures = "0.3"
+async-stream = "0.3"
 semver = { workspace = true }
 utoipa = { version = "4", features = ["axum_extras"] }
 chrono = { workspace = true }

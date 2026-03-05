@@ -12,6 +12,7 @@ members = [
     "crates/uhorse-config",
     "crates/uhorse-llm",
     "crates/uhorse-agent",
+    "crates/uhorse-multimodal",
     "crates/uhorse-bin",
 ]
 resolver = "2"
@@ -84,7 +85,11 @@ jsonschema = "0.20"
 cron = "0.12"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Async streaming
+async-stream = "0.3"
+futures = "0.3"
 
 # Utilities
 derive_more = { version = "1.0", features = ["from", "display"] }

@@ -100,4 +100,9 @@ pub fn create_api_router(state: Arc<HttpState>) -> AxumRouter<Arc<HttpState>> {
         // === 原有端点 ===
         .route("/api/v1/info", get(handlers::system::get_info))
         .route("/metrics", get(handlers::system::prometheus_metrics))
+        // === 实时通信 ===
+        .route("/api/v1/events", get(handlers::streams::sse_events))
+        .route("/api/v1/chat/stream", post(handlers::streams::stream_chat))
+        .route("/api/v1/connections", get(handlers::streams::get_active_connections))
+        .route("/ws", get(crate::websocket::handle_upgrade))
 }

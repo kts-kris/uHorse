@@ -10,4 +10,5 @@ pub mod health;
 pub mod marketplace;
 pub mod sessions;
 pub mod skills;
+pub mod streams;
 pub mod system;

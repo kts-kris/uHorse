@@ -10,4 +10,4 @@ pub mod store;
 pub mod websocket;
 
 pub use store::MemoryStore;
-pub use websocket::WebSocketHandler;
+pub use websocket::{ConnectionManager, WsEvent};

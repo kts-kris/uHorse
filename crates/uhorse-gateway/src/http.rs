@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::api;
 use crate::auth::AuthService;
 use crate::store::MemoryStore;
+use crate::websocket::ConnectionManager;
 
 /// HTTP 处理器状态
 #[derive(Debug, Clone)]
@@ -22,6 +23,8 @@ pub struct HttpState {
     pub auth: Arc<AuthService>,
     /// 内存存储
     pub store: Arc<MemoryStore>,
+    /// WebSocket 连接管理器
+    pub ws_manager: Arc<ConnectionManager>,
 }
 
 impl HttpState {
@@ -30,6 +33,7 @@ impl HttpState {
         Self {
             auth: Arc::new(AuthService::default()),
             store: Arc::new(MemoryStore::new()),
+            ws_manager: Arc::new(ConnectionManager::new()),
         }
     }
 }
