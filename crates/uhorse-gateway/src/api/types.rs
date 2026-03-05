@@ -247,7 +247,7 @@ pub struct SkillDto {
 }
 
 /// Skill 参数
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct SkillParameter {
     /// 参数名
     pub name: String,
@@ -406,6 +406,13 @@ pub struct FileContent {
     pub content: String,
     /// 文件大小
     pub size: u64,
+}
+
+/// 创建文件请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateFileRequest {
+    /// 文件内容
+    pub content: String,
 }
 
 /// 更新文件请求

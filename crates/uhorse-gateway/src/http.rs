@@ -13,12 +13,15 @@ use std::sync::Arc;
 
 use crate::api;
 use crate::auth::AuthService;
+use crate::store::MemoryStore;
 
 /// HTTP 处理器状态
 #[derive(Debug, Clone)]
 pub struct HttpState {
     /// 认证服务
     pub auth: Arc<AuthService>,
+    /// 内存存储
+    pub store: Arc<MemoryStore>,
 }
 
 impl HttpState {
@@ -26,6 +29,7 @@ impl HttpState {
     pub fn new() -> Self {
         Self {
             auth: Arc::new(AuthService::default()),
+            store: Arc::new(MemoryStore::new()),
         }
     }
 }

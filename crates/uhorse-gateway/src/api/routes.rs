@@ -63,8 +63,20 @@ pub fn create_api_router(state: Arc<HttpState>) -> AxumRouter<Arc<HttpState>> {
         // === 通道管理 ===
         .route("/api/v1/channels", get(handlers::channels::list_channels))
         .route(
-            "/api/v1/channels/:type",
+            "/api/v1/channels/:channel_type",
             get(handlers::channels::get_channel_status),
+        )
+        .route(
+            "/api/v1/channels/:channel_type/enable",
+            post(handlers::channels::enable_channel),
+        )
+        .route(
+            "/api/v1/channels/:channel_type/disable",
+            post(handlers::channels::disable_channel),
+        )
+        .route(
+            "/api/v1/channels/:channel_type/test",
+            post(handlers::channels::test_channel),
         )
         // === 系统信息 ===
         .route(

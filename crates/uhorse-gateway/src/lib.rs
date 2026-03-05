@@ -6,6 +6,8 @@ pub mod api;
 pub mod auth;
 pub mod http;
 pub mod middleware;
+pub mod store;
 pub mod websocket;
 
+pub use store::MemoryStore;
 pub use websocket::WebSocketHandler;
