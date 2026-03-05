@@ -291,42 +291,52 @@ mod tests {
         let manager = AuditManager::new(100);
 
         // 添加多条日志
-        manager.log(AuditLog::new(
-            "tenant1".to_string(),
-            "user1".to_string(),
-            Action::Create,
-            ResourceType::Agent,
-            "创建 Agent 1".to_string(),
-        )).await;
+        manager
+            .log(AuditLog::new(
+                "tenant1".to_string(),
+                "user1".to_string(),
+                Action::Create,
+                ResourceType::Agent,
+                "创建 Agent 1".to_string(),
+            ))
+            .await;
 
-        manager.log(AuditLog::new(
-            "tenant1".to_string(),
-            "user2".to_string(),
-            Action::Delete,
-            ResourceType::Agent,
-            "删除 Agent 2".to_string(),
-        )).await;
+        manager
+            .log(AuditLog::new(
+                "tenant1".to_string(),
+                "user2".to_string(),
+                Action::Delete,
+                ResourceType::Agent,
+                "删除 Agent 2".to_string(),
+            ))
+            .await;
 
-        manager.log(AuditLog::new(
-            "tenant2".to_string(),
-            "user1".to_string(),
-            Action::Create,
-            ResourceType::Skill,
-            "创建 Skill".to_string(),
-        )).await;
+        manager
+            .log(AuditLog::new(
+                "tenant2".to_string(),
+                "user1".to_string(),
+                Action::Create,
+                ResourceType::Skill,
+                "创建 Skill".to_string(),
+            ))
+            .await;
 
         // 按用户过滤
-        let logs = manager.query(AuditQuery {
-            user_id: Some("user1".to_string()),
-            ..Default::default()
-        }).await;
+        let logs = manager
+            .query(AuditQuery {
+                user_id: Some("user1".to_string()),
+                ..Default::default()
+            })
+            .await;
         assert_eq!(logs.len(), 2);
 
         // 按操作类型过滤
-        let logs = manager.query(AuditQuery {
-            action: Some(Action::Delete),
-            ..Default::default()
-        }).await;
+        let logs = manager
+            .query(AuditQuery {
+                action: Some(Action::Delete),
+                ..Default::default()
+            })
+            .await;
         assert_eq!(logs.len(), 1);
     }
 }

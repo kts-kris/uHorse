@@ -56,7 +56,10 @@ pub async fn sse_events(
     State(state): State<Arc<HttpState>>,
     Query(query): Query<SseQuery>,
 ) -> impl IntoResponse {
-    info!("SSE connection established, last_event_id={:?}", query.last_event_id);
+    info!(
+        "SSE connection established, last_event_id={:?}",
+        query.last_event_id
+    );
 
     // 订阅 WebSocket 管理器的事件
     let mut event_rx = state.ws_manager.subscribe_events();
@@ -154,10 +157,8 @@ pub async fn stream_chat(
 
     // 创建模拟的 LLM 流式响应
     let words = vec![
-        "你好", "！", "我", "是", " uHorse", " AI", " 助手", "。",
-        "\n\n",
-        "我", "可以", "帮助", "你", "处理", "各种", "任务", "。",
-        "请", "告诉", "我", "你", "需要", "什么", "帮助", "。",
+        "你好", "！", "我", "是", " uHorse", " AI", " 助手", "。", "\n\n", "我", "可以", "帮助",
+        "你", "处理", "各种", "任务", "。", "请", "告诉", "我", "你", "需要", "什么", "帮助", "。",
     ];
 
     let session_id = req.session_id.clone();
@@ -192,9 +193,7 @@ pub async fn stream_chat(
 
 /// 获取活跃连接数
 #[axum::debug_handler]
-pub async fn get_active_connections(
-    State(state): State<Arc<HttpState>>,
-) -> impl IntoResponse {
+pub async fn get_active_connections(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     let count = state.ws_manager.active_connections().await;
     (
         StatusCode::OK,

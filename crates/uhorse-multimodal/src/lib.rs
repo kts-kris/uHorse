@@ -6,10 +6,10 @@
 //! - Vision (图像理解) - GPT-4V / Claude Vision
 //! - Document (文档解析) - PDF/Word/Excel/Markdown
 
+pub mod document;
+mod error;
 pub mod stt;
 pub mod tts;
 pub mod vision;
-pub mod document;
-mod error;
 
 pub use error::{MultimodalError, Result};

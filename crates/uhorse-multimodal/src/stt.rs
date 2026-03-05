@@ -160,8 +160,16 @@ impl SttClient {
 
     /// 转录音频
     #[instrument(skip(self, audio_data))]
-    pub async fn transcribe(&self, audio_data: &[u8], filename: &str) -> Result<TranscriptionResult> {
-        debug!("Transcribing audio: {} bytes, filename: {}", audio_data.len(), filename);
+    pub async fn transcribe(
+        &self,
+        audio_data: &[u8],
+        filename: &str,
+    ) -> Result<TranscriptionResult> {
+        debug!(
+            "Transcribing audio: {} bytes, filename: {}",
+            audio_data.len(),
+            filename
+        );
 
         let url = format!("{}/audio/transcriptions", self.config.api_base);
 
@@ -201,7 +209,11 @@ impl SttClient {
     /// 翻译音频（翻译为英文）
     #[instrument(skip(self, audio_data))]
     pub async fn translate(&self, audio_data: &[u8], filename: &str) -> Result<TranslationResult> {
-        debug!("Translating audio: {} bytes, filename: {}", audio_data.len(), filename);
+        debug!(
+            "Translating audio: {} bytes, filename: {}",
+            audio_data.len(),
+            filename
+        );
 
         let url = format!("{}/audio/translations", self.config.api_base);
 

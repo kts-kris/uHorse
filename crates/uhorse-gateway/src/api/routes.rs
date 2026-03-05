@@ -103,6 +103,9 @@ pub fn create_api_router(state: Arc<HttpState>) -> AxumRouter<Arc<HttpState>> {
         // === 实时通信 ===
         .route("/api/v1/events", get(handlers::streams::sse_events))
         .route("/api/v1/chat/stream", post(handlers::streams::stream_chat))
-        .route("/api/v1/connections", get(handlers::streams::get_active_connections))
+        .route(
+            "/api/v1/connections",
+            get(handlers::streams::get_active_connections),
+        )
         .route("/ws", get(crate::websocket::handle_upgrade))
 }

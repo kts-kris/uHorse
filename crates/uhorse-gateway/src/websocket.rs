@@ -112,10 +112,7 @@ pub enum WsCommand {
     Unsubscribe { room: String },
     /// 发送消息
     #[serde(rename = "send")]
-    Send {
-        session_id: String,
-        content: String,
-    },
+    Send { session_id: String, content: String },
 }
 
 /// 房间类型
@@ -189,7 +186,11 @@ impl ConnectionManager {
     pub async fn broadcast_to_room(&self, room: &Room, event: WsEvent) {
         let subscriptions = self.room_subscriptions.read().await;
         if let Some(connection_ids) = subscriptions.get(room) {
-            debug!("Broadcasting to room {:?}: {} connections", room, connection_ids.len());
+            debug!(
+                "Broadcasting to room {:?}: {} connections",
+                room,
+                connection_ids.len()
+            );
             // 事件会通过 broadcast channel 传给所有订阅者
         }
         if let Err(e) = self.event_tx.send(event) {
@@ -218,7 +219,10 @@ impl ConnectionManager {
 
     /// 订阅房间
     pub async fn subscribe_room(&self, connection_id: &str, room: Room) {
-        debug!("Connection {} subscribing to room {:?}", connection_id, &room);
+        debug!(
+            "Connection {} subscribing to room {:?}",
+            connection_id, &room
+        );
         self.room_subscriptions
             .write()
             .await
@@ -232,7 +236,10 @@ impl ConnectionManager {
         if let Some(conns) = self.room_subscriptions.write().await.get_mut(room) {
             conns.retain(|id| id != connection_id);
         }
-        debug!("Connection {} unsubscribed from room {:?}", connection_id, room);
+        debug!(
+            "Connection {} unsubscribed from room {:?}",
+            connection_id, room
+        );
     }
 
     /// 获取活跃连接数
@@ -260,13 +267,11 @@ pub async fn handle_upgrade(
 }
 
 /// 处理 WebSocket 连接
-async fn handle_socket(
-    socket: WebSocket,
-    manager: Arc<ConnectionManager>,
-    query: WsConnectQuery,
-) {
+async fn handle_socket(socket: WebSocket, manager: Arc<ConnectionManager>, query: WsConnectQuery) {
     let connection_id = Uuid::new_v4().to_string();
-    let client_id = query.client_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let client_id = query
+        .client_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     let connection = Connection {
         id: connection_id.clone(),
@@ -388,7 +393,10 @@ async fn handle_client_message(
                 manager.unsubscribe_room(connection_id, &room).await;
             }
         }
-        WsCommand::Send { session_id, content } => {
+        WsCommand::Send {
+            session_id,
+            content,
+        } => {
             // 广播消息事件
             let event = WsEvent::Message {
                 session_id,

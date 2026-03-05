@@ -289,8 +289,17 @@ impl VisionClient {
 
     /// 分析图像
     #[instrument(skip(self, image_data))]
-    pub async fn analyze(&self, image_data: &[u8], prompt: &str, mime_type: &str) -> Result<VisionResponse> {
-        debug!("Analyzing image: {} bytes, mime: {}", image_data.len(), mime_type);
+    pub async fn analyze(
+        &self,
+        image_data: &[u8],
+        prompt: &str,
+        mime_type: &str,
+    ) -> Result<VisionResponse> {
+        debug!(
+            "Analyzing image: {} bytes, mime: {}",
+            image_data.len(),
+            mime_type
+        );
 
         let url = format!("{}/chat/completions", self.config.api_base);
 
@@ -373,7 +382,12 @@ impl VisionClient {
 #[async_trait]
 pub trait VisionService: Send + Sync {
     /// 分析图像
-    async fn analyze(&self, image_data: &[u8], prompt: &str, mime_type: &str) -> Result<VisionResponse>;
+    async fn analyze(
+        &self,
+        image_data: &[u8],
+        prompt: &str,
+        mime_type: &str,
+    ) -> Result<VisionResponse>;
 
     /// 从 URL 分析图像
     async fn analyze_url(&self, image_url: &str, prompt: &str) -> Result<VisionResponse>;
@@ -381,7 +395,12 @@ pub trait VisionService: Send + Sync {
 
 #[async_trait]
 impl VisionService for VisionClient {
-    async fn analyze(&self, image_data: &[u8], prompt: &str, mime_type: &str) -> Result<VisionResponse> {
+    async fn analyze(
+        &self,
+        image_data: &[u8],
+        prompt: &str,
+        mime_type: &str,
+    ) -> Result<VisionResponse> {
         self.analyze(image_data, prompt, mime_type).await
     }
 

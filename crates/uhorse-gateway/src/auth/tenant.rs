@@ -193,8 +193,14 @@ impl TenantManager {
         let tenant = Tenant::new(name, plan);
         let tenant_id = tenant.id.clone();
 
-        self.tenants.write().await.insert(tenant_id.clone(), tenant.clone());
-        self.usage.write().await.insert(tenant_id, UsageRecord::new(tenant.id.clone()));
+        self.tenants
+            .write()
+            .await
+            .insert(tenant_id.clone(), tenant.clone());
+        self.usage
+            .write()
+            .await
+            .insert(tenant_id, UsageRecord::new(tenant.id.clone()));
 
         tenant
     }
@@ -220,11 +226,13 @@ impl TenantManager {
     pub async fn check_quota(&self, tenant_id: &str, resource: &str) -> QuotaCheck {
         let tenant = match self.get_tenant(tenant_id).await {
             Some(t) => t,
-            None => return QuotaCheck::Exceeded {
-                resource: "tenant".to_string(),
-                current: 0,
-                limit: 0,
-            },
+            None => {
+                return QuotaCheck::Exceeded {
+                    resource: "tenant".to_string(),
+                    current: 0,
+                    limit: 0,
+                }
+            }
         };
 
         let usage = self.usage.read().await;
@@ -280,9 +288,9 @@ impl TenantManager {
     /// 增加消息计数
     pub async fn increment_messages(&self, tenant_id: &str, count: u64) {
         let mut usage = self.usage.write().await;
-        let record = usage.entry(tenant_id.to_string()).or_insert_with(|| {
-            UsageRecord::new(tenant_id.to_string())
-        });
+        let record = usage
+            .entry(tenant_id.to_string())
+            .or_insert_with(|| UsageRecord::new(tenant_id.to_string()));
         record.messages_count += count;
         record.updated_at = Utc::now();
     }
@@ -290,9 +298,9 @@ impl TenantManager {
     /// 增加请求计数
     pub async fn increment_requests(&self, tenant_id: &str, count: u64) {
         let mut usage = self.usage.write().await;
-        let record = usage.entry(tenant_id.to_string()).or_insert_with(|| {
-            UsageRecord::new(tenant_id.to_string())
-        });
+        let record = usage
+            .entry(tenant_id.to_string())
+            .or_insert_with(|| UsageRecord::new(tenant_id.to_string()));
         record.requests_count += count;
         record.updated_at = Utc::now();
     }
@@ -321,7 +329,9 @@ mod tests {
     #[tokio::test]
     async fn test_create_tenant() {
         let manager = TenantManager::new();
-        let tenant = manager.create_tenant("Test Company".to_string(), TenantPlan::Pro).await;
+        let tenant = manager
+            .create_tenant("Test Company".to_string(), TenantPlan::Pro)
+            .await;
 
         assert_eq!(tenant.name, "Test Company");
         assert_eq!(tenant.plan, TenantPlan::Pro);
@@ -334,7 +344,9 @@ mod tests {
     #[tokio::test]
     async fn test_quota_check() {
         let manager = TenantManager::new();
-        let tenant = manager.create_tenant("Test".to_string(), TenantPlan::Free).await;
+        let tenant = manager
+            .create_tenant("Test".to_string(), TenantPlan::Free)
+            .await;
 
         // 免费版最多 3 个 Agent
         let check = manager.check_quota(&tenant.id, "agents").await;
@@ -344,7 +356,9 @@ mod tests {
     #[tokio::test]
     async fn test_usage_tracking() {
         let manager = TenantManager::new();
-        let tenant = manager.create_tenant("Test".to_string(), TenantPlan::Pro).await;
+        let tenant = manager
+            .create_tenant("Test".to_string(), TenantPlan::Pro)
+            .await;
 
         manager.increment_messages(&tenant.id, 100).await;
         manager.increment_requests(&tenant.id, 50).await;

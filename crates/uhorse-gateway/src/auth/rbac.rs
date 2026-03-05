@@ -197,11 +197,21 @@ impl RbacManager {
             vec![
                 Permission::new(
                     ResourceType::Agent,
-                    vec![Action::Create, Action::Read, Action::Update, Action::Execute],
+                    vec![
+                        Action::Create,
+                        Action::Read,
+                        Action::Update,
+                        Action::Execute,
+                    ],
                 ),
                 Permission::new(
                     ResourceType::Skill,
-                    vec![Action::Create, Action::Read, Action::Update, Action::Execute],
+                    vec![
+                        Action::Create,
+                        Action::Read,
+                        Action::Update,
+                        Action::Execute,
+                    ],
                 ),
                 Permission::new(ResourceType::Session, vec![Action::Read]),
                 Permission::new(ResourceType::Channel, vec![Action::Read]),
@@ -288,10 +298,9 @@ mod tests {
         let mut viewer = UserRole::new("user1".to_string(), Role::Viewer, "tenant1".to_string());
 
         // 添加自定义删除权限
-        viewer.custom_permissions.push(Permission::new(
-            ResourceType::Agent,
-            vec![Action::Delete],
-        ));
+        viewer
+            .custom_permissions
+            .push(Permission::new(ResourceType::Agent, vec![Action::Delete]));
 
         // 现在 Viewer 可以删除 Agent
         assert!(rbac.check_permission(&viewer, ResourceType::Agent, Action::Delete));

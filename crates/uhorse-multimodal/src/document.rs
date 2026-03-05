@@ -74,8 +74,12 @@ impl DocumentType {
     pub fn to_mime(&self) -> &'static str {
         match self {
             DocumentType::Pdf => "application/pdf",
-            DocumentType::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            DocumentType::Xlsx => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            DocumentType::Docx => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
+            DocumentType::Xlsx => {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
             DocumentType::Markdown => "text/markdown",
             DocumentType::Txt => "text/plain",
             DocumentType::Html => "text/html",
@@ -197,12 +201,20 @@ impl DocumentParser {
 
     /// 解析文档
     #[instrument(skip(self, data))]
-    pub async fn parse(&self, data: &[u8], filename: &str, doc_type: Option<DocumentType>) -> Result<ParsedDocument> {
+    pub async fn parse(
+        &self,
+        data: &[u8],
+        filename: &str,
+        doc_type: Option<DocumentType>,
+    ) -> Result<ParsedDocument> {
         debug!("Parsing document: {} ({} bytes)", filename, data.len());
 
         // 检查文件大小
         if data.len() as u64 > self.max_file_size {
-            return Err(MultimodalError::FileTooLarge(data.len() as u64, self.max_file_size));
+            return Err(MultimodalError::FileTooLarge(
+                data.len() as u64,
+                self.max_file_size,
+            ));
         }
 
         // 推断文档类型
@@ -255,7 +267,15 @@ impl DocumentParser {
     }
 
     /// 解析 Markdown
-    async fn parse_markdown(&self, data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_markdown(
+        &self,
+        data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         let text = String::from_utf8_lossy(data).to_string();
         let mut sections = Vec::new();
 
@@ -290,7 +310,15 @@ impl DocumentParser {
     }
 
     /// 解析纯文本
-    async fn parse_text(&self, data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_text(
+        &self,
+        data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         let text = String::from_utf8_lossy(data).to_string();
 
         let sections = vec![DocumentSection {
@@ -303,7 +331,15 @@ impl DocumentParser {
     }
 
     /// 解析 JSON
-    async fn parse_json(&self, data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_json(
+        &self,
+        data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         let text = String::from_utf8_lossy(data).to_string();
 
         // 格式化 JSON
@@ -323,7 +359,15 @@ impl DocumentParser {
     }
 
     /// 解析 CSV
-    async fn parse_csv(&self, data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_csv(
+        &self,
+        data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         let text = String::from_utf8_lossy(data).to_string();
         let mut tables = Vec::new();
         let mut rows: Vec<Vec<String>> = Vec::new();
@@ -348,7 +392,15 @@ impl DocumentParser {
     }
 
     /// 解析 HTML
-    async fn parse_html(&self, data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_html(
+        &self,
+        data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         // 简单的 HTML 标签移除
         let raw = String::from_utf8_lossy(data).to_string();
         let mut text = String::new();
@@ -376,7 +428,15 @@ impl DocumentParser {
     }
 
     /// 解析 PDF（简化版 - 实际需要 pdf-extract 等库）
-    async fn parse_pdf(&self, _data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_pdf(
+        &self,
+        _data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         // TODO: 集成 pdf-extract 库
         debug!("PDF parsing - using placeholder implementation");
 
@@ -393,7 +453,15 @@ impl DocumentParser {
     }
 
     /// 解析 DOCX（简化版 - 实际需要 docx-rs 等库）
-    async fn parse_docx(&self, _data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_docx(
+        &self,
+        _data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         // TODO: 集成 docx-rs 库
         debug!("DOCX parsing - using placeholder implementation");
 
@@ -410,7 +478,15 @@ impl DocumentParser {
     }
 
     /// 解析 XLSX（简化版 - 实际需要 calamine 等库）
-    async fn parse_xlsx(&self, _data: &[u8]) -> Result<(String, Vec<DocumentSection>, Vec<TableData>, Vec<ImageDescription>)> {
+    async fn parse_xlsx(
+        &self,
+        _data: &[u8],
+    ) -> Result<(
+        String,
+        Vec<DocumentSection>,
+        Vec<TableData>,
+        Vec<ImageDescription>,
+    )> {
         // TODO: 集成 calamine 库
         debug!("XLSX parsing - using placeholder implementation");
 
@@ -435,12 +511,22 @@ impl DocumentParser {
 #[async_trait]
 pub trait DocumentService: Send + Sync {
     /// 解析文档
-    async fn parse(&self, data: &[u8], filename: &str, doc_type: Option<DocumentType>) -> Result<ParsedDocument>;
+    async fn parse(
+        &self,
+        data: &[u8],
+        filename: &str,
+        doc_type: Option<DocumentType>,
+    ) -> Result<ParsedDocument>;
 }
 
 #[async_trait]
 impl DocumentService for DocumentParser {
-    async fn parse(&self, data: &[u8], filename: &str, doc_type: Option<DocumentType>) -> Result<ParsedDocument> {
+    async fn parse(
+        &self,
+        data: &[u8],
+        filename: &str,
+        doc_type: Option<DocumentType>,
+    ) -> Result<ParsedDocument> {
         self.parse(data, filename, doc_type).await
     }
 }
@@ -454,13 +540,22 @@ mod tests {
         assert_eq!(DocumentType::from_extension("pdf"), DocumentType::Pdf);
         assert_eq!(DocumentType::from_extension("md"), DocumentType::Markdown);
         assert_eq!(DocumentType::from_extension("JSON"), DocumentType::Json);
-        assert_eq!(DocumentType::from_extension("unknown"), DocumentType::Unknown);
+        assert_eq!(
+            DocumentType::from_extension("unknown"),
+            DocumentType::Unknown
+        );
     }
 
     #[test]
     fn test_document_type_from_mime() {
-        assert_eq!(DocumentType::from_mime("application/pdf"), DocumentType::Pdf);
-        assert_eq!(DocumentType::from_mime("text/markdown"), DocumentType::Markdown);
+        assert_eq!(
+            DocumentType::from_mime("application/pdf"),
+            DocumentType::Pdf
+        );
+        assert_eq!(
+            DocumentType::from_mime("text/markdown"),
+            DocumentType::Markdown
+        );
     }
 
     #[test]
@@ -473,7 +568,10 @@ mod tests {
     async fn test_parse_markdown() {
         let parser = DocumentParser::new();
         let content = b"# Title\n\nThis is content.\n\n## Subtitle\n\nMore content.";
-        let result = parser.parse(content, "test.md", Some(DocumentType::Markdown)).await.unwrap();
+        let result = parser
+            .parse(content, "test.md", Some(DocumentType::Markdown))
+            .await
+            .unwrap();
 
         assert_eq!(result.metadata.doc_type, DocumentType::Markdown);
         assert!(!result.sections.is_empty());
@@ -483,7 +581,10 @@ mod tests {
     async fn test_parse_json() {
         let parser = DocumentParser::new();
         let content = br#"{"name": "test", "value": 123}"#;
-        let result = parser.parse(content, "test.json", Some(DocumentType::Json)).await.unwrap();
+        let result = parser
+            .parse(content, "test.json", Some(DocumentType::Json))
+            .await
+            .unwrap();
 
         assert_eq!(result.metadata.doc_type, DocumentType::Json);
         assert!(!result.text.is_empty());
@@ -493,7 +594,9 @@ mod tests {
     async fn test_file_too_large() {
         let parser = DocumentParser::new().with_max_file_size(10);
         let content = b"This is more than 10 bytes";
-        let result = parser.parse(content, "test.txt", Some(DocumentType::Txt)).await;
+        let result = parser
+            .parse(content, "test.txt", Some(DocumentType::Txt))
+            .await;
 
         assert!(matches!(result, Err(MultimodalError::FileTooLarge(_, _))));
     }
