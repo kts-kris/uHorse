@@ -51,7 +51,7 @@ pub struct SseEventData {
 }
 
 /// SSE 事件端点
-#[axum::debug_handler]
+#[allow(clippy::diverging_sub_expression)]
 pub async fn sse_events(
     State(state): State<Arc<HttpState>>,
     Query(query): Query<SseQuery>,
@@ -148,7 +148,7 @@ pub async fn sse_events(
 }
 
 /// LLM 流式聊天端点
-#[axum::debug_handler]
+#[allow(clippy::diverging_sub_expression)]
 pub async fn stream_chat(
     State(state): State<Arc<HttpState>>,
     Json(req): Json<StreamChatRequest>,
@@ -192,7 +192,7 @@ pub async fn stream_chat(
 }
 
 /// 获取活跃连接数
-#[axum::debug_handler]
+#[allow(clippy::diverging_sub_expression)]
 pub async fn get_active_connections(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     let count = state.ws_manager.active_connections().await;
     (

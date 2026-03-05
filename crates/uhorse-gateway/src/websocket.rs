@@ -127,23 +127,26 @@ pub enum Room {
 }
 
 impl Room {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         if s == "global" {
             Some(Room::Global)
-        } else if let Some(id) = s.strip_prefix("agent:") {
-            Some(Room::Agent(id.to_string()))
-        } else if let Some(id) = s.strip_prefix("session:") {
-            Some(Room::Session(id.to_string()))
         } else {
-            None
+            s.strip_prefix("agent:")
+                .map(|id| Room::Agent(id.to_string()))
+                .or_else(|| {
+                    s.strip_prefix("session:")
+                        .map(|id| Room::Session(id.to_string()))
+                })
         }
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for Room {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Room::Global => "global".to_string(),
-            Room::Agent(id) => format!("agent:{}", id),
-            Room::Session(id) => format!("session:{}", id),
+            Room::Global => write!(f, "global"),
+            Room::Agent(id) => write!(f, "agent:{}", id),
+            Room::Session(id) => write!(f, "session:{}", id),
         }
     }
 }
@@ -255,12 +258,11 @@ impl Default for ConnectionManager {
 }
 
 /// 处理 WebSocket 升级
-#[axum::debug_handler]
 pub async fn handle_upgrade(
     State(state): State<Arc<HttpState>>,
     Query(query): Query<WsConnectQuery>,
     ws: WebSocketUpgrade,
-) -> impl IntoResponse {
+) -> axum::response::Response<axum::body::Body> {
     debug!("WebSocket upgrade request: {:?}", query);
 
     ws.on_upgrade(move |socket| handle_socket(socket, state.ws_manager.clone(), query))
@@ -375,7 +377,7 @@ async fn handle_client_message(
             manager.broadcast(pong).await;
         }
         WsCommand::Subscribe { room } => {
-            if let Some(room) = Room::from_str(&room) {
+            if let Some(room) = Room::parse(&room) {
                 let room_str = room.to_string();
                 manager.subscribe_room(connection_id, room).await;
                 // 发送确认
@@ -389,7 +391,7 @@ async fn handle_client_message(
             }
         }
         WsCommand::Unsubscribe { room } => {
-            if let Some(room) = Room::from_str(&room) {
+            if let Some(room) = Room::parse(&room) {
                 manager.unsubscribe_room(connection_id, &room).await;
             }
         }
@@ -440,7 +442,7 @@ impl SseEvent {
         self
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn format_sse(&self) -> String {
         let mut result = format!("event: {}\n", self.event);
         for line in self.data.lines() {
             result.push_str(&format!("data: {}\n", line));
@@ -448,7 +450,7 @@ impl SseEvent {
         if let Some(ref id) = self.id {
             result.push_str(&format!("id: {}\n", id));
         }
-        result.push_str("\n");
+        result.push('\n');
         result
     }
 }
@@ -459,16 +461,16 @@ mod tests {
 
     #[test]
     fn test_room_parsing() {
-        assert_eq!(Room::from_str("global"), Some(Room::Global));
+        assert_eq!(Room::parse("global"), Some(Room::Global));
         assert_eq!(
-            Room::from_str("agent:123"),
+            Room::parse("agent:123"),
             Some(Room::Agent("123".to_string()))
         );
         assert_eq!(
-            Room::from_str("session:456"),
+            Room::parse("session:456"),
             Some(Room::Session("456".to_string()))
         );
-        assert_eq!(Room::from_str("invalid"), None);
+        assert_eq!(Room::parse("invalid"), None);
     }
 
     #[test]
@@ -481,7 +483,7 @@ mod tests {
     #[test]
     fn test_sse_event() {
         let event = SseEvent::new("message", "Hello World");
-        let s = event.to_string();
+        let s = event.format_sse();
         assert!(s.contains("event: message"));
         assert!(s.contains("data: Hello World"));
     }
@@ -489,7 +491,7 @@ mod tests {
     #[test]
     fn test_sse_event_multiline() {
         let event = SseEvent::new("message", "Line 1\nLine 2");
-        let s = event.to_string();
+        let s = event.format_sse();
         assert!(s.contains("data: Line 1"));
         assert!(s.contains("data: Line 2"));
     }

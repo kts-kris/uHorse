@@ -257,7 +257,7 @@ pub struct FileEntry {
 
 impl FileEntry {
     pub fn new(agent_id: String, path: String, content: String) -> Self {
-        let name = path.split('/').last().unwrap_or(&path).to_string();
+        let name = path.split('/').next_back().unwrap_or(&path).to_string();
         let now = current_timestamp();
         Self {
             agent_id,
@@ -543,7 +543,6 @@ fn current_timestamp() -> u64 {
 
 fn format_timestamp(ts: u64) -> String {
     // ISO 8601 格式
-    let datetime =
-        chrono::DateTime::from_timestamp(ts as i64, 0).unwrap_or_else(|| chrono::Utc::now());
+    let datetime = chrono::DateTime::from_timestamp(ts as i64, 0).unwrap_or_else(chrono::Utc::now);
     datetime.to_rfc3339()
 }

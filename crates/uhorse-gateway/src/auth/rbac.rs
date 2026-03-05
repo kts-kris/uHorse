@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 /// 角色
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     /// 管理员 - 完全访问权限
@@ -18,13 +18,8 @@ pub enum Role {
     /// 操作员 - 可创建/修改资源
     Operator,
     /// 观察者 - 只读权限
+    #[default]
     Viewer,
-}
-
-impl Default for Role {
-    fn default() -> Self {
-        Self::Viewer
-    }
 }
 
 impl std::fmt::Display for Role {

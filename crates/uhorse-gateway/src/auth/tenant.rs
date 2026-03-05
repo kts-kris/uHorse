@@ -15,21 +15,16 @@ use tokio::sync::RwLock;
 pub type TenantId = String;
 
 /// 租户计划
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TenantPlan {
     /// 免费版
+    #[default]
     Free,
     /// 专业版
     Pro,
     /// 企业版
     Enterprise,
-}
-
-impl Default for TenantPlan {
-    fn default() -> Self {
-        Self::Free
-    }
 }
 
 /// 资源配额
