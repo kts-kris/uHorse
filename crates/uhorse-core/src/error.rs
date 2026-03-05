@@ -162,6 +162,12 @@ pub enum ChannelError {
 
     #[error("Timeout")]
     Timeout,
+
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
 }
 
 impl ChannelError {
@@ -173,6 +179,8 @@ impl ChannelError {
             ChannelError::ConfigError(_) => ErrorCode::InternalError,
             ChannelError::ConnectionLost => ErrorCode::InternalError,
             ChannelError::Timeout => ErrorCode::InternalError,
+            ChannelError::ConnectionError(_) => ErrorCode::InternalError,
+            ChannelError::InvalidResponse(_) => ErrorCode::InternalError,
         }
     }
 }
