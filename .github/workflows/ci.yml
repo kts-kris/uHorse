@@ -94,7 +94,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy --all-features --workspace -- -D clippy::all -A clippy::missing_docs_in_private_items
+        run: cargo clippy --all-features --workspace -- -D clippy::all -A clippy::missing_docs_in_private_items -W warnings
         continue-on-error: true
 
   # ==================== 文档检查 ====================
