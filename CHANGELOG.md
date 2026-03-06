@@ -12,6 +12,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Daily build workflow with smart change detection
 - Nightly release channel for development builds
 
+## [2.0.0] - 2026-03-05
+
+### Added
+
+#### Real-time Communication
+- **WebSocket Support**: Full bidirectional real-time communication
+  - Connection management with heartbeat and reconnection
+  - Room-based pub/sub (global, agent, session)
+  - Event broadcasting for messages, state changes, task progress
+- **SSE (Server-Sent Events)**: Streaming event delivery
+  - `/api/v1/events` endpoint for real-time updates
+  - `/api/v1/chat/stream` for LLM streaming responses
+  - Keep-alive support
+
+#### Frontend Management UI
+- **Dashboard**: System overview with metrics and statistics
+- **Agents Page**: Agent CRUD, enable/disable, configuration
+- **Skills Page**: Skill management with parameter definitions
+- **Sessions Page**: Session list, details, message history
+- **Channels Page**: Channel status monitoring and configuration
+- **Settings Page**: System configuration with tabs
+  - General settings (server, logging)
+  - LLM settings (model, API key, parameters)
+  - Security settings (JWT, rate limiting, CORS)
+
+#### Enterprise Features
+- **RBAC (Role-Based Access Control)**:
+  - Roles: Admin, Operator, Viewer
+  - Resources: Agent, Skill, Session, Channel, System, Tenant
+  - Actions: Create, Read, Update, Delete, Execute, Manage
+- **Audit Logging**:
+  - Operation logging with user/IP tracking
+  - Query API with filtering and pagination
+  - Export functionality (JSON/CSV)
+- **Multi-tenancy**:
+  - Tenant isolation with TenantId
+  - Resource quotas (agents, skills, messages, storage)
+  - Tenant plans: Free, Pro, Enterprise
+  - Usage tracking and billing support
+
+#### Multi-modal Support (uhorse-multimodal crate)
+- **STT (Speech-to-Text)**: OpenAI Whisper integration
+  - Multi-language support
+  - Automatic language detection
+- **TTS (Text-to-Speech)**: OpenAI TTS integration
+  - 6 voice options: alloy, echo, fable, onyx, nova, shimmer
+  - Adjustable speed
+- **Vision**: Image understanding
+  - OpenAI GPT-4V support
+  - Anthropic Claude Vision support
+  - Base64 and URL image inputs
+- **Document Parsing**:
+  - PDF text extraction
+  - Word (DOCX) parsing
+  - Excel (XLSX) reading
+  - Markdown/JSON/CSV support
+
+### Changed
+- Improved API handler implementations with full CRUD operations
+- Enhanced channel implementations with better error handling
+- Updated CI configuration with stricter clippy checks
+
+### Dependencies
+- Added `async-stream` for streaming support
+- Added `futures` for async utilities
+- Added `base64` for image encoding
+- Added `utoipa` and `utoipa-swagger-ui` for OpenAPI docs
+
 ## [0.1.0] - 2025-03-04
 
 ### Added
