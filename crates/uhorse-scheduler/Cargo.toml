@@ -19,5 +19,5 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
-tokio-cron-scheduler = "0.10"
+tokio-cron-scheduler = "0.15"
 chrono = "0.4"
