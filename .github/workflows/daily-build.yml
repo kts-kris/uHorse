@@ -143,7 +143,7 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: uhorse-nightly-${{ steps.date.outputs.date }}-${{ matrix.target }}
           path: uhorse-nightly-*
