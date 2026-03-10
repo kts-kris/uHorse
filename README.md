@@ -17,6 +17,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-production%20ready-green" alt="Status">
@@ -327,15 +328,19 @@ weather,api,utility
 - [x] 调度与安全增强
 - [x] 可观测性完善
 
-### v1.1 🚧 进行中
-- [ ] Web 管理界面
-- [ ] 更多 LLM 提供商
-- [ ] 技能市场
+### v2.0 ✅ 已发布
+- [x] **API 完善**: 完整的 REST API (Agents/Skills/Sessions/Files/Channels)
+- [x] **通道实现**: Telegram/钉钉/飞书/企业微信/Slack/Discord/WhatsApp
+- [x] **实时通信**: WebSocket 连接管理 + SSE 流式响应
+- [x] **前端完善**: React 管理界面 (Agent/Skill/Session/Channel 管理)
+- [x] **企业级特性**: RBAC 权限系统 + 审计日志 + 多租户架构
+- [x] **多模态支持**: STT/TTS 语音处理 + Vision 图像理解 + 文件解析
 
-### v2.0 📋 计划中
-- [ ] 多租户支持
+### v2.1 📋 计划中
 - [ ] 联邦学习
 - [ ] 边缘部署优化
+- [ ] 技能市场
+- [ ] 更多 LLM 提供商
 
 ---
 
