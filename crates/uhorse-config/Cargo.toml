@@ -8,6 +8,11 @@ license.workspace = true
 repository.workspace = true
 description = "Configuration management for uHorse AI Gateway"
 
+[features]
+default = ["etcd"]
+etcd = ["dep:etcd-client"]
+distributed = ["etcd"]
+
 [dependencies]
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -19,6 +24,8 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 once_cell = "1.19"
 dirs = "5.0"
+async-trait = { workspace = true }
+etcd-client = { version = "0.13", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

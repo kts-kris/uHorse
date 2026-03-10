@@ -2,15 +2,30 @@
 //!
 //! 提供配置加载、验证和热加载功能。
 
+pub mod distributed;
+pub mod hot_reload;
 pub mod loader;
 pub mod source;
 pub mod validator;
+pub mod versioning;
 pub mod wizard;
 
 pub use loader::{ConfigLoader, ConfigWatch};
 pub use source::{ConfigSource, ConfigValue, MergeStrategy};
 pub use validator::{ConfigValidator, ValidationResult};
 pub use wizard::{CliWizard, ConfigWizard};
+
+// Re-exports for distributed config
+pub use distributed::{
+    ConfigBackend, ConfigWatchEvent, ConfigWatchStream, DistributedConfigClient,
+    DistributedConfigOptions, InMemoryConfigBackend,
+};
+pub use hot_reload::{
+    ConfigChangeEvent, ConfigReloader, HotReloadBuilder, HotReloadManager, ReloadableConfig,
+};
+pub use versioning::{
+    ConfigDiff, ConfigHistory, ConfigRollback, ConfigVersion, DiffLine,
+};
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -69,13 +84,13 @@ pub struct ServerConfig {
     /// 最大连接数
     #[serde(default = "default_max_connections")]
     pub max_connections: usize,
-    /// 请求超时（秒）
+    /// 请求超时（秒)
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
-    /// 读取超时（秒）
+    /// 读取超时（秒)
     #[serde(default = "default_read_timeout")]
     pub read_timeout: u64,
-    /// 写入超时（秒）
+    /// 写入超时（秒)
     #[serde(default = "default_write_timeout")]
     pub write_timeout: u64,
     /// TLS 配置
@@ -162,7 +177,7 @@ pub struct DatabaseConfig {
     /// 连接池大小
     #[serde(default = "default_pool_size")]
     pub pool_size: usize,
-    /// 连接超时（秒）
+    /// 连接超时（秒)
     #[serde(default = "default_conn_timeout")]
     pub conn_timeout: u64,
     /// 启用 WAL 模式
@@ -478,7 +493,7 @@ fn default_max_concurrent_jobs() -> usize {
 pub struct ToolsConfig {
     /// 是否启用沙箱
     pub sandbox_enabled: bool,
-    /// 沙箱超时（秒）
+    /// 沙箱超时（秒)
     #[serde(default = "default_sandbox_timeout")]
     pub sandbox_timeout: u64,
     /// 最大内存（MB）
