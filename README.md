@@ -17,10 +17,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.0.0--dev-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
-  <img src="https://img.shields.io/badge/status-production%20ready-green" alt="Status">
+  <img src="https://img.shields.io/badge/status-active%20development-yellow" alt="Status">
 </p>
 
 ---
@@ -336,11 +336,46 @@ weather,api,utility
 - [x] **企业级特性**: RBAC 权限系统 + 审计日志 + 多租户架构
 - [x] **多模态支持**: STT/TTS 语音处理 + Vision 图像理解 + 文件解析
 
-### v2.1 📋 计划中
-- [ ] 联邦学习
-- [ ] 边缘部署优化
-- [ ] 技能市场
-- [ ] 更多 LLM 提供商
+### v3.0 🚧 开发中 - 企业级 AI 基础设施平台
+
+> 从"企业级多渠道 AI 网关"升级为"企业级 AI 基础设施平台"
+
+**核心目标**:
+
+| 维度 | 2.0 现状 | 3.0 目标 | 提升 |
+|------|----------|----------|------|
+| **高可用性** | 40% | 95% | +55% |
+| **可扩展性** | 40% | 95% | +55% |
+| **安全合规** | 50% | 100% | +50% |
+| **数据治理** | 40% | 100% | +60% |
+| **API 标准** | 60% | 100% | +40% |
+| **企业集成** | 30% | 100% | +70% |
+
+**实施阶段** (23 周):
+
+| Phase | 名称 | 周期 | 状态 | 文档 |
+|-------|------|------|------|------|
+| **Phase 1** | 高可用性基础设施 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase1-high-availability.md) |
+| **Phase 2** | 可扩展性架构 | 5 周 | 📋 计划中 | [详细设计](docs/roadmap/phase2-scalability.md) |
+| **Phase 3** | 安全合规体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase3-security.md) |
+| **Phase 4** | 数据治理体系 | 3 周 | 📋 计划中 | [详细设计](docs/roadmap/phase4-data-governance.md) |
+| **Phase 5** | API 标准体系 | 3 周 | 📋 计划中 | [详细设计](docs/roadmap/phase5-api-standards.md) |
+| **Phase 6** | 企业集成体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase6-enterprise-integration.md) |
+
+**Phase 1 已完成** ✅:
+- [x] etcd 服务发现
+- [x] Consul 备选后端
+- [x] 4 种负载均衡策略 (轮询/加权/健康感知/最少连接)
+- [x] 分布式配置中心
+- [x] 配置热加载
+- [x] 配置版本管理
+
+**Phase 2 计划中**:
+- [ ] 数据库分片
+- [ ] Redis 分布式缓存
+- [ ] NATS 消息队列
+
+📄 **完整文档**: [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | [架构设计](docs/architecture/v3.0-architecture.md)
 
 ---
 
