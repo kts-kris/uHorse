@@ -10,6 +10,7 @@ description = "Gateway layer for uHorse AI Gateway"
 
 [dependencies]
 uhorse-core = { path = "../uhorse-core" }
+uhorse-discovery = { path = "../uhorse-discovery" }
 tokio = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
