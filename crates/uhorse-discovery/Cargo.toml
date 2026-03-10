@@ -1,0 +1,38 @@
+[package]
+name = "uhorse-discovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "uHorse service discovery module - etcd and Consul support"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Service discovery backends
+etcd-client = { version = "0.13", optional = true }
+consul = { version = "0.4", optional = true }
+
+# HTTP client for health checks
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+
+[features]
+default = ["etcd"]
+etcd = ["dep:etcd-client"]
+consul = ["dep:consul"]
+health-check = ["dep:reqwest"]
+full = ["etcd", "consul", "health-check"]

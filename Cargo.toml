@@ -14,6 +14,8 @@ members = [
     "crates/uhorse-agent",
     "crates/uhorse-multimodal",
     "crates/uhorse-bin",
+    # uHorse 3.0 - Service Discovery
+    "crates/uhorse-discovery",
 ]
 resolver = "2"
 
