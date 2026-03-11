@@ -21,3 +21,12 @@ anyhow = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = "0.4"
 rand = "0.8"
+
+# TLS 加密
+rustls = "0.23"
+rustls-pemfile = "2.0"
+
+# 字段级加密
+aes-gcm = "0.10"
+base64 = "0.22"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }

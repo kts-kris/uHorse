@@ -20,6 +20,8 @@ members = [
     "crates/uhorse-cache",
     # uHorse 3.0 - Message Queue
     "crates/uhorse-queue",
+    # uHorse 3.0 - GDPR Compliance
+    "crates/uhorse-gdpr",
 ]
 resolver = "2"
 
