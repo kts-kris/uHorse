@@ -125,6 +125,9 @@ uhorse/
 ├── uhorse-scheduler/    # Cron 调度器
 ├── uhorse-observability/# 可观测性 (tracing, metrics, audit)
 ├── uhorse-config/       # 配置管理、交互式向导
+├── uhorse-discovery/    # 服务发现 (etcd/consul) + 故障转移
+├── uhorse-governance/   # 数据治理 (分类/保留/归档)
+├── uhorse-backup/       # 备份恢复 (调度/加密/复制)
 └── uhorse-bin/          # 二进制程序入口
 ```
 
@@ -358,7 +361,7 @@ weather,api,utility
 | **Phase 1** | 高可用性基础设施 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase1-high-availability.md) |
 | **Phase 2** | 可扩展性架构 | 5 周 | 📋 计划中 | [详细设计](docs/roadmap/phase2-scalability.md) |
 | **Phase 3** | 安全合规体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase3-security.md) |
-| **Phase 4** | 数据治理体系 | 3 周 | 📋 计划中 | [详细设计](docs/roadmap/phase4-data-governance.md) |
+| **Phase 4** | 数据治理体系 | 3 周 | ✅ 完成 | [详细设计](docs/roadmap/phase4-data-governance.md) |
 | **Phase 5** | API 标准体系 | 3 周 | 📋 计划中 | [详细设计](docs/roadmap/phase5-api-standards.md) |
 | **Phase 6** | 企业集成体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase6-enterprise-integration.md) |
 
@@ -369,6 +372,16 @@ weather,api,utility
 - [x] 分布式配置中心
 - [x] 配置热加载
 - [x] 配置版本管理
+
+**Phase 4 已完成** ✅:
+- [x] 数据分类框架 (4 级敏感度: Public/Internal/Confidential/Restricted)
+- [x] 数据保留策略管理
+- [x] 数据归档机制 (冷数据归档)
+- [x] 自动备份调度 (完整/增量备份)
+- [x] AES-256-GCM 备份加密
+- [x] 点时间恢复 (PITR)
+- [x] 跨区域复制 (灾备支持)
+- [x] 自动故障转移 (自动/手动/优先级策略)
 
 **Phase 2 计划中**:
 - [ ] 数据库分片

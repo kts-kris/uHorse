@@ -44,6 +44,9 @@ pub enum Error {
 
     #[error("not implemented: {0}")]
     NotImplemented(String),
+
+    #[error("no healthy instances available for service: {0}")]
+    NoHealthyInstances(String),
 }
 
 /// Result type alias for service discovery operations

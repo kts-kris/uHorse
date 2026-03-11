@@ -22,6 +22,10 @@ members = [
     "crates/uhorse-queue",
     # uHorse 3.0 - GDPR Compliance
     "crates/uhorse-gdpr",
+    # uHorse 3.0 - Data Governance
+    "crates/uhorse-governance",
+    # uHorse 3.0 - Backup and Recovery
+    "crates/uhorse-backup",
 ]
 resolver = "2"
 

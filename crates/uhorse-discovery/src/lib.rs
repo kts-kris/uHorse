@@ -45,6 +45,7 @@ pub mod error;
 pub mod types;
 pub mod registry;
 pub mod health;
+pub mod failover;
 
 #[cfg(feature = "etcd")]
 pub mod etcd;
@@ -59,6 +60,10 @@ pub use types::{
 };
 pub use registry::{DiscoveryClient, ServiceRegistry, InMemoryRegistry};
 pub use health::{HealthChecker, HealthCheckResult, HealthTracker};
+pub use failover::{
+    FailoverConfig, FailoverManager, FailoverRecord, FailoverStatus, FailoverStats, FailoverStrategy,
+    FailureRecord, FailureType,
+};
 
 // Re-exports for convenience
 #[cfg(feature = "etcd")]
