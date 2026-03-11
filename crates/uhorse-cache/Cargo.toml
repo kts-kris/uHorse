@@ -1,17 +1,16 @@
 [package]
-name = "uhorse-storage"
+name = "uhorse-cache"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Storage layer for uHorse AI Gateway"
+description = "Distributed cache layer for uHorse AI Gateway"
 
 [dependencies]
-uhorse-core = { path = "../uhorse-core", features = ["sqlx"] }
+uhorse-core = { path = "../uhorse-core" }
 tokio = { workspace = true }
-sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -19,5 +18,15 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
-futures = "0.3" # For .collect() on streams
-toml = "0.8" # For config parsing
+
+# Redis client
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+
+# LRU cache for local caching
+lru = "0.12"
+
+# Async utilities
+futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"

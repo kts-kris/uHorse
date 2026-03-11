@@ -1,17 +1,16 @@
 [package]
-name = "uhorse-storage"
+name = "uhorse-queue"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Storage layer for uHorse AI Gateway"
+description = "Message queue layer for uHorse AI Gateway"
 
 [dependencies]
-uhorse-core = { path = "../uhorse-core", features = ["sqlx"] }
+uhorse-core = { path = "../uhorse-core" }
 tokio = { workspace = true }
-sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -19,5 +18,13 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
-futures = "0.3" # For .collect() on streams
-toml = "0.8" # For config parsing
+futures = { workspace = true }
+
+# NATS client
+async-nats = "0.35"
+
+# Random number generation for jitter
+rand = "0.8"
+
+[dev-dependencies]
+tokio-test = "0.4"

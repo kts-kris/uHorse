@@ -16,6 +16,10 @@ members = [
     "crates/uhorse-bin",
     # uHorse 3.0 - Service Discovery
     "crates/uhorse-discovery",
+    # uHorse 3.0 - Distributed Cache
+    "crates/uhorse-cache",
+    # uHorse 3.0 - Message Queue
+    "crates/uhorse-queue",
 ]
 resolver = "2"
 
