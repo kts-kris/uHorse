@@ -359,8 +359,8 @@ weather,api,utility
 | Phase | 名称 | 周期 | 状态 | 文档 |
 |-------|------|------|------|------|
 | **Phase 1** | 高可用性基础设施 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase1-high-availability.md) |
-| **Phase 2** | 可扩展性架构 | 5 周 | 📋 计划中 | [详细设计](docs/roadmap/phase2-scalability.md) |
-| **Phase 3** | 安全合规体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase3-security.md) |
+| **Phase 2** | 可扩展性架构 | 5 周 | ✅ 完成 | [详细设计](docs/roadmap/phase2-scalability.md) |
+| **Phase 3** | 安全合规体系 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase3-security.md) |
 | **Phase 4** | 数据治理体系 | 3 周 | ✅ 完成 | [详细设计](docs/roadmap/phase4-data-governance.md) |
 | **Phase 5** | API 标准体系 | 3 周 | 📋 计划中 | [详细设计](docs/roadmap/phase5-api-standards.md) |
 | **Phase 6** | 企业集成体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase6-enterprise-integration.md) |
@@ -373,6 +373,21 @@ weather,api,utility
 - [x] 配置热加载
 - [x] 配置版本管理
 
+**Phase 2 已完成** ✅:
+- [x] 数据库分片 (按 tenant_id 分片)
+- [x] 读写分离 (主从复制)
+- [x] Redis 分布式缓存 (会话缓存/令牌黑名单)
+- [x] NATS 消息队列 (任务队列/死信队列)
+- [x] 缓存策略 (LRU/LFU/TTL)
+
+**Phase 3 已完成** ✅:
+- [x] TLS 1.3 传输加密
+- [x] Let's Encrypt 证书管理
+- [x] 数据库加密 (SQLCipher)
+- [x] 字段级加密
+- [x] GDPR 合规 (数据导出/删除/同意管理)
+- [x] 审计日志持久化 + 防篡改签名
+
 **Phase 4 已完成** ✅:
 - [x] 数据分类框架 (4 级敏感度: Public/Internal/Confidential/Restricted)
 - [x] 数据保留策略管理
@@ -383,10 +398,11 @@ weather,api,utility
 - [x] 跨区域复制 (灾备支持)
 - [x] 自动故障转移 (自动/手动/优先级策略)
 
-**Phase 2 计划中**:
-- [ ] 数据库分片
-- [ ] Redis 分布式缓存
-- [ ] NATS 消息队列
+**Phase 5 计划中**:
+- [ ] OpenAPI 3.0 规范生成
+- [ ] Swagger UI 文档
+- [ ] API 版本管理
+- [ ] Rate Limiting 分布式限流
 
 📄 **完整文档**: [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | [架构设计](docs/architecture/v3.0-architecture.md)
 
