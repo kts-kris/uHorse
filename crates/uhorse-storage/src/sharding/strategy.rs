@@ -170,6 +170,7 @@ impl ShardingConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_sharding_strategy_from_str() {

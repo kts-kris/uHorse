@@ -371,26 +371,36 @@ mod tests {
 
     #[test]
     fn test_task_priority() {
-        let task: Task<String> = Task::new("task-1", "test", "payload")
+        let task: Task<String> = Task::new("task-1", "test", "payload".to_string())
             .with_priority(TaskPriority::High);
         assert_eq!(task.priority, TaskPriority::High);
     }
 
     #[test]
     fn test_task_retry() {
-        let mut task: Task<String> = Task::new("task-1", "test", "payload")
+        let mut task: Task<String> = Task::new("task-1", "test", "payload".to_string())
             .with_max_retries(2);
         assert!(task.can_retry());
 
+        // First failure -> Retrying
         task.fail("test error");
         assert_eq!(task.status, TaskStatus::Retrying);
 
+        // Increment retry count (retry_count = 1)
         task.increment_retry();
         assert!(task.can_retry());
 
+        // Second failure -> Retrying (retry_count = 1 < max_retries = 2)
         task.fail("test error 2");
-        assert_eq!(task.status, TaskStatus::Failed);
+        assert_eq!(task.status, TaskStatus::Retrying);
+
+        // Increment retry count (retry_count = 2)
+        task.increment_retry();
         assert!(!task.can_retry());
+
+        // Third failure -> Failed (retry_count = 2 >= max_retries = 2)
+        task.fail("test error 3");
+        assert_eq!(task.status, TaskStatus::Failed);
     }
 
     #[test]

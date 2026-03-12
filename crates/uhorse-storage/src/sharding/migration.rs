@@ -219,7 +219,7 @@ mod tests {
         let step = MigrationStep::new("test", 1, 2, 0, 1000, 1000);
 
         manager.create_migration(step).await.unwrap();
-        let result = manager.get_migration("test").await.unwrap();
+        let result = manager.get_migration("test").await;
         assert!(result.is_some());
 
         let migrations = manager.get_migrations_for_shard(1).await;

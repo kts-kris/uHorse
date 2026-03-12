@@ -262,11 +262,11 @@ mod tests {
             "token-123",
             "tenant-001",
             "Test",
-            Duration::from_millis(10),
+            Duration::from_secs(1),
         );
 
         assert!(!token.is_expired());
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(2100));
         assert!(token.is_expired());
     }
 
