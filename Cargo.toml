@@ -32,6 +32,8 @@ members = [
     "crates/uhorse-siem",
     # uHorse 3.0 - Webhook Enhancement
     "crates/uhorse-webhook",
+    # uHorse 3.0 - Third-party Integration
+    "crates/uhorse-integration",
 ]
 resolver = "2"
 
