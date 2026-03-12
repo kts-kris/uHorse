@@ -30,6 +30,8 @@ members = [
     "crates/uhorse-sso",
     # uHorse 3.0 - SIEM Integration
     "crates/uhorse-siem",
+    # uHorse 3.0 - Webhook Enhancement
+    "crates/uhorse-webhook",
 ]
 resolver = "2"
 
