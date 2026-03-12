@@ -20,7 +20,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = "0.4"
-rand = "0.8"
+rand = "0.10"
 
 # TLS 加密
 rustls = "0.23"
