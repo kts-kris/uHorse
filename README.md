@@ -406,9 +406,14 @@ weather,api,utility
 - [x] 兼容性检查器 (破坏性变更检测)
 - [x] Rate Limiting (全局/用户/端点/分布式)
 
-**Phase 6 计划中**:
-- [ ] OAuth2/OIDC/SAML 2.0 SSO
-- [ ] SIEM 集成 (Splunk/Datadog)
+**Phase 6 进行中** 🚧:
+- [x] OAuth2 授权服务器 (授权码/客户端凭证/刷新令牌)
+- [x] OIDC 客户端 (身份发现/用户信息获取/令牌验证)
+- [x] SAML 2.0 客户端 (企业 SSO 集成)
+- [x] 多 IdP 集成 (Okta/Auth0/Azure AD/Google Workspace)
+- [x] SIEM 集成 (Splunk HEC/Datadog Logs API)
+- [x] 审计日志导出 (JSON/CEF/Syslog/CSV)
+- [x] 安全告警管理 (规则引擎/阈值检测)
 - [ ] Webhook 增强 (重试/签名/模板)
 - [ ] 第三方集成 (Jira/GitHub/Slack)
 
