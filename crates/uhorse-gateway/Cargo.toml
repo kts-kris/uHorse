@@ -17,8 +17,11 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 tracing = { workspace = true }
 async-trait = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 futures = "0.3"
 async-stream = "0.3"
@@ -26,3 +29,12 @@ semver = { workspace = true }
 utoipa = { version = "4", features = ["axum_extras"] }
 chrono = { workspace = true }
 jsonwebtoken = { workspace = true }
+
+[features]
+default = []
+redis = ["dep:redis"]
+
+[dependencies.redis]
+version = "0.25"
+features = ["tokio-comp", "connection-manager"]
+optional = true

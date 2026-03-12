@@ -362,7 +362,7 @@ weather,api,utility
 | **Phase 2** | 可扩展性架构 | 5 周 | ✅ 完成 | [详细设计](docs/roadmap/phase2-scalability.md) |
 | **Phase 3** | 安全合规体系 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase3-security.md) |
 | **Phase 4** | 数据治理体系 | 3 周 | ✅ 完成 | [详细设计](docs/roadmap/phase4-data-governance.md) |
-| **Phase 5** | API 标准体系 | 3 周 | 📋 计划中 | [详细设计](docs/roadmap/phase5-api-standards.md) |
+| **Phase 5** | API 标准体系 | 3 周 | ✅ 完成 | [详细设计](docs/roadmap/phase5-api-standards.md) |
 | **Phase 6** | 企业集成体系 | 4 周 | 📋 计划中 | [详细设计](docs/roadmap/phase6-enterprise-integration.md) |
 
 **Phase 1 已完成** ✅:
@@ -398,11 +398,19 @@ weather,api,utility
 - [x] 跨区域复制 (灾备支持)
 - [x] 自动故障转移 (自动/手动/优先级策略)
 
-**Phase 5 计划中**:
-- [ ] OpenAPI 3.0 规范生成
-- [ ] Swagger UI 文档
-- [ ] API 版本管理
-- [ ] Rate Limiting 分布式限流
+**Phase 5 已完成** ✅:
+- [x] OpenAPI 3.0 规范生成 (utoipa 集成)
+- [x] Swagger UI + ReDoc 文档界面
+- [x] 客户端代码生成器 (TypeScript/Go/Python/Rust)
+- [x] API 版本管理 (URL 版本 + 废弃通知)
+- [x] 兼容性检查器 (破坏性变更检测)
+- [x] Rate Limiting (全局/用户/端点/分布式)
+
+**Phase 6 计划中**:
+- [ ] OAuth2/OIDC/SAML 2.0 SSO
+- [ ] SIEM 集成 (Splunk/Datadog)
+- [ ] Webhook 增强 (重试/签名/模板)
+- [ ] 第三方集成 (Jira/GitHub/Slack)
 
 📄 **完整文档**: [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | [架构设计](docs/architecture/v3.0-architecture.md)
 
