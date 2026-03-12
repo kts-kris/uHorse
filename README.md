@@ -414,7 +414,7 @@ weather,api,utility
 - [x] SIEM 集成 (Splunk HEC/Datadog Logs API)
 - [x] 审计日志导出 (JSON/CEF/Syslog/CSV)
 - [x] 安全告警管理 (规则引擎/阈值检测)
-- [ ] Webhook 增强 (重试/签名/模板)
+- [x] Webhook 增强 (重试/签名/模板/历史)
 - [ ] 第三方集成 (Jira/GitHub/Slack)
 
 📄 **完整文档**: [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | [架构设计](docs/architecture/v3.0-architecture.md)
