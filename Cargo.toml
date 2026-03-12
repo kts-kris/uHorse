@@ -26,6 +26,10 @@ members = [
     "crates/uhorse-governance",
     # uHorse 3.0 - Backup and Recovery
     "crates/uhorse-backup",
+    # uHorse 3.0 - SSO/OAuth2/OIDC/SAML
+    "crates/uhorse-sso",
+    # uHorse 3.0 - SIEM Integration
+    "crates/uhorse-siem",
 ]
 resolver = "2"
 
