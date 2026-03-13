@@ -1,18 +1,27 @@
 <p align="center">
+  <a href="README-en.md">English</a> | <strong>简体中文</strong>
+</p>
+
+<p align="center">
   <img src="assets/logo-wide.png" alt="uHorse Logo" style="background-color: white; padding: 20px; border-radius: 10px;" width="400">
 </p>
 
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>🦄 企业级多渠道 AI 网关 + 智能体框架</strong>
+  <strong>🦄 企业级 AI 基础设施平台</strong>
 </p>
 
 <p align="center">
-  <a href="#特性">特性</a> •
-  <a href="#快速开始">快速开始</a> •
-  <a href="#架构">架构</a> •
-  <a href="#文档">文档</a> •
+  <em>Enterprise AI Infrastructure Platform</em>
+</p>
+
+<p align="center">
+  <a href="#-uhorse-是什么">概述</a> •
+  <a href="#-核心亮点">特性</a> •
+  <a href="#-快速开始">快速开始</a> •
+  <a href="#-架构">架构</a> •
+  <a href="#-文档">文档</a> •
   <a href="docs/ENTERPRISE_BEST_PRACTICES.md">🏆 企业最佳实践</a>
 </p>
 
@@ -25,7 +34,7 @@
 
 ---
 
-## 🌟 uHorse 是什么？
+## 🌟 uHorse 是什么？ / What is uHorse?
 
 uHorse 是一个用 **Rust** 编写的企业级多渠道 AI 网关和智能体框架。它将大语言模型（LLM）的力量连接到 7+ 主流通信平台，让 AI 助手能够无缝地在 Telegram、钉钉、飞书、企业微信、Slack、Discord、WhatsApp 等平台上为用户服务。
 

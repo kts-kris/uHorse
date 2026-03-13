@@ -1,18 +1,27 @@
 <p align="center">
+  <strong>English</strong> | <a href="README.md">简体中文</a>
+</p>
+
+<p align="center">
   <img src="assets/logo-wide.png" alt="uHorse Logo" style="background-color: white; padding: 20px; border-radius: 10px;" width="400">
 </p>
 
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>🦄 Enterprise Multi-Channel AI Gateway + Agent Framework</strong>
+  <strong>🦄 Enterprise AI Infrastructure Platform</strong>
 </p>
 
 <p align="center">
-  <a href="#key-highlights">Features</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#documentation">Docs</a> •
+  <em>企业级 AI 基础设施平台</em>
+</p>
+
+<p align="center">
+  <a href="#-what-is-uhorse">Overview</a> •
+  <a href="#-key-highlights">Features</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-documentation">Docs</a> •
   <a href="docs/ENTERPRISE_BEST_PRACTICES.md">🏆 Best Practices</a>
 </p>
 
