@@ -269,7 +269,7 @@ model = "gpt-4"
 
 | Document | Description |
 |----------|-------------|
-| **[Enterprise Best Practices Guide](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **Highly Recommended** - 5 typical scenarios, architecture design, deployment & operations, security compliance, cost optimization |
+| **[Enterprise Best Practices Guide](docs/ENTERPRISE_BEST_PRACTICES-en.md)** | ⭐ **Highly Recommended** - 5 typical scenarios, architecture design, deployment & operations, security compliance, cost optimization |
 
 ### Basic Documentation
 
