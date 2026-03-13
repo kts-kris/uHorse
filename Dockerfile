@@ -29,19 +29,19 @@ RUN apt-get update && apt-get install -y \
     && update-ca-certificates
 
 # 创建非 root 用户
-RUN useradd -m -u 1000 -s /bin/bash -c /app openclaw
+RUN useradd -m -u 1000 -s /bin/bash -c /app uhorse
 
 # 创建目录
 RUN mkdir -p /app/data /app/logs /app/config
 
 # 从构建阶段复制二进制文件
-COPY --from=builder /build/target/release/openclaw /app/openclaw
+COPY --from=builder /build/target/release/uhorse /app/uhorse
 
 # 设置权限
-RUN chown -R openclaw:openclaw /app
+RUN chown -R uhorse:uhorse /app
 
 # 切换到非 root 用户
-USER openclaw
+USER uhorse
 WORKDIR /app
 
 # 暴露端口
@@ -56,9 +56,9 @@ VOLUME ["/app/data", "/app/logs"]
 
 # 设置环境变量
 ENV RUST_LOG=info \
-    OPENCLAW_CONFIG=/app/config/config.toml \
-    OPENCLAW_DATA_DIR=/app/data \
-    OPENCLAW_LOG_DIR=/app/logs
+    UHORSE_CONFIG=/app/config/config.toml \
+    UHORSE_DATA_DIR=/app/data \
+    UHORSE_LOG_DIR=/app/logs
 
 # 启动应用
-CMD ["/app/openclaw"]
+CMD ["/app/uhorse"]
