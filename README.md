@@ -12,8 +12,8 @@
   <a href="#特性">特性</a> •
   <a href="#快速开始">快速开始</a> •
   <a href="#架构">架构</a> •
-  <a href="#与-openclaw-对比">对比</a> •
-  <a href="#文档">文档</a>
+  <a href="#文档">文档</a> •
+  <a href="docs/ENTERPRISE_BEST_PRACTICES.md">🏆 企业最佳实践</a>
 </p>
 
 <p align="center">
@@ -311,6 +311,14 @@ weather,api,utility
 
 ## 📚 文档
 
+### 🏆 企业级指南
+
+| 文档 | 说明 |
+|------|------|
+| **[企业最佳实践指南](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **推荐阅读** - 5 大典型场景、架构设计、部署运维、安全合规、成本优化 |
+
+### 基础文档
+
 | 文档 | 说明 |
 |------|------|
 | [安装指南](INSTALL.md) | 详细安装步骤 |
@@ -319,6 +327,14 @@ weather,api,utility
 | [通道集成](CHANNELS.md) | 各通道配置指南 |
 | [技能开发](SKILLS.md) | 自定义技能开发 |
 | [部署指南](deployments/DEPLOYMENT.md) | 生产环境部署 |
+
+### 架构与路线图
+
+| 文档 | 说明 |
+|------|------|
+| [v3.0 架构设计](docs/architecture/v3.0-architecture.md) | 企业级架构设计 |
+| [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | 完整开发路线图 |
+| [发布说明](RELEASE_NOTES.md) | 版本更新日志 |
 
 ---
 

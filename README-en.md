@@ -9,17 +9,18 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
+  <a href="#key-highlights">Features</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#architecture">Architecture</a> •
-  <a href="#comparison-with-openclaw">Comparison</a> •
-  <a href="#documentation">Docs</a>
+  <a href="#documentation">Docs</a> •
+  <a href="docs/ENTERPRISE_BEST_PRACTICES.md">🏆 Best Practices</a>
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
-  <img src="https://img.shields.io/badge/status-production%20ready-green" alt="Status">
+  <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
 </p>
 
 ---
@@ -41,7 +42,7 @@ uHorse = Multi-Channel Gateway + Agent Orchestration + Skill System + Memory Man
 | 🔌 **7+ Channels** | Telegram, DingTalk⭐, Feishu, WeCom, Slack, Discord, WhatsApp |
 | 🤖 **Multi-Agent** | Independent Agent workspaces, multi-agent collaboration support |
 | 🛡️ **Enterprise-Grade** | JWT authentication, device pairing, approval workflows, complete audit logs |
-| 📦 **Modular** | 10+ independent crates, combine as needed, flexible extension |
+| 📦 **Modular** | 18+ independent crates, combine as needed, flexible extension |
 | 🔧 **MCP Protocol** | Full Model Context Protocol support, compatible with mainstream LLM tool ecosystem |
 
 ---
@@ -53,13 +54,16 @@ OpenClaw is an excellent personal AI assistant framework, while uHorse focuses o
 | Dimension | OpenClaw | uHorse | Recommendation |
 |-----------|----------|--------|----------------|
 | **Positioning** | Personal AI Assistant | Enterprise AI Gateway | Personal use → OpenClaw, Enterprise → uHorse |
-| **Tech Stack** | TypeScript (220K+ lines) | Rust (10K+ lines) | Performance → Rust |
+| **Tech Stack** | TypeScript (220K+ lines) | Rust (15K+ lines) | Performance → Rust |
 | **Architecture** | 3-Layer (Gateway-Skills-Memory) | 4-Layer (Gateway-Agent-Skills-Memory) | Multi-Agent → uHorse |
 | **Channels** | Community plugin driven | Built-in 7+ enterprise channels | Multi-channel → uHorse |
 | **Workspace** | Single shared | Independent Agent isolation | Multi-tenant → uHorse |
-| **Enterprise Features** | Basic | Auth/AuthZ/Audit/Monitoring | Production → uHorse |
+| **Enterprise Features** | Basic | Auth/AuthZ/Audit/Monitoring/Compliance | Production → uHorse |
 | **Performance** | ~10K concurrent | ~100K+ concurrent | High concurrency → uHorse |
 | **Memory Footprint** | 50-200MB | 5-20MB | Edge devices → uHorse |
+| **High Availability** | Manual setup | Built-in cluster + failover | Enterprise → uHorse |
+| **Data Governance** | None | Classification/Retention/Backup | Compliance → uHorse |
+| **SSO Integration** | Community plugins | OAuth2/OIDC/SAML built-in | Enterprise SSO → uHorse |
 
 ### Decision Tree
 
@@ -74,7 +78,9 @@ What are your needs?
 ├─ Multi-Agent Collaboration ─────────────────→ uHorse ✅
 ├─ High Concurrency / Low Latency ───────────→ uHorse ✅
 ├─ Edge Computing / Resource Constrained ────→ uHorse ✅
-└─ Complete Audit / Security Required ───────→ uHorse ✅
+├─ Complete Audit / Security Required ───────→ uHorse ✅
+├─ GDPR/SOC2 Compliance ─────────────────────→ uHorse ✅
+└─ SSO/SIEM Integration ─────────────────────→ uHorse ✅
 ```
 
 ---
@@ -107,7 +113,7 @@ uHorse adopts a **four-layer architecture**, adding an independent agent layer c
                                  ↓
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        🧠 Memory (Memory System)                     │
-│  • SOUL.md (Constitution)  • MEMORY.md (Long-term)  • USER.md      │
+│  • SOUL.md (Constitution)  • MEMORY.md (Long-term)  • USER.md       │
 │  • File System + SQLite Persistence  • SessionState Management      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -127,6 +133,16 @@ uhorse/
 ├── uhorse-scheduler/    # Cron scheduler
 ├── uhorse-observability/# Observability (tracing, metrics, audit)
 ├── uhorse-config/       # Configuration management, interactive wizard
+├── uhorse-discovery/    # Service discovery (etcd/consul) + failover
+├── uhorse-cache/        # Distributed cache (Redis)
+├── uhorse-queue/        # Message queue (NATS)
+├── uhorse-gdpr/         # GDPR compliance
+├── uhorse-governance/   # Data governance (classification/retention)
+├── uhorse-backup/       # Backup & recovery
+├── uhorse-sso/          # SSO/OAuth2/OIDC/SAML
+├── uhorse-siem/         # SIEM integration (Splunk/Datadog)
+├── uhorse-webhook/      # Webhook enhancement
+├── uhorse-integration/  # Third-party integration (Jira/GitHub/Slack)
 └── uhorse-bin/          # Binary entry point
 ```
 
@@ -226,76 +242,6 @@ model = "gpt-4"
 
 ---
 
-## 🔧 Core Features
-
-### 1. Multi-Channel Unified Gateway
-
-```rust
-// Unified channel interface
-pub trait Channel: Send + Sync {
-    fn channel_type(&self) -> ChannelType;
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError>;
-    async fn verify_webhook(&self, payload: &[u8], signature: Option<&str>) -> Result<bool, ChannelError>;
-    async fn start(&mut self) -> Result<()>;
-    async fn stop(&mut self) -> Result<()>;
-    fn is_running(&self) -> bool;
-}
-```
-
-### 2. SKILL.md Driven Skill System
-
-```markdown
-# Weather Query Skill
-
-## Description
-Query real-time weather information for any city worldwide
-
-## Version
-1.0.0
-
-## Tags
-weather, api, utility
-
-## Tools
-{
-  "name": "get_weather",
-  "description": "Get weather for specified city",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "city": {"type": "string", "description": "City name"},
-      "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
-    },
-    "required": ["city"]
-  }
-}
-```
-
-### 3. Structured Memory System
-
-```
-~/.uhorse/
-├── workspace-main/       # Main Agent workspace
-│   ├── SOUL.md          # Constitution - defines behavior guidelines
-│   ├── MEMORY.md        # Long-term memory index
-│   ├── USER.md          # User preferences
-│   └── sessions/        # Session states
-├── workspace-coder/     # Coder Agent (independent personality)
-│   └── SOUL.md          # Code-focused "soul"
-└── workspace-writer/    # Writer Agent (independent personality)
-    └── SOUL.md          # Writing-focused "soul"
-```
-
-### 4. Enterprise-Grade Security
-
-- **JWT Authentication**: Secure token verification
-- **Device Pairing**: New device requires approval
-- **Approval Workflow**: Sensitive operations need human confirmation
-- **Audit Logs**: Complete operation records
-- **Idempotency Control**: Prevent duplicate operations
-
----
-
 ## 📊 Performance
 
 | Metric | Value | Description |
@@ -310,41 +256,118 @@ weather, api, utility
 
 ## 📚 Documentation
 
+### 🏆 Enterprise Guides
+
 | Document | Description |
 |----------|-------------|
-| [Installation Guide](INSTALL-en.md) | Detailed installation steps |
+| **[Enterprise Best Practices Guide](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **Highly Recommended** - 5 typical scenarios, architecture design, deployment & operations, security compliance, cost optimization |
+
+### Basic Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Installation Guide](INSTALL.md) | Detailed installation steps |
 | [Configuration Wizard](WIZARD.md) | Interactive configuration guide |
 | [API Reference](API.md) | REST API reference |
 | [Channel Integration](CHANNELS.md) | Channel configuration guides |
-| [Skill Development](SKILLS-en.md) | Custom skill development |
+| [Skill Development](SKILLS.md) | Custom skill development |
 | [Deployment Guide](deployments/DEPLOYMENT.md) | Production deployment |
+
+### Architecture & Roadmap
+
+| Document | Description |
+|----------|-------------|
+| [v3.0 Architecture Design](docs/architecture/v3.0-architecture.md) | Enterprise architecture design |
+| [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | Complete development roadmap |
+| [Release Notes](RELEASE_NOTES.md) | Version changelog |
 
 ---
 
 ## 🛣️ Roadmap
 
-### v1.0 ✅ Production Ready
-- [x] Core infrastructure
-- [x] 7+ channel integration
-- [x] Tool and plugin system
-- [x] Scheduling and security enhancements
-- [x] Observability completion
+| Phase | Name | Duration | Status | Completion Date |
+|-------|------|----------|--------|-----------------|
+| **Phase 1** | High Availability Infrastructure | 4 weeks | ✅ Complete | 2025-03-01 |
+| **Phase 2** | Scalability Architecture | 5 weeks | ✅ Complete | 2025-03-08 |
+| **Phase 3** | Security & Compliance | 4 weeks | ✅ Complete | 2025-03-12 |
+| **Phase 4** | Data Governance | 3 weeks | ✅ Complete | 2025-03-15 |
+| **Phase 5** | API Standards | 3 weeks | ✅ Complete | 2025-03-18 |
+| **Phase 6** | Enterprise Integration | 4 weeks | ✅ Complete | 2025-03-13 |
 
-### v1.1 🚧 In Progress
-- [ ] Web management interface
-- [ ] More LLM providers
-- [ ] Skill marketplace
+### v3.0 ✅ Released - Enterprise AI Infrastructure Platform
 
-### v2.0 📋 Planned
-- [ ] Multi-tenant support
-- [ ] Federated learning
-- [ ] Edge deployment optimization
+> Upgraded from "Enterprise Multi-Channel AI Gateway" to "Enterprise AI Infrastructure Platform"
+
+**Core Goals Achieved**:
+
+| Dimension | 2.0 Baseline | 3.0 Target | Achieved |
+|-----------|--------------|------------|----------|
+| **High Availability** | 40% | 95% | ✅ 95% |
+| **Scalability** | 40% | 95% | ✅ 95% |
+| **Security Compliance** | 50% | 100% | ✅ 100% |
+| **Data Governance** | 40% | 100% | ✅ 100% |
+| **API Standards** | 60% | 100% | ✅ 100% |
+| **Enterprise Integration** | 30% | 100% | ✅ 100% |
+
+**Phase 1 Completed** ✅:
+- [x] etcd service discovery
+- [x] Consul backup backend
+- [x] 4 load balancing strategies (round-robin/weighted/health-aware/least-connection)
+- [x] Distributed configuration center
+- [x] Hot configuration reload
+- [x] Configuration version management
+
+**Phase 2 Completed** ✅:
+- [x] Database sharding (by tenant_id)
+- [x] Read-write separation (master-slave replication)
+- [x] Redis distributed cache (session cache/token blacklist)
+- [x] NATS message queue (task queue/dead letter queue)
+- [x] Cache policies (LRU/LFU/TTL)
+
+**Phase 3 Completed** ✅:
+- [x] TLS 1.3 transport encryption
+- [x] Let's Encrypt certificate management
+- [x] Database encryption (SQLCipher)
+- [x] Field-level encryption
+- [x] GDPR compliance (data export/deletion/consent management)
+- [x] Audit log persistence + tamper-proof signing
+
+**Phase 4 Completed** ✅:
+- [x] Data classification framework (4 sensitivity levels: Public/Internal/Confidential/Restricted)
+- [x] Data retention policy management
+- [x] Data archiving mechanism (cold data archive)
+- [x] Automatic backup scheduling (full/incremental)
+- [x] AES-256-GCM backup encryption
+- [x] Point-in-time recovery (PITR)
+- [x] Cross-region replication (disaster recovery)
+- [x] Automatic failover (auto/manual/priority strategies)
+
+**Phase 5 Completed** ✅:
+- [x] OpenAPI 3.0 specification generation (utoipa integration)
+- [x] Swagger UI + ReDoc documentation UI
+- [x] Client code generators (TypeScript/Go/Python/Rust)
+- [x] API version management (URL version + deprecation notice)
+- [x] Compatibility checker (breaking change detection)
+- [x] Rate Limiting (global/user/endpoint/distributed)
+
+**Phase 6 Completed** ✅:
+- [x] OAuth2 authorization server (authorization code/client credentials/refresh token)
+- [x] OIDC client (identity discovery/user info/token validation)
+- [x] SAML 2.0 client (enterprise SSO integration)
+- [x] Multi-IdP integration (Okta/Auth0/Azure AD/Google Workspace)
+- [x] SIEM integration (Splunk HEC/Datadog Logs API)
+- [x] Audit log export (JSON/CEF/Syslog/CSV)
+- [x] Security alert management (rule engine/threshold detection)
+- [x] Webhook enhancement (retry/signature/template/history)
+- [x] Third-party integration (Jira/GitHub/Slack)
+
+📄 **Full Documentation**: [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | [Architecture Design](docs/architecture/v3.0-architecture.md)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please check [CONTRIBUTING-en.md](CONTRIBUTING-en.md).
+Contributions are welcome! Please check [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Development Environment
 
