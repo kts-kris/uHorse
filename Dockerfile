@@ -1,6 +1,6 @@
 # 多阶段构建，减小最终镜像大小
 # 构建阶段
-FROM rust:1.93-slim as builder
+FROM rust:1.94-slim as builder
 
 WORKDIR /build
 
