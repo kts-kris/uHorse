@@ -59,6 +59,7 @@ pub mod executor;
 pub mod connection;
 pub mod status;
 pub mod node;
+pub mod tools;
 
 pub use error::{NodeError, NodeResult};
 pub use workspace::{Workspace, WorkspaceConfig};
@@ -67,6 +68,7 @@ pub use executor::{CommandExecutor, ExecutionContext};
 pub use connection::{HubConnection, ConnectionConfig, ConnectionState};
 pub use status::{StatusReporter, Metrics};
 pub use node::{Node, NodeConfig};
+pub use tools::{DatabaseExecutor, BrowserExecutor, SkillExecutor};
 
 /// 节点版本
 pub const NODE_VERSION: &str = env!("CARGO_PKG_VERSION");

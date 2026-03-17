@@ -41,6 +41,7 @@ pub mod message_router;
 pub mod hub;
 pub mod orchestrator;
 pub mod security_integration;
+pub mod web;
 
 // 重新导出 Hub 特有模块
 pub use error::{HubError, HubResult};
@@ -55,6 +56,9 @@ pub use security_integration::{
     HubTlsConfig, HubFieldEncryptor,
     SecurityManager,
 };
+
+// Web 管理界面
+pub use web::{WebState, WebConfig, ApiResponse, TaskInfo, create_router, start_server};
 
 // 重新导出复用的 3.x 模块（方便下游使用）
 pub use uhorse_llm as llm;

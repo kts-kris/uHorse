@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>uHorse Hub - 分布式 AI 工作编排平台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 60px;
+            max-width: 600px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .logo {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+        }
+        .features {
+            text-align: left;
+            margin: 30px 0;
+        }
+        .feature {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        .feature-icon {
+            font-size: 1.5rem;
+            margin-right: 15px;
+        }
+        .feature-text {
+            color: #333;
+        }
+        .btn {
+            display: inline-block;
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 30px;
+            font-weight: bold;
+            font-size: 1.1rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        .version {
+            margin-top: 30px;
+            color: #999;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🦄</div>
+        <h1>uHorse Hub</h1>
+        <p class="subtitle">分布式 AI 工作编排平台</p>
+
+        <div class="features">
+            <div class="feature">
+                <span class="feature-icon">🌐</span>
+                <span class="feature-text">云端中枢 - 智能任务调度与分发</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🖥️</span>
+                <span class="feature-text">本地节点 - 安全执行用户命令</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🤖</span>
+                <span class="feature-text">智能编排 - 意图理解与任务规划</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🔐</span>
+                <span class="feature-text">安全加固 - JWT 认证与敏感操作审批</span>
+            </div>
+        </div>
+
+        <a href="/dashboard" class="btn">进入管理面板 →</a>
+
+        <p class="version">Version 4.0.0-alpha</p>
+    </div>
+</body>
+</html>
