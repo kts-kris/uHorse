@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Panel - uHorse</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #e94560;
+            --success: #00c851;
+            --warning: #ffbb33;
+            --danger: #ff4444;
+            --info: #33b5e5;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .app { display: flex; height: 100vh; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background: var(--bg-secondary);
+            border-right: 1px solid #2a2a4a;
+            padding: 20px;
+        }
+        .sidebar h2 { font-size: 18px; margin-bottom: 20px; }
+        .nav-item {
+            display: block;
+            padding: 10px 14px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: 6px;
+            margin-bottom: 4px;
+        }
+        .nav-item:hover, .nav-item.active {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        /* Main */
+        .main { flex: 1; padding: 20px; overflow-y: auto; }
+        .main h1 { font-size: 24px; margin-bottom: 20px; }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+        }
+        .stat-card h3 {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .stat-value.success { color: var(--success); }
+        .stat-value.warning { color: var(--warning); }
+        .stat-value.danger { color: var(--danger); }
+
+        /* Event Stream */
+        .event-stream {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .event-stream h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+        .event-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .event-item {
+            padding: 10px;
+            border-bottom: 1px solid #2a2a4a;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .event-item:last-child { border-bottom: none; }
+        .event-time {
+            color: var(--text-secondary);
+            margin-right: 10px;
+        }
+        .event-type {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 10px;
+        }
+        .event-type.tool { background: var(--info); color: #fff; }
+        .event-type.llm { background: var(--accent); color: #fff; }
+        .event-type.error { background: var(--danger); color: #fff; }
+        .event-type.session { background: var(--success); color: #fff; }
+
+        /* Charts */
+        .chart-container {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .chart-container h3 {
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        #performance-chart {
+            width: 100%;
+            height: 200px;
+        }
+
+        /* Session List */
+        .session-list {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .session-item {
+            padding: 12px;
+            border-bottom: 1px solid #2a2a4a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .session-item:hover { background: var(--bg-tertiary); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <h2>🐛 Debug Panel</h2>
+            <nav>
+                <a href="/debug" class="nav-item active">📊 Overview</a>
+                <a href="/debug/sessions" class="nav-item">💬 Sessions</a>
+                <a href="/debug/tools" class="nav-item">🔧 Tools</a>
+                <a href="/debug/performance" class="nav-item">⚡ Performance</a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main">
+            <h1>Debug Overview</h1>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Active Sessions</h3>
+                    <div class="stat-value" id="stat-sessions">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Tool Calls (1h)</h3>
+                    <div class="stat-value" id="stat-tools">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>LLM Requests (1h)</h3>
+                    <div class="stat-value" id="stat-llm">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Error Rate</h3>
+                    <div class="stat-value" id="stat-errors">0%</div>
+                </div>
+            </div>
+
+            <!-- Performance Chart -->
+            <div class="chart-container">
+                <h3>Response Time (ms)</h3>
+                <canvas id="performance-chart"></canvas>
+            </div>
+
+            <!-- Event Stream -->
+            <div class="event-stream">
+                <h3>Live Events</h3>
+                <div class="event-list" id="event-list">
+                    <div class="event-item">Connecting...</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Initialize chart
+        const ctx = document.getElementById('performance-chart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Response Time (ms)',
+                    data: [],
+                    borderColor: '#e94560',
+                    backgroundColor: 'rgba(233, 69, 96, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true },
+                    x: { display: false }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        // WebSocket connection
+        let ws;
+        function connect() {
+            ws = new WebSocket(`ws://${location.host}/api/debug/ws`);
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                addEvent(data);
+                updateChart(data);
+            };
+
+            ws.onclose = () => setTimeout(connect, 3000);
+        }
+
+        function addEvent(event) {
+            const list = document.getElementById('event-list');
+            const time = new Date().toLocaleTimeString();
+            const type = event.type.replace('_', '-');
+
+            const item = document.createElement('div');
+            item.className = 'event-item';
+            item.innerHTML = `
+                <span class="event-time">${time}</span>
+                <span class="event-type ${type}">${type}</span>
+                ${formatEvent(event)}
+            `;
+
+            list.insertBefore(item, list.firstChild);
+
+            // Keep only last 100 events
+            while (list.children.length > 100) {
+                list.removeChild(list.lastChild);
+            }
+        }
+
+        function formatEvent(event) {
+            switch (event.type) {
+                case 'tool_call':
+                    return `${event.tool_name} (${event.duration_ms}ms)`;
+                case 'llm_request':
+                    return `${event.provider}/${event.model} (${event.prompt_tokens}+${event.completion_tokens} tokens)`;
+                case 'error':
+                    return event.message;
+                case 'session_event':
+                    return `${event.session_id}: ${event.event}`;
+                default:
+                    return JSON.stringify(event);
+            }
+        }
+
+        function updateChart(event) {
+            if (event.type === 'llm_request') {
+                chart.data.labels.push(new Date().toLocaleTimeString());
+                chart.data.datasets[0].data.push(event.duration_ms);
+
+                // Keep last 50 points
+                if (chart.data.labels.length > 50) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+
+                chart.update('none');
+            }
+        }
+
+        // Fetch initial metrics
+        async function fetchMetrics() {
+            try {
+                const res = await fetch('/api/debug/metrics');
+                const data = await res.json();
+
+                if (data.success) {
+                    document.getElementById('stat-sessions').textContent = data.metrics.active_sessions;
+                    document.getElementById('stat-tools').textContent = data.metrics.tool_calls_hour;
+                    document.getElementById('stat-llm').textContent = data.metrics.llm_requests_hour;
+                    document.getElementById('stat-errors').textContent =
+                        (data.metrics.error_rate * 100).toFixed(1) + '%';
+                }
+            } catch (e) {
+                console.error('Failed to fetch metrics:', e);
+            }
+        }
+
+        // Initialize
+        connect();
+        fetchMetrics();
+        setInterval(fetchMetrics, 5000);
+    </script>
+</body>
+</html>

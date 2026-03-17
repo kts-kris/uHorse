@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performance - Debug Panel</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #e94560;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        .app { display: flex; height: 100vh; }
+        .sidebar { width: 240px; background: var(--bg-secondary); border-right: 1px solid #2a2a4a; padding: 20px; }
+        .sidebar h2 { font-size: 18px; margin-bottom: 20px; }
+        .nav-item { display: block; padding: 10px 14px; color: var(--text-secondary); text-decoration: none; border-radius: 6px; margin-bottom: 4px; }
+        .nav-item:hover, .nav-item.active { background: var(--bg-tertiary); color: var(--text-primary); }
+        .main { flex: 1; padding: 20px; overflow-y: auto; }
+        .chart-container { background: var(--bg-secondary); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .chart-container h3 { font-size: 14px; margin-bottom: 16px; }
+        .chart { height: 250px; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+        .metric-card { background: var(--bg-secondary); border-radius: 12px; padding: 16px; text-align: center; }
+        .metric-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+        .metric-value { font-size: 24px; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <h2>🐛 Debug Panel</h2>
+            <nav>
+                <a href="/debug" class="nav-item">📊 Overview</a>
+                <a href="/debug/sessions" class="nav-item">💬 Sessions</a>
+                <a href="/debug/tools" class="nav-item">🔧 Tools</a>
+                <a href="/debug/performance" class="nav-item active">⚡ Performance</a>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <h1 style="margin-bottom: 20px;">Performance Metrics</h1>
+
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Avg Response Time</div>
+                    <div class="metric-value" id="metric-avg">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">P95 Response Time</div>
+                    <div class="metric-value" id="metric-p95">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Total Tokens</div>
+                    <div class="metric-value" id="metric-tokens">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Error Rate</div>
+                    <div class="metric-value" id="metric-errors">-</div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Response Time Distribution</h3>
+                <div class="chart"><canvas id="response-chart"></canvas></div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Token Usage Over Time</h3>
+                <div class="chart"><canvas id="token-chart"></canvas></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Response time chart
+        const responseCtx = document.getElementById('response-chart').getContext('2d');
+        const responseChart = new Chart(responseCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Response Time (ms)',
+                    data: [],
+                    borderColor: '#e94560',
+                    backgroundColor: 'rgba(233, 69, 96, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        // Token chart
+        const tokenCtx = document.getElementById('token-chart').getContext('2d');
+        const tokenChart = new Chart(tokenCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Prompt Tokens',
+                        data: [],
+                        backgroundColor: '#33b5e5'
+                    },
+                    {
+                        label: 'Completion Tokens',
+                        data: [],
+                        backgroundColor: '#00c851'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+            }
+        });
+
+        async function loadPerformance() {
+            try {
+                const res = await fetch('/api/debug/performance');
+                const data = await res.json();
+
+                if (data.success) {
+                    updateMetrics(data.metrics);
+                    updateCharts(data.response_times);
+                }
+            } catch (e) {
+                console.error('Failed to load performance:', e);
+            }
+        }
+
+        function updateMetrics(metrics) {
+            document.getElementById('metric-avg').textContent =
+                metrics.avg_response_time_ms > 0
+                    ? Math.round(metrics.avg_response_time_ms) + 'ms'
+                    : '-';
+            document.getElementById('metric-p95').textContent = '-';
+            document.getElementById('metric-tokens').textContent =
+                formatNumber(metrics.token_usage.total_tokens);
+            document.getElementById('metric-errors').textContent =
+                (metrics.error_rate * 100).toFixed(1) + '%';
+        }
+
+        function updateCharts(responseTimes) {
+            // Update response time chart
+            responseChart.data.labels = responseTimes.map((_, i) => i + 1);
+            responseChart.data.datasets[0].data = responseTimes;
+            responseChart.update('none');
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        loadPerformance();
+        setInterval(loadPerformance, 5000);
+    </script>
+</body>
+</html>

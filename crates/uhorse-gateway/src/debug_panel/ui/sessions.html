@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sessions - Debug Panel</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #e94560;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .app { display: flex; height: 100vh; }
+        .sidebar { width: 240px; background: var(--bg-secondary); border-right: 1px solid #2a2a4a; padding: 20px; }
+        .sidebar h2 { font-size: 18px; margin-bottom: 20px; }
+        .nav-item { display: block; padding: 10px 14px; color: var(--text-secondary); text-decoration: none; border-radius: 6px; margin-bottom: 4px; }
+        .nav-item:hover, .nav-item.active { background: var(--bg-tertiary); color: var(--text-primary); }
+        .main { flex: 1; padding: 20px; overflow-y: auto; display: grid; grid-template-columns: 1fr 400px; gap: 20px; }
+        .session-list, .session-detail { background: var(--bg-secondary); border-radius: 12px; padding: 16px; }
+        .session-item { padding: 12px; border-bottom: 1px solid #2a2a4a; cursor: pointer; }
+        .session-item:hover { background: var(--bg-tertiary); }
+        .session-item.active { background: var(--accent); }
+        .session-id { font-family: monospace; font-size: 13px; }
+        .session-channel { font-size: 11px; color: var(--text-secondary); }
+        .event-item { padding: 8px 0; border-bottom: 1px solid #2a2a4a; font-size: 13px; }
+        .event-role { font-weight: 600; margin-right: 8px; }
+        .event-role.user { color: var(--accent); }
+        .event-role.assistant { color: #00c851; }
+        .event-role.tool { color: #33b5e5; }
+        pre { background: var(--bg-tertiary); padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <h2>🐛 Debug Panel</h2>
+            <nav>
+                <a href="/debug" class="nav-item">📊 Overview</a>
+                <a href="/debug/sessions" class="nav-item active">💬 Sessions</a>
+                <a href="/debug/tools" class="nav-item">🔧 Tools</a>
+                <a href="/debug/performance" class="nav-item">⚡ Performance</a>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <div class="session-list">
+                <h3>Sessions</h3>
+                <div id="session-list"></div>
+            </div>
+
+            <div class="session-detail">
+                <h3>Session Detail</h3>
+                <div id="session-detail">
+                    <p style="color: var(--text-secondary)">Select a session to view details</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let sessions = [];
+
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/debug/sessions');
+                const data = await res.json();
+
+                if (data.success) {
+                    sessions = data.sessions;
+                    renderSessions();
+                }
+            } catch (e) {
+                console.error('Failed to load sessions:', e);
+            }
+        }
+
+        function renderSessions() {
+            const list = document.getElementById('session-list');
+
+            if (sessions.length === 0) {
+                list.innerHTML = '<p style="color: var(--text-secondary); padding: 20px;">No active sessions</p>';
+                return;
+            }
+
+            list.innerHTML = sessions.map(session => `
+                <div class="session-item" data-id="${session}">
+                    <div class="session-id">${session}</div>
+                </div>
+            `).join('');
+
+            // Bind click events
+            list.querySelectorAll('.session-item').forEach(el => {
+                el.addEventListener('click', () => loadSessionDetail(el.dataset.id));
+            });
+        }
+
+        async function loadSessionDetail(sessionId) {
+            try {
+                // Highlight active
+                document.querySelectorAll('.session-item').forEach(el => {
+                    el.classList.toggle('active', el.dataset.id === sessionId);
+                });
+
+                const res = await fetch(`/api/debug/sessions/${sessionId}`);
+                const data = await res.json();
+
+                if (data.success) {
+                    renderSessionDetail(data);
+                }
+            } catch (e) {
+                console.error('Failed to load session detail:', e);
+            }
+        }
+
+        function renderSessionDetail(data) {
+            const detail = document.getElementById('session-detail');
+
+            let html = `
+                <h4 style="margin-bottom: 16px;">${data.session_id}</h4>
+                <div style="margin-bottom: 16px; font-size: 12px; color: var(--text-secondary);">
+                    Tool Calls: ${data.stats.tool_calls} |
+                    LLM Requests: ${data.stats.llm_requests} |
+                    Errors: ${data.stats.errors}
+                </div>
+                <div class="events">
+            `;
+
+            for (const event of data.events) {
+                html += formatEvent(event);
+            }
+
+            html += '</div>';
+            detail.innerHTML = html;
+        }
+
+        function formatEvent(event) {
+            switch (event.type) {
+                case 'conversation_message':
+                    return `
+                        <div class="event-item">
+                            <span class="event-role ${event.role}">${event.role}:</span>
+                            <span>${escapeHtml(event.content.substring(0, 200))}${event.content.length > 200 ? '...' : ''}</span>
+                        </div>
+                    `;
+                case 'tool_call':
+                    return `
+                        <div class="event-item">
+                            <span class="event-role tool">🔧 ${event.tool_name}:</span>
+                            <pre>${JSON.stringify(event.result || event.parameters, null, 2)}</pre>
+                        </div>
+                    `;
+                case 'error':
+                    return `
+                        <div class="event-item" style="color: #ff4444;">
+                            <span class="event-role">❌ Error:</span>
+                            <span>${escapeHtml(event.message)}</span>
+                        </div>
+                    `;
+                default:
+                    return '';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize
+        loadSessions();
+        setInterval(loadSessions, 10000);
+    </script>
+</body>
+</html>

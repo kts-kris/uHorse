@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  uhorse-playground:
+    build:
+      context: ..
+      dockerfile: playground/Dockerfile.playground
+    image: uhorse/playground:3.5.0
+    container_name: uhorse-playground
+    ports:
+      - "8080:8080"
+    environment:
+      # LLM Configuration (uncomment and set your API key)
+      # - LLM_PROVIDER=openai
+      # - LLM_API_KEY=sk-your-api-key
+      # - LLM_MODEL=gpt-4
+
+      # Or use mock mode (default, no API key needed)
+      - LLM_PROVIDER=mock
+
+      # Logging
+      - RUST_LOG=info
+    volumes:
+      # Persist data (optional)
+      - uhorse-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  uhorse-data:
+
+# Quick Start:
+# 1. Start: docker-compose up -d
+# 2. Access: http://localhost:8080
+# 3. Stop:  docker-compose down
+#
+# With LLM API:
+# 1. Set environment: export LLM_API_KEY=sk-xxx
+# 2. Edit docker-compose.yml to use openai provider
+# 3. Start: docker-compose up -d

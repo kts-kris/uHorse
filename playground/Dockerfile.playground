@@ -1,0 +1,78 @@
+# uHorse Playground - 30秒快速体验
+#
+# 构建命令:
+#   docker build -f Dockerfile.playground -t uhorse/playground:latest .
+#
+# 运行命令:
+#   docker run -it --rm -p 8080:8080 uhorse/playground:latest
+#
+# 访问地址:
+#   http://localhost:8080
+
+# ============================================
+# Stage 1: Build
+# ============================================
+FROM rust:1.78-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy manifests
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build release binary
+RUN cargo build --release -p uhorse
+
+# ============================================
+# Stage 2: Runtime
+# ============================================
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/uhorse /usr/local/bin/
+
+# Create directories
+RUN mkdir -p /app/data /app/logs /app/workspace/default
+
+# Copy playground configuration
+COPY playground/config.toml /app/config.toml
+COPY playground/workspace/ /app/workspace/
+
+# Copy entrypoint script
+COPY playground/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health/live || exit 1
+
+# Environment
+ENV UHORSE_ENV=playground
+ENV RUST_LOG=info
+
+# Labels
+LABEL org.opencontainers.image.title="uHorse Playground"
+LABEL org.opencontainers.image.description="uHorse AI Gateway - 30 Second Quick Start"
+LABEL org.opencontainers.image.version="3.5.0"
+LABEL org.opencontainers.image.source="https://github.com/uhorse/uhorse-rs"
+
+# Entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uhorse", "start"]

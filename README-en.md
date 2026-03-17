@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
@@ -371,6 +371,37 @@ model = "gpt-4"
 - [x] Third-party integration (Jira/GitHub/Slack)
 
 📄 **Full Documentation**: [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | [Architecture Design](docs/architecture/v3.0-architecture.md)
+
+### v3.5 🚧 In Progress - Developer Experience Enhancement
+
+> Focus on developer experience and operational efficiency improvements
+
+**Core Objectives**:
+
+| Dimension | 3.0 Baseline | 3.5 Target | Improvement |
+|-----------|--------------|------------|-------------|
+| **CLI Experience** | Basic commands | TUI interactive | +80% |
+| **Error Messages** | Simple text | Structured + suggestions | +90% |
+| **Debugging** | Log viewing | Real-time panel | +95% |
+| **Quick Start** | Build required | Docker one-click | +100% |
+| **SDK Support** | None | Python/TypeScript | From 0 to 1 |
+
+**Phase 1 Completed** ✅:
+- [x] CLI TUI interactive enhancement (colored/indicatif/dialoguer/console)
+- [x] Error message optimization (error codes + cause analysis + solutions + doc links)
+- [x] Playground Docker image (30-second quick experience)
+- [x] Preset scenario templates (customer-service/HR/IT-support/sales/general - 5 templates)
+
+**Phase 2 Completed** ✅:
+- [x] Web skill editor (online editing + JSON Schema validation + skill template library)
+- [x] Debug panel (conversation flow + tool calls + performance metrics + WebSocket real-time updates)
+- [x] Enhanced doctor command (auto-fix + dependency check + config validation)
+- [x] SDK development (Python SDK + TypeScript SDK)
+
+**Phase 3 Planned**:
+- [ ] Interactive tutorial system
+- [ ] Example library
+- [ ] Dashboard
 
 ---
 

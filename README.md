@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
@@ -448,6 +448,37 @@ weather,api,utility
 - [x] 安全告警管理 (规则引擎/阈值检测)
 - [x] Webhook 增强 (重试/签名/模板/历史)
 - [x] 第三方集成 (Jira/GitHub/Slack)
+
+### v3.5 🚧 进行中 - 用户体验提升
+
+> 专注于开发者体验和运维效率的提升
+
+**核心目标**:
+
+| 维度 | 3.0 现状 | 3.5 目标 | 提升 |
+|------|----------|----------|------|
+| **CLI 体验** | 基础命令 | TUI 交互式 | +80% |
+| **错误提示** | 简单文本 | 结构化+建议 | +90% |
+| **调试能力** | 日志查看 | 实时面板 | +95% |
+| **快速体验** | 需编译 | Docker 一键启动 | +100% |
+| **SDK 支持** | 无 | Python/TypeScript | 从 0 到 1 |
+
+**Phase 1 已完成** ✅:
+- [x] CLI TUI 交互式增强 (colored/indicatif/dialoguer/console)
+- [x] 错误提示优化 (错误码 + 原因分析 + 解决方案 + 文档链接)
+- [x] Playground Docker 镜像 (30 秒快速体验)
+- [x] 预置场景模板 (客服/HR/IT 支持/销售/通用 5 个模板)
+
+**Phase 2 已完成** ✅:
+- [x] Web 技能编辑器 (在线编辑 + JSON Schema 验证 + 技能模板库)
+- [x] 调试面板 (对话流程 + 工具调用 + 性能指标 + WebSocket 实时更新)
+- [x] doctor 命令增强 (自动修复 + 依赖检查 + 配置验证)
+- [x] SDK 开发 (Python SDK + TypeScript SDK)
+
+**Phase 3 规划中**:
+- [ ] 交互式教程系统
+- [ ] 示例库
+- [ ] Dashboard 仪表板
 
 📄 **完整文档**: [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | [架构设计](docs/architecture/v3.0-architecture.md)
 

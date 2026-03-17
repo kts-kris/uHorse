@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tools - Debug Panel</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #0f3460;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #e94560;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        .app { display: flex; height: 100vh; }
+        .sidebar { width: 240px; background: var(--bg-secondary); border-right: 1px solid #2a2a4a; padding: 20px; }
+        .sidebar h2 { font-size: 18px; margin-bottom: 20px; }
+        .nav-item { display: block; padding: 10px 14px; color: var(--text-secondary); text-decoration: none; border-radius: 6px; margin-bottom: 4px; }
+        .nav-item:hover, .nav-item.active { background: var(--bg-tertiary); color: var(--text-primary); }
+        .main { flex: 1; padding: 20px; overflow-y: auto; }
+        .tools-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+        .tool-card { background: var(--bg-secondary); border-radius: 12px; padding: 16px; }
+        .tool-name { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+        .tool-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .stat { font-size: 12px; }
+        .stat-label { color: var(--text-secondary); }
+        .stat-value { font-weight: 600; }
+        .progress-bar { height: 4px; background: var(--bg-tertiary); border-radius: 2px; margin-top: 12px; overflow: hidden; }
+        .progress-fill { height: 100%; background: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <h2>🐛 Debug Panel</h2>
+            <nav>
+                <a href="/debug" class="nav-item">📊 Overview</a>
+                <a href="/debug/sessions" class="nav-item">💬 Sessions</a>
+                <a href="/debug/tools" class="nav-item active">🔧 Tools</a>
+                <a href="/debug/performance" class="nav-item">⚡ Performance</a>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <h1 style="margin-bottom: 20px;">Tool Statistics</h1>
+            <div class="tools-grid" id="tools-grid">
+                <div style="color: var(--text-secondary);">Loading...</div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        async function loadTools() {
+            try {
+                const res = await fetch('/api/debug/tools');
+                const data = await res.json();
+
+                if (data.success) {
+                    renderTools(data.tools);
+                }
+            } catch (e) {
+                console.error('Failed to load tools:', e);
+            }
+        }
+
+        function renderTools(tools) {
+            const grid = document.getElementById('tools-grid');
+
+            const entries = Object.entries(tools);
+            if (entries.length === 0) {
+                grid.innerHTML = '<div style="color: var(--text-secondary);">No tool calls recorded</div>';
+                return;
+            }
+
+            // Sort by call count
+            entries.sort((a, b) => b[1].calls - a[1].calls);
+
+            const maxCalls = Math.max(...entries.map(([_, stats]) => stats.calls));
+
+            grid.innerHTML = entries.map(([name, stats]) => {
+                const avgTime = stats.calls > 0 ? Math.round(stats.total_time_ms / stats.calls) : 0;
+                const successRate = stats.calls > 0 ? ((stats.calls - stats.failures) / stats.calls * 100).toFixed(1) : 100;
+                const barWidth = (stats.calls / maxCalls * 100).toFixed(0);
+
+                return `
+                    <div class="tool-card">
+                        <div class="tool-name">🔧 ${name}</div>
+                        <div class="tool-stats">
+                            <div class="stat">
+                                <span class="stat-label">Calls:</span>
+                                <span class="stat-value">${stats.calls}</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Avg Time:</span>
+                                <span class="stat-value">${avgTime}ms</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Failures:</span>
+                                <span class="stat-value" style="color: ${stats.failures > 0 ? '#ff4444' : 'inherit'}">${stats.failures}</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Success:</span>
+                                <span class="stat-value">${successRate}%</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${barWidth}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        loadTools();
+        setInterval(loadTools, 5000);
+    </script>
+</body>
+</html>
