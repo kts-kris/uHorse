@@ -1,0 +1,48 @@
+[package]
+name = "uhorse-node"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+uhorse-protocol = { path = "../uhorse-protocol" }
+uhorse-core = { path = "../uhorse-core" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# System info
+sysinfo = { workspace = true }
+
+# Glob matching
+glob-match = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }

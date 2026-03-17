@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.5.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0--alpha-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
@@ -449,19 +449,9 @@ weather,api,utility
 - [x] Webhook 增强 (重试/签名/模板/历史)
 - [x] 第三方集成 (Jira/GitHub/Slack)
 
-### v3.5 🚧 进行中 - 用户体验提升
+### v3.5 ✅ 已完成 - 用户体验提升
 
 > 专注于开发者体验和运维效率的提升
-
-**核心目标**:
-
-| 维度 | 3.0 现状 | 3.5 目标 | 提升 |
-|------|----------|----------|------|
-| **CLI 体验** | 基础命令 | TUI 交互式 | +80% |
-| **错误提示** | 简单文本 | 结构化+建议 | +90% |
-| **调试能力** | 日志查看 | 实时面板 | +95% |
-| **快速体验** | 需编译 | Docker 一键启动 | +100% |
-| **SDK 支持** | 无 | Python/TypeScript | 从 0 到 1 |
 
 **Phase 1 已完成** ✅:
 - [x] CLI TUI 交互式增强 (colored/indicatif/dialoguer/console)
@@ -475,12 +465,50 @@ weather,api,utility
 - [x] doctor 命令增强 (自动修复 + 依赖检查 + 配置验证)
 - [x] SDK 开发 (Python SDK + TypeScript SDK)
 
-**Phase 3 规划中**:
-- [ ] 交互式教程系统
-- [ ] 示例库
-- [ ] Dashboard 仪表板
+### v4.0 🚧 进行中 - 分布式 AI 工作编排平台
 
-📄 **完整文档**: [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | [架构设计](docs/architecture/v3.0-architecture.md)
+> 从"企业级 AI 基础设施平台"升级为"分布式 AI 工作编排平台"
+
+**架构升级**: 云端中枢 (Hub) + 本地节点 (Node) 分布式架构
+
+| 维度 | 3.x 现状 | 4.0 目标 |
+|------|----------|----------|
+| **架构模式** | 单体/集群 | 中枢-节点分布式 |
+| **执行位置** | 服务端执行 | 中枢规划 + 节点执行 |
+| **文件访问** | 服务端文件系统 | 用户本地文件系统 |
+| **权限模型** | 服务端权限 | 用户授权 + 节点权限 |
+| **任务分发** | 无 | 支持多节点并行 |
+
+**Phase 1 已完成** ✅ (核心架构):
+- [x] uhorse-protocol crate (Hub-Node 通信协议)
+- [x] uhorse-hub crate (云端中枢骨架)
+- [x] uhorse-node crate (本地节点骨架)
+- [x] WebSocket 双向通信
+- [x] 命令类型定义 (File/Shell/Code/Database/Api/Browser/Skill)
+- [x] 节点管理器 (注册/心跳/负载监控)
+- [x] 任务调度器 (优先级队列/超时控制/重试机制)
+- [x] 消息路由器 (命令分发/结果汇总)
+
+**Phase 2 已完成** ✅ (智能编排):
+- [x] Orchestrator 编排器 (意图理解 + 任务规划 + 结果汇总)
+- [x] 复用 uhorse-agent SkillRegistry (技能注册表)
+- [x] 子任务依赖管理 (拓扑排序执行)
+- [x] 结果汇总与状态跟踪
+
+**Phase 3 已完成** ✅ (安全加固):
+- [x] NodeAuthenticator (JWT 节点认证)
+- [x] SensitiveOperationApprover (敏感操作审批)
+- [x] HubFieldEncryptor (字段级加密)
+- [x] HubTlsConfig (TLS 配置)
+- [x] SecurityManager (安全组件整合)
+- [x] 幂等性控制 (IdempotencyCache)
+
+**Phase 4 规划中** (工具与集成):
+- [ ] 本地工具完善 (文件/代码/数据库/API)
+- [ ] 通道集成测试
+- [ ] Web 管理界面
+
+📄 **完整文档**: [v4.0 架构设计](docs/V4_ARCHITECTURE_DESIGN.md)
 
 ---
 

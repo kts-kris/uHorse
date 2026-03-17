@@ -34,11 +34,17 @@ members = [
     "crates/uhorse-webhook",
     # uHorse 3.0 - Third-party Integration
     "crates/uhorse-integration",
+    # uHorse 4.0 - Protocol (Hub-Node Communication)
+    "crates/uhorse-protocol",
+    # uHorse 4.0 - Local Node
+    "crates/uhorse-node",
+    # uHorse 4.0 - Cloud Hub
+    "crates/uhorse-hub",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "3.5.0"
+version = "4.0.0-alpha.1"
 edition = "2021"
 rust-version = "1.78"
 authors = ["uHorse Contributors"]
@@ -111,6 +117,12 @@ reqwest = { version = "0.12", features = ["json", "multipart"] }
 async-stream = "0.3"
 futures = "0.3"
 
+# System info
+sysinfo = "0.32"
+
+# Glob matching
+glob-match = "0.2"
+
 # Utilities
 derive_more = { version = "1.0", features = ["from", "display"] }
 strum = { version = "0.26", features = ["derive"] }
@@ -118,6 +130,7 @@ strum = { version = "0.26", features = ["derive"] }
 # Dev dependencies
 tokio-test = "0.4"
 criterion = "0.5"
+tempfile = "3.14"
 
 [profile.release]
 opt-level = 3

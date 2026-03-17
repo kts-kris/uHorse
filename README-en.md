@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.5.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0--alpha-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
@@ -372,19 +372,9 @@ model = "gpt-4"
 
 📄 **Full Documentation**: [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | [Architecture Design](docs/architecture/v3.0-architecture.md)
 
-### v3.5 🚧 In Progress - Developer Experience Enhancement
+### v3.5 ✅ Completed - Developer Experience Enhancement
 
 > Focus on developer experience and operational efficiency improvements
-
-**Core Objectives**:
-
-| Dimension | 3.0 Baseline | 3.5 Target | Improvement |
-|-----------|--------------|------------|-------------|
-| **CLI Experience** | Basic commands | TUI interactive | +80% |
-| **Error Messages** | Simple text | Structured + suggestions | +90% |
-| **Debugging** | Log viewing | Real-time panel | +95% |
-| **Quick Start** | Build required | Docker one-click | +100% |
-| **SDK Support** | None | Python/TypeScript | From 0 to 1 |
 
 **Phase 1 Completed** ✅:
 - [x] CLI TUI interactive enhancement (colored/indicatif/dialoguer/console)
@@ -398,10 +388,50 @@ model = "gpt-4"
 - [x] Enhanced doctor command (auto-fix + dependency check + config validation)
 - [x] SDK development (Python SDK + TypeScript SDK)
 
-**Phase 3 Planned**:
-- [ ] Interactive tutorial system
-- [ ] Example library
-- [ ] Dashboard
+### v4.0 🚧 In Progress - Distributed AI Work Orchestration Platform
+
+> Upgraded from "Enterprise AI Infrastructure Platform" to "Distributed AI Work Orchestration Platform"
+
+**Architecture Upgrade**: Cloud Hub + Local Node distributed architecture
+
+| Dimension | 3.x Baseline | 4.0 Target |
+|-----------|--------------|------------|
+| **Architecture** | Monolithic/Cluster | Hub-Node Distributed |
+| **Execution** | Server-side | Hub planning + Node execution |
+| **File Access** | Server filesystem | User local filesystem |
+| **Permission** | Server permissions | User authorization + Node permissions |
+| **Task Dispatch** | None | Multi-node parallel support |
+
+**Phase 1 Completed** ✅ (Core Architecture):
+- [x] uhorse-protocol crate (Hub-Node communication protocol)
+- [x] uhorse-hub crate (Cloud Hub skeleton)
+- [x] uhorse-node crate (Local Node skeleton)
+- [x] WebSocket bidirectional communication
+- [x] Command types (File/Shell/Code/Database/Api/Browser/Skill)
+- [x] Node manager (registration/heartbeat/load monitoring)
+- [x] Task scheduler (priority queue/timeout control/retry mechanism)
+- [x] Message router (command dispatch/result aggregation)
+
+**Phase 2 Completed** ✅ (Intelligent Orchestration):
+- [x] Orchestrator (intent understanding + task planning + result summarization)
+- [x] Reuse uhorse-agent SkillRegistry (skill registry)
+- [x] Subtask dependency management (topological sort execution)
+- [x] Result aggregation and status tracking
+
+**Phase 3 Completed** ✅ (Security Hardening):
+- [x] NodeAuthenticator (JWT node authentication)
+- [x] SensitiveOperationApprover (sensitive operation approval)
+- [x] HubFieldEncryptor (field-level encryption)
+- [x] HubTlsConfig (TLS configuration)
+- [x] SecurityManager (security component integration)
+- [x] Idempotency control (IdempotencyCache)
+
+**Phase 4 Planned** (Tools & Integration):
+- [ ] Local tools enhancement (file/code/database/API)
+- [ ] Channel integration testing
+- [ ] Web management interface
+
+📄 **Full Documentation**: [v4.0 Architecture Design](docs/V4_ARCHITECTURE_DESIGN.md)
 
 ---
 

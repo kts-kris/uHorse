@@ -1,0 +1,53 @@
+[package]
+name = "uhorse-hub"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 4.0 新增协议
+uhorse-protocol = { path = "../uhorse-protocol" }
+
+# 复用 3.x 核心模块
+uhorse-core = { path = "../uhorse-core" }
+uhorse-llm = { path = "../uhorse-llm" }
+uhorse-agent = { path = "../uhorse-agent" }
+uhorse-channel = { path = "../uhorse-channel" }
+uhorse-session = { path = "../uhorse-session" }
+uhorse-storage = { path = "../uhorse-storage" }
+uhorse-security = { path = "../uhorse-security" }
+uhorse-observability = { path = "../uhorse-observability" }
+uhorse-config = { path = "../uhorse-config" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
