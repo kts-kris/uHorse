@@ -12,6 +12,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Daily build workflow with smart change detection
 - Nightly release channel for development builds
 
+## [4.0.0] - 2026-03-18
+
+### Added
+
+#### Hub-Node Distributed Architecture
+- **uhorse-protocol**: Hub-Node 通信协议
+  - 消息类型定义 (HubToNode, NodeToHub)
+  - 二进制编解码 (MessageCodec)
+  - 命令系统 (Shell, File, Edit, Write, Task, LLM, Info)
+  - 任务上下文与优先级调度
+  - 节点能力与状态管理
+
+- **uhorse-node**: 本地节点
+  - 任务执行引擎 (TaskExecutor)
+  - 文件系统操作 (FileOps)
+  - Shell 命令执行
+  - 工作空间管理
+  - 与 Hub 的 WebSocket 连接
+  - 心跳与健康报告
+
+- **uhorse-hub**: 云端 Hub
+  - 多节点管理与调度
+  - 优先级任务队列
+  - 负载均衡策略
+  - 节点健康监控
+  - 统计信息收集
+
+#### Security Features
+- **JWT 认证**: NodeAuthenticator
+  - 令牌签发与验证
+  - 令牌刷新机制
+  - 节点认证状态管理
+
+- **敏感操作审批**: SensitiveOperationApprover
+  - 5 类敏感操作检测 (file_delete, system_command, network_access, credential_access, config_change)
+  - 审批流程 (请求、通过、拒绝)
+  - 幂等性检查
+
+- **字段加密**: HubFieldEncryptor
+  - AES-GCM 加密
+  - JSON 字段加密
+  - 主密钥管理
+
+- **TLS 配置**: HubTlsConfig
+  - 证书路径配置
+  - 安全传输支持
+
+### Testing
+- **端到端测试**: 12 个测试覆盖 Hub-Node 通信
+- **集成测试**: 7 个测试覆盖 Hub 基础功能
+- **安全测试**: 26 个测试覆盖 JWT、加密、审批
+- **性能基准**: 8 个基准测试 (criterion)
+
+### Performance
+- 任务提交吞吐量优化
+- 并发任务处理
+- 优先级调度效率
+
+## [3.0.0] - 2026-03-10
+
+### Added
+
+#### Enterprise Infrastructure
+- **uhorse-discovery**: 服务发现 (etcd/consul)
+- **uhorse-cache**: 分布式缓存 (Redis)
+- **uhorse-queue**: 消息队列 (NATS)
+- **uhorse-gdpr**: GDPR 合规 (数据导出、删除、同意管理)
+- **uhorse-governance**: 数据治理 (分类、保留策略)
+- **uhorse-backup**: 备份恢复 (自动备份、加密)
+- **uhorse-sso**: SSO/OAuth2/OIDC/SAML
+- **uhorse-siem**: SIEM 集成 (Splunk/Datadog)
+- **uhorse-webhook**: Webhook 增强 (重试、签名)
+- **uhorse-integration**: 第三方集成 (Jira/GitHub/Slack)
+
+#### High Availability
+- 服务注册与发现
+- 负载均衡策略 (轮询、加权、健康感知)
+- 分布式配置中心
+- 自动故障转移
+
+#### Scalability
+- 数据库分片
+- 读写分离
+- 分布式会话缓存
+- 令牌黑名单持久化
+- 异步任务队列
+
+#### Compliance
+- GDPR/CCPA 合规
+- 数据分类 (4 级敏感度)
+- 自动备份与恢复
+- 审计日志持久化
+
 ## [2.0.0] - 2026-03-05
 
 ### Added
@@ -134,5 +227,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0
+[3.0.0]: https://github.com/kts-kris/uHorse/compare/v2.0.0...v3.0.0
+[2.0.0]: https://github.com/kts-kris/uHorse/compare/v0.1.0...v2.0.0
 [0.1.0]: https://github.com/kts-kris/uHorse/releases/tag/v0.1.0
