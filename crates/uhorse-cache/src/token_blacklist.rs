@@ -186,17 +186,15 @@ impl TokenBlacklist {
 
     /// Clean up expired entries from local cache
     pub async fn cleanup_expired(&self) -> Result<u64> {
-        let mut count = 0u64;
-
         // Note: Local cache doesn't track expiration, so we rely on Redis TTL
         // For a more complete solution, you'd track expiration times locally
 
-        if let Some(ref redis) = self.redis {
+        if let Some(_redis) = &self.redis {
             // Redis handles TTL automatically
             debug!("Redis TTL handles blacklist expiration automatically");
         }
 
-        Ok(count)
+        Ok(0)
     }
 
     /// Get blacklist statistics
@@ -210,22 +208,25 @@ impl TokenBlacklist {
 
     /// Clear all entries (use with caution)
     pub async fn clear(&self) -> Result<u64> {
-        let mut count = 0u64;
+        let local_count;
 
         // Clear local cache
         {
             let mut local = self.local.write().await;
-            count = local.len() as u64;
+            local_count = local.len() as u64;
             local.clear();
         }
 
         // Clear Redis if available
-        if let Some(ref redis) = self.redis {
-            count = redis.delete_pattern("blacklist:*").await?;
-        }
+        let redis_count = if let Some(ref redis) = self.redis {
+            redis.delete_pattern("blacklist:*").await?
+        } else {
+            0
+        };
 
-        warn!("Blacklist cleared: {} entries removed", count);
-        Ok(count)
+        let total = local_count + redis_count;
+        warn!("Blacklist cleared: {} entries removed", total);
+        Ok(total)
     }
 }
 

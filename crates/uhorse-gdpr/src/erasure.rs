@@ -2,7 +2,6 @@
 //!
 //! 数据删除功能 (GDPR Article 17: 被遗忘权)
 
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

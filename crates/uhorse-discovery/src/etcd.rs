@@ -1,6 +1,6 @@
 //! etcd-based service discovery implementation
 use async_trait::async_trait;
-use etcd_client::{Client, GetOptions, PutOptions};
+use etcd_client::{Client, PutOptions};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

@@ -1,9 +1,5 @@
 //! Health checking for service instances
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
 
 use crate::types::{HealthCheckConfig, HealthStatus, ServiceInstance};
 
@@ -32,7 +28,7 @@ pub struct HealthChecker {
 impl HealthChecker {
     /// Create a new health checker with the given configuration
     pub fn new(config: HealthCheckConfig) -> Self {
-        let timeout_secs = config.timeout_secs;
+        let _timeout_secs = config.timeout_secs;
         Self {
             config,
             #[cfg(feature = "health-check")]
