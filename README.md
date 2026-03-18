@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0--alpha-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
@@ -341,6 +341,8 @@ weather,api,utility
 
 | 文档 | 说明 |
 |------|------|
+| [v4.0 架构设计](docs/architecture/v4.0-architecture.md) | Hub-Node 分布式架构 |
+| [v4.0 架构设计 (EN)](docs/architecture/v4.0-architecture-en.md) | Hub-Node Architecture (English) |
 | [v3.0 架构设计](docs/architecture/v3.0-architecture.md) | 企业级架构设计 |
 | [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | 完整开发路线图 |
 | [发布说明](RELEASE_NOTES.md) | 版本更新日志 |
@@ -465,7 +467,7 @@ weather,api,utility
 - [x] doctor 命令增强 (自动修复 + 依赖检查 + 配置验证)
 - [x] SDK 开发 (Python SDK + TypeScript SDK)
 
-### v4.0 🚧 进行中 - 分布式 AI 工作编排平台
+### v4.0 ✅ 已完成 - 分布式 AI 工作编排平台
 
 > 从"企业级 AI 基础设施平台"升级为"分布式 AI 工作编排平台"
 
@@ -503,14 +505,20 @@ weather,api,utility
 - [x] SecurityManager (安全组件整合)
 - [x] 幂等性控制 (IdempotencyCache)
 
-**Phase 4 ✅ 完成** (工具与集成):
+**Phase 4 已完成** ✅ (工具与集成):
 - [x] 本地工具完善 (文件/代码/数据库/API/浏览器)
 - [x] 技能执行器 (SKILL.md 解析, JSON Schema 验证)
 - [x] 通道集成测试
 - [x] Web 管理界面 (Axum, Dashboard, REST API)
-- [ ] Web 管理界面
 
-📄 **完整文档**: [v4.0 架构设计](docs/V4_ARCHITECTURE_DESIGN.md)
+**Phase 5 已完成** ✅ (测试与优化):
+- [x] 端到端测试 (12 个测试覆盖 Hub-Node 通信)
+- [x] 集成测试 (7 个测试覆盖 Hub 基础功能)
+- [x] 安全测试 (26 个测试覆盖 JWT、加密、审批)
+- [x] 性能基准测试 (8 个 criterion 基准)
+- [x] 文档更新 (CHANGELOG 中英文版)
+
+📄 **完整文档**: [v4.0 架构设计](docs/architecture/v4.0-architecture.md) | [English](docs/architecture/v4.0-architecture-en.md)
 
 ---
 
