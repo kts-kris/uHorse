@@ -151,21 +151,21 @@ impl PermissionRule {
     /// 获取命令所需的操作
     fn get_required_actions(&self, command: &Command) -> Vec<Action> {
         match command {
-            Command::File(file_cmd) => {
-                match file_cmd {
-                    uhorse_protocol::FileCommand::Read { .. } => vec![Action::Read],
-                    uhorse_protocol::FileCommand::List { .. } => vec![Action::Read],
-                    uhorse_protocol::FileCommand::Search { .. } => vec![Action::Read],
-                    uhorse_protocol::FileCommand::Info { .. } => vec![Action::Read],
-                    uhorse_protocol::FileCommand::Exists { .. } => vec![Action::Read],
-                    uhorse_protocol::FileCommand::Write { .. } => vec![Action::Write],
-                    uhorse_protocol::FileCommand::Append { .. } => vec![Action::Write],
-                    uhorse_protocol::FileCommand::Delete { .. } => vec![Action::Delete],
-                    uhorse_protocol::FileCommand::Copy { .. } => vec![Action::Read, Action::Write],
-                    uhorse_protocol::FileCommand::Move { .. } => vec![Action::Read, Action::Write, Action::Delete],
-                    uhorse_protocol::FileCommand::CreateDir { .. } => vec![Action::Write],
+            Command::File(file_cmd) => match file_cmd {
+                uhorse_protocol::FileCommand::Read { .. } => vec![Action::Read],
+                uhorse_protocol::FileCommand::List { .. } => vec![Action::Read],
+                uhorse_protocol::FileCommand::Search { .. } => vec![Action::Read],
+                uhorse_protocol::FileCommand::Info { .. } => vec![Action::Read],
+                uhorse_protocol::FileCommand::Exists { .. } => vec![Action::Read],
+                uhorse_protocol::FileCommand::Write { .. } => vec![Action::Write],
+                uhorse_protocol::FileCommand::Append { .. } => vec![Action::Write],
+                uhorse_protocol::FileCommand::Delete { .. } => vec![Action::Delete],
+                uhorse_protocol::FileCommand::Copy { .. } => vec![Action::Read, Action::Write],
+                uhorse_protocol::FileCommand::Move { .. } => {
+                    vec![Action::Read, Action::Write, Action::Delete]
                 }
-            }
+                uhorse_protocol::FileCommand::CreateDir { .. } => vec![Action::Write],
+            },
             Command::Shell(_) => vec![Action::Execute],
             Command::Code(_) => vec![Action::Execute],
             Command::Database(_) => vec![Action::Execute],
@@ -232,17 +232,11 @@ impl ResourcePattern {
         match self {
             Self::AllowAll => true,
 
-            Self::ExactPath { path } => {
-                self.command_involves_path(command, path)
-            }
+            Self::ExactPath { path } => self.command_involves_path(command, path),
 
-            Self::PathPrefix { prefix } => {
-                self.command_path_starts_with(command, prefix)
-            }
+            Self::PathPrefix { prefix } => self.command_path_starts_with(command, prefix),
 
-            Self::Glob { pattern } => {
-                self.command_path_matches_glob(command, pattern)
-            }
+            Self::Glob { pattern } => self.command_path_matches_glob(command, pattern),
 
             Self::Regex { pattern } => {
                 // 简化处理，实际应该使用正则表达式
@@ -254,54 +248,46 @@ impl ResourcePattern {
                 types.iter().any(|t| t.to_lowercase() == cmd_type)
             }
 
-            Self::All { patterns } => {
-                patterns.iter().all(|p| p.matches(command, _context))
-            }
+            Self::All { patterns } => patterns.iter().all(|p| p.matches(command, _context)),
 
-            Self::Any { patterns } => {
-                patterns.iter().any(|p| p.matches(command, _context))
-            }
+            Self::Any { patterns } => patterns.iter().any(|p| p.matches(command, _context)),
         }
     }
 
     fn command_involves_path(&self, command: &Command, target_path: &str) -> bool {
         match command {
-            Command::File(file_cmd) => {
-                file_cmd.target_path() == target_path
-            }
-            Command::Shell(shell_cmd) => {
-                shell_cmd.cwd.as_ref().map(|p| p == target_path).unwrap_or(false)
-            }
+            Command::File(file_cmd) => file_cmd.target_path() == target_path,
+            Command::Shell(shell_cmd) => shell_cmd
+                .cwd
+                .as_ref()
+                .map(|p| p == target_path)
+                .unwrap_or(false),
             _ => false,
         }
     }
 
     fn command_path_starts_with(&self, command: &Command, prefix: &str) -> bool {
         match command {
-            Command::File(file_cmd) => {
-                file_cmd.target_path().starts_with(prefix)
-            }
-            Command::Shell(shell_cmd) => {
-                shell_cmd.cwd.as_ref().map(|p| p.starts_with(prefix)).unwrap_or(false)
-            }
+            Command::File(file_cmd) => file_cmd.target_path().starts_with(prefix),
+            Command::Shell(shell_cmd) => shell_cmd
+                .cwd
+                .as_ref()
+                .map(|p| p.starts_with(prefix))
+                .unwrap_or(false),
             _ => false,
         }
     }
 
     fn command_path_matches_glob(&self, command: &Command, pattern: &str) -> bool {
         match command {
-            Command::File(file_cmd) => {
-                glob_match::glob_match(pattern, file_cmd.target_path())
-            }
+            Command::File(file_cmd) => glob_match::glob_match(pattern, file_cmd.target_path()),
             _ => false,
         }
     }
 
     fn command_path_contains(&self, command: &Command, substr: &str) -> bool {
         match command {
-            Command::File(file_cmd) => {
-                file_cmd.target_path().contains(substr)
-            }
+            Command::File(file_cmd) => file_cmd.target_path().contains(substr),
             _ => false,
         }
     }
@@ -594,7 +580,9 @@ impl PermissionManager {
             // 检查是否过期
             if now > request.expires_at {
                 request.status = ApprovalStatus::Expired;
-                return Err(NodeError::Permission("Approval request expired".to_string()));
+                return Err(NodeError::Permission(
+                    "Approval request expired".to_string(),
+                ));
             }
 
             if approved {

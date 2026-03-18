@@ -103,7 +103,12 @@ impl WebhookRecord {
     }
 
     /// 标记成功
-    pub fn mark_success(mut self, response_code: u16, response_body: Option<String>, duration_ms: u64) -> Self {
+    pub fn mark_success(
+        mut self,
+        response_code: u16,
+        response_body: Option<String>,
+        duration_ms: u64,
+    ) -> Self {
         self.status = WebhookStatus::Success;
         self.response_code = Some(response_code);
         self.response_body = response_body;
@@ -282,7 +287,11 @@ impl WebhookHistory {
     /// 查询记录
     pub async fn query(&self, filter: &WebhookFilter) -> Vec<WebhookRecord> {
         let records = self.records.read().await;
-        records.iter().filter(|r| filter.matches(r)).cloned().collect()
+        records
+            .iter()
+            .filter(|r| filter.matches(r))
+            .cloned()
+            .collect()
     }
 
     /// 查询最近的记录
@@ -392,7 +401,8 @@ mod tests {
             "user.created",
             r#"{"user_id": "123"}"#,
             "tenant-001",
-        ).mark_success(200, Some(r#"{"status": "ok"}"#.to_string()), 150);
+        )
+        .mark_success(200, Some(r#"{"status": "ok"}"#.to_string()), 150);
 
         assert!(record.is_success());
         assert_eq!(record.response_code, Some(200));
@@ -410,7 +420,8 @@ mod tests {
             "user.created",
             r#"{}"#,
             "tenant-001",
-        ).mark_success(200, None, 100);
+        )
+        .mark_success(200, None, 100);
 
         assert!(filter.matches(&record));
 
@@ -419,7 +430,8 @@ mod tests {
             "user.created",
             r#"{}"#,
             "tenant-001",
-        ).mark_failure("Timeout");
+        )
+        .mark_failure("Timeout");
 
         assert!(!filter.matches(&failed_record));
     }
@@ -449,7 +461,11 @@ mod tests {
         for i in 0..10 {
             let record = WebhookRecord::new(
                 "https://example.com/webhook",
-                if i % 2 == 0 { "user.created" } else { "user.updated" },
+                if i % 2 == 0 {
+                    "user.created"
+                } else {
+                    "user.updated"
+                },
                 r#"{}"#,
                 "tenant-001",
             );
@@ -468,12 +484,8 @@ mod tests {
 
         // 添加成功和失败的记录
         for i in 0..10 {
-            let mut record = WebhookRecord::new(
-                "https://example.com/webhook",
-                "test",
-                r#"{}"#,
-                "tenant-001",
-            );
+            let mut record =
+                WebhookRecord::new("https://example.com/webhook", "test", r#"{}"#, "tenant-001");
             if i < 7 {
                 record = record.mark_success(200, None, 100);
             } else {

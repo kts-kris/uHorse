@@ -2,13 +2,15 @@
 //!
 //! OpenAPI 3.0 规范生成和 Swagger UI 集成
 
+mod generator;
 mod spec;
 mod ui;
-mod generator;
 
-pub use spec::{OpenApiInfo, OpenApiManager, ServerInfo, SecurityScheme, TagInfo};
-pub use ui::{SwaggerUi, SwaggerUiConfig, create_docs_router};
-pub use generator::{ClientGenerator, ClientLanguage, GeneratorConfig, GeneratedClient, GeneratedFile};
+pub use generator::{
+    ClientGenerator, ClientLanguage, GeneratedClient, GeneratedFile, GeneratorConfig,
+};
+pub use spec::{OpenApiInfo, OpenApiManager, SecurityScheme, ServerInfo, TagInfo};
+pub use ui::{create_docs_router, SwaggerUi, SwaggerUiConfig};
 
 use serde::{Deserialize, Serialize};
 

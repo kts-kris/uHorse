@@ -46,7 +46,10 @@ impl RetryStrategy {
 
     /// Create a fixed interval retry strategy
     pub fn fixed(max_retries: u32, interval: Duration) -> Self {
-        Self::Fixed { interval, max_retries }
+        Self::Fixed {
+            interval,
+            max_retries,
+        }
     }
 
     /// Create an exponential backoff strategy
@@ -68,7 +71,10 @@ impl RetryStrategy {
     pub fn get_delay(&self, attempt: u32) -> Option<Duration> {
         match self {
             Self::None => None,
-            Self::Fixed { interval, max_retries } => {
+            Self::Fixed {
+                interval,
+                max_retries,
+            } => {
                 if attempt < *max_retries {
                     Some(*interval)
                 } else {
@@ -82,17 +88,14 @@ impl RetryStrategy {
                 max_retries,
             } => {
                 if attempt < *max_retries {
-                    let delay = initial_interval.as_secs_f64()
-                        * multiplier.powi(attempt as i32);
+                    let delay = initial_interval.as_secs_f64() * multiplier.powi(attempt as i32);
                     let delay = delay.min(max_interval.as_secs_f64());
                     Some(Duration::from_secs_f64(delay))
                 } else {
                     None
                 }
             }
-            Self::Custom { intervals } => {
-                intervals.get(attempt as usize).copied()
-            }
+            Self::Custom { intervals } => intervals.get(attempt as usize).copied(),
         }
     }
 
@@ -157,7 +160,9 @@ impl RetryPolicy {
         let random_value: f64 = rand::thread_rng().gen();
         let jitter_factor = 1.0 - self.jitter / 2.0 + (random_value * self.jitter);
 
-        Some(Duration::from_secs_f64(base_delay.as_secs_f64() * jitter_factor))
+        Some(Duration::from_secs_f64(
+            base_delay.as_secs_f64() * jitter_factor,
+        ))
     }
 }
 

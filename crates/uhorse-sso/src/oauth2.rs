@@ -35,8 +35,8 @@ impl Default for OAuth2Config {
         Self {
             authorize_endpoint: "/oauth2/authorize".to_string(),
             token_endpoint: "/oauth2/token".to_string(),
-            auth_code_ttl: 600, // 10 分钟
-            access_token_ttl: 3600, // 1 小时
+            auth_code_ttl: 600,           // 10 分钟
+            access_token_ttl: 3600,       // 1 小时
             refresh_token_ttl: 86400 * 7, // 7 天
             enable_refresh_token: true,
             grant_types: vec![
@@ -268,26 +268,35 @@ impl OAuth2Server {
 
         // 验证授权码
         if auth_code.client_id != client_id {
-            return Err(crate::SsoError::AuthenticationFailed("Client ID mismatch".to_string()));
+            return Err(crate::SsoError::AuthenticationFailed(
+                "Client ID mismatch".to_string(),
+            ));
         }
 
         if auth_code.redirect_uri != redirect_uri {
-            return Err(crate::SsoError::AuthenticationFailed("Redirect URI mismatch".to_string()));
+            return Err(crate::SsoError::AuthenticationFailed(
+                "Redirect URI mismatch".to_string(),
+            ));
         }
 
         if auth_code.used {
-            return Err(crate::SsoError::InvalidState("Authorization code already used".to_string()));
+            return Err(crate::SsoError::InvalidState(
+                "Authorization code already used".to_string(),
+            ));
         }
 
         if auth_code.is_expired() {
-            return Err(crate::SsoError::InvalidState("Authorization code expired".to_string()));
+            return Err(crate::SsoError::InvalidState(
+                "Authorization code expired".to_string(),
+            ));
         }
 
         // 标记为已使用
         auth_code.mark_used();
 
         // 生成令牌
-        self.generate_token_response(client_id, &auth_code.user_id, auth_code.scope.clone()).await
+        self.generate_token_response(client_id, &auth_code.user_id, auth_code.scope.clone())
+            .await
     }
 
     /// 刷新令牌
@@ -298,16 +307,20 @@ impl OAuth2Server {
     ) -> crate::Result<TokenResponse> {
         let tokens = self.tokens.read().await;
 
-        let token_info = tokens.get(refresh_token).ok_or_else(|| {
-            crate::SsoError::InvalidState("Invalid refresh token".to_string())
-        })?;
+        let token_info = tokens
+            .get(refresh_token)
+            .ok_or_else(|| crate::SsoError::InvalidState("Invalid refresh token".to_string()))?;
 
         if token_info.client_id != client_id {
-            return Err(crate::SsoError::AuthenticationFailed("Client ID mismatch".to_string()));
+            return Err(crate::SsoError::AuthenticationFailed(
+                "Client ID mismatch".to_string(),
+            ));
         }
 
         if token_info.is_expired() {
-            return Err(crate::SsoError::InvalidState("Refresh token expired".to_string()));
+            return Err(crate::SsoError::InvalidState(
+                "Refresh token expired".to_string(),
+            ));
         }
 
         // 生成新令牌
@@ -316,7 +329,8 @@ impl OAuth2Server {
 
         drop(tokens); // 释放锁
 
-        self.generate_token_response(client_id, &user_id, scope).await
+        self.generate_token_response(client_id, &user_id, scope)
+            .await
     }
 
     /// 生成令牌响应
@@ -373,12 +387,14 @@ impl OAuth2Server {
     /// 验证访问令牌
     pub async fn validate_token(&self, access_token: &str) -> crate::Result<TokenInfo> {
         let tokens = self.tokens.read().await;
-        let token_info = tokens.get(access_token).ok_or_else(|| {
-            crate::SsoError::TokenError("Invalid access token".to_string())
-        })?;
+        let token_info = tokens
+            .get(access_token)
+            .ok_or_else(|| crate::SsoError::TokenError("Invalid access token".to_string()))?;
 
         if token_info.is_expired() {
-            return Err(crate::SsoError::TokenError("Access token expired".to_string()));
+            return Err(crate::SsoError::TokenError(
+                "Access token expired".to_string(),
+            ));
         }
 
         Ok(token_info.clone())
@@ -451,19 +467,21 @@ mod tests {
         server.register_client(client).await;
 
         // 创建授权码
-        let code = server.create_auth_code(
-            &client_id,
-            "http://localhost/callback",
-            "user-1",
-            vec!["openid".to_string()],
-        ).await.unwrap();
+        let code = server
+            .create_auth_code(
+                &client_id,
+                "http://localhost/callback",
+                "user-1",
+                vec!["openid".to_string()],
+            )
+            .await
+            .unwrap();
 
         // 交换令牌
-        let token = server.exchange_auth_code(
-            &code.code,
-            &client_id,
-            "http://localhost/callback",
-        ).await.unwrap();
+        let token = server
+            .exchange_auth_code(&code.code, &client_id, "http://localhost/callback")
+            .await
+            .unwrap();
 
         assert!(!token.access_token.is_empty());
         assert_eq!(token.token_type, "Bearer");

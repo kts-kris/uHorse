@@ -3,8 +3,8 @@
 //! 使用 utoipa 生成 OpenAPI 3.0 规范
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use std::collections::HashMap;
+use utoipa::ToSchema;
 
 use super::ServerConfig;
 
@@ -190,7 +190,11 @@ impl OpenApiManager {
     }
 
     /// 添加安全方案
-    pub fn add_security_scheme(&mut self, name: impl Into<String>, scheme: SecurityScheme) -> &mut Self {
+    pub fn add_security_scheme(
+        &mut self,
+        name: impl Into<String>,
+        scheme: SecurityScheme,
+    ) -> &mut Self {
         self.security_schemes.insert(name.into(), scheme);
         self
     }
@@ -215,11 +219,17 @@ impl OpenApiManager {
         doc.insert("openapi".to_string(), serde_json::json!("3.0.3"));
 
         // 基本信息
-        doc.insert("info".to_string(), serde_json::to_value(&self.info).unwrap());
+        doc.insert(
+            "info".to_string(),
+            serde_json::to_value(&self.info).unwrap(),
+        );
 
         // 服务器列表
         if !self.servers.is_empty() {
-            doc.insert("servers".to_string(), serde_json::to_value(&self.servers).unwrap());
+            doc.insert(
+                "servers".to_string(),
+                serde_json::to_value(&self.servers).unwrap(),
+            );
         }
 
         // 安全方案
@@ -229,17 +239,26 @@ impl OpenApiManager {
                 "securitySchemes".to_string(),
                 serde_json::to_value(&self.security_schemes).unwrap(),
             );
-            doc.insert("components".to_string(), serde_json::Value::Object(components));
+            doc.insert(
+                "components".to_string(),
+                serde_json::Value::Object(components),
+            );
         }
 
         // 标签
         if !self.tags.is_empty() {
-            doc.insert("tags".to_string(), serde_json::to_value(&self.tags).unwrap());
+            doc.insert(
+                "tags".to_string(),
+                serde_json::to_value(&self.tags).unwrap(),
+            );
         }
 
         // 外部文档
         if let Some(ref docs) = self.external_docs {
-            doc.insert("externalDocs".to_string(), serde_json::to_value(docs).unwrap());
+            doc.insert(
+                "externalDocs".to_string(),
+                serde_json::to_value(docs).unwrap(),
+            );
         }
 
         serde_json::Value::Object(doc)
@@ -354,7 +373,14 @@ mod tests {
         let manager = OpenApiManager::default();
         let yaml = manager.to_yaml().unwrap();
 
-        assert!(yaml.contains("openapi: \"3.0.3\"") || yaml.contains("openapi: '3.0.3'") || yaml.contains("openapi: 3.0.3"));
-        assert!(yaml.contains("title: uHorse AI Gateway API") || yaml.contains("title: \"uHorse AI Gateway API\""));
+        assert!(
+            yaml.contains("openapi: \"3.0.3\"")
+                || yaml.contains("openapi: '3.0.3'")
+                || yaml.contains("openapi: 3.0.3")
+        );
+        assert!(
+            yaml.contains("title: uHorse AI Gateway API")
+                || yaml.contains("title: \"uHorse AI Gateway API\"")
+        );
     }
 }

@@ -108,9 +108,8 @@ impl<T: Clone + Serialize + DeserializeOwned> Task<T> {
 
     /// Schedule for future execution
     pub fn with_schedule(mut self, delay: Duration) -> Self {
-        self.scheduled_at = Some(
-            chrono::Utc::now().timestamp_millis() as u64 + delay.as_millis() as u64
-        );
+        self.scheduled_at =
+            Some(chrono::Utc::now().timestamp_millis() as u64 + delay.as_millis() as u64);
         self
     }
 
@@ -304,8 +303,10 @@ impl<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static> TaskQueue<
                             task.fail(e.to_string());
                             if task.can_retry() {
                                 task.increment_retry();
-                                info!("Task {} will be retried (attempt {}/{})",
-                                     task.id, task.retry_count, task.max_retries);
+                                info!(
+                                    "Task {} will be retried (attempt {}/{})",
+                                    task.id, task.retry_count, task.max_retries
+                                );
                             } else {
                                 error!("Task {} failed permanently: {}", task.id, e);
                                 to_remove.push(i);
@@ -371,15 +372,15 @@ mod tests {
 
     #[test]
     fn test_task_priority() {
-        let task: Task<String> = Task::new("task-1", "test", "payload".to_string())
-            .with_priority(TaskPriority::High);
+        let task: Task<String> =
+            Task::new("task-1", "test", "payload".to_string()).with_priority(TaskPriority::High);
         assert_eq!(task.priority, TaskPriority::High);
     }
 
     #[test]
     fn test_task_retry() {
-        let mut task: Task<String> = Task::new("task-1", "test", "payload".to_string())
-            .with_max_retries(2);
+        let mut task: Task<String> =
+            Task::new("task-1", "test", "payload".to_string()).with_max_retries(2);
         assert!(task.can_retry());
 
         // First failure -> Retrying

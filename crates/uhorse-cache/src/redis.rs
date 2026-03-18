@@ -117,7 +117,8 @@ impl RedisCache {
 
     /// Set a string value
     pub async fn set_string(&self, key: &str, value: &str) -> Result<()> {
-        self.set_string_with_ttl(key, value, self.policy.default_ttl).await
+        self.set_string_with_ttl(key, value, self.policy.default_ttl)
+            .await
     }
 
     /// Set a string value with custom TTL
@@ -166,10 +167,13 @@ impl RedisCache {
         let mut conn = self.get_connection().await?;
         let full_key = self.build_key(key);
 
-        let result: i32 = conn.expire(&full_key, ttl.as_secs() as i64).await.map_err(|e| {
-            error!("Redis expire error for key {}: {}", key, e);
-            anyhow!("Redis expire error: {}", e)
-        })?;
+        let result: i32 = conn
+            .expire(&full_key, ttl.as_secs() as i64)
+            .await
+            .map_err(|e| {
+                error!("Redis expire error for key {}: {}", key, e);
+                anyhow!("Redis expire error: {}", e)
+            })?;
 
         Ok(result == 1)
     }

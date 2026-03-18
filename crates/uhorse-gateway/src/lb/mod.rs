@@ -1,18 +1,18 @@
 //! Load balancing strategies for service routing
 
-mod round_robin;
-mod weighted;
 mod health_aware;
 mod least_connection;
+mod round_robin;
+mod weighted;
 
 use async_trait::async_trait;
 use std::sync::Arc;
 use uhorse_discovery::ServiceInstance;
 
-pub use round_robin::RoundRobinLoadBalancer;
-pub use weighted::WeightedLoadBalancer;
 pub use health_aware::HealthAwareLoadBalancer;
 pub use least_connection::LeastConnectionLoadBalancer;
+pub use round_robin::RoundRobinLoadBalancer;
+pub use weighted::WeightedLoadBalancer;
 
 /// Load balancer trait
 #[async_trait]

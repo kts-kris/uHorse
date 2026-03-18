@@ -426,8 +426,17 @@ impl GitHubClient {
         repo: &str,
         issue_number: u64,
     ) -> crate::Result<GitHubIssue> {
-        self.update_issue(owner, repo, issue_number, None, None, Some(IssueState::Closed), None, None)
-            .await
+        self.update_issue(
+            owner,
+            repo,
+            issue_number,
+            None,
+            None,
+            Some(IssueState::Closed),
+            None,
+            None,
+        )
+        .await
     }
 
     /// 重新打开 Issue
@@ -437,8 +446,17 @@ impl GitHubClient {
         repo: &str,
         issue_number: u64,
     ) -> crate::Result<GitHubIssue> {
-        self.update_issue(owner, repo, issue_number, None, None, Some(IssueState::Open), None, None)
-            .await
+        self.update_issue(
+            owner,
+            repo,
+            issue_number,
+            None,
+            None,
+            Some(IssueState::Open),
+            None,
+            None,
+        )
+        .await
     }
 
     /// 创建 Pull Request
@@ -452,10 +470,7 @@ impl GitHubClient {
         body: Option<&str>,
         draft: Option<bool>,
     ) -> crate::Result<GitHubPullRequest> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls",
-            self.config.api_url, owner, repo
-        );
+        let url = format!("{}/repos/{}/{}/pulls", self.config.api_url, owner, repo);
 
         let request = CreatePullRequestRequest {
             title: title.to_string(),
@@ -619,7 +634,10 @@ impl GitHubClient {
             )));
         }
 
-        info!("Added comment to GitHub issue {}/{}#{}", owner, repo, issue_number);
+        info!(
+            "Added comment to GitHub issue {}/{}#{}",
+            owner, repo, issue_number
+        );
         Ok(())
     }
 }

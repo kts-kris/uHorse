@@ -81,8 +81,8 @@ pub struct DatadogLogEntry {
 
 /// 时间戳序列化模块
 mod dd_timestamp {
-    use chrono::{DateTime, Utc, TimeZone};
-    use serde::{self, Deserialize, Serializer, Deserializer};
+    use chrono::{DateTime, TimeZone, Utc};
+    use serde::{self, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(date: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -96,9 +96,9 @@ mod dd_timestamp {
         D: Deserializer<'de>,
     {
         let ts = i64::deserialize(deserializer)?;
-        Utc.timestamp_millis_opt(ts).single().ok_or_else(|| {
-            serde::de::Error::custom("Invalid timestamp")
-        })
+        Utc.timestamp_millis_opt(ts)
+            .single()
+            .ok_or_else(|| serde::de::Error::custom("Invalid timestamp"))
     }
 }
 
@@ -136,12 +136,9 @@ impl DatadogLogEntry {
         attributes.insert("result".to_string(), serde_json::json!(audit.result));
 
         Self {
-            message: format!("[{}] {} - {} {} on {}",
-                audit.event_type,
-                audit.actor,
-                audit.action,
-                audit.result,
-                audit.resource
+            message: format!(
+                "[{}] {} - {} {} on {}",
+                audit.event_type, audit.actor, audit.action, audit.result, audit.resource
             ),
             timestamp: audit.timestamp,
             host: audit.ip_address.clone(),
@@ -161,7 +158,8 @@ impl DatadogLogEntry {
             "denied" => "warn",
             "warning" => "warn",
             _ => "info",
-        }.to_string()
+        }
+        .to_string()
     }
 
     /// 设置主机
@@ -292,11 +290,7 @@ impl DatadogClient {
 
     /// 发送审计事件
     pub async fn send_audit(&self, audit: &crate::export::AuditEvent) -> crate::Result<()> {
-        let entry = DatadogLogEntry::from_audit(
-            audit,
-            &self.config.service,
-            &self.config.env,
-        );
+        let entry = DatadogLogEntry::from_audit(audit, &self.config.service, &self.config.env);
 
         self.send_log(&entry).await
     }
@@ -336,7 +330,8 @@ mod tests {
             "user-123",
             "/auth/login",
             "login",
-        ).with_result("success");
+        )
+        .with_result("success");
 
         let entry = DatadogLogEntry::from_audit(&audit, "uhorse", "production");
 

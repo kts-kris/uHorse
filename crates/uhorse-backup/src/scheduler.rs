@@ -196,7 +196,9 @@ impl BackupScheduler {
             let records = self.records.read().await;
             if let Some(last_full) = records
                 .iter()
-                .filter(|r| r.backup_type == BackupType::Full && r.status == BackupStatus::Completed)
+                .filter(|r| {
+                    r.backup_type == BackupType::Full && r.status == BackupStatus::Completed
+                })
                 .max_by_key(|r| r.started_at)
             {
                 record = record.with_base(&last_full.id);
@@ -213,7 +215,12 @@ impl BackupScheduler {
     }
 
     /// 完成备份
-    pub async fn complete_backup(&self, record: &mut BackupRecord, size_bytes: u64, checksum: String) {
+    pub async fn complete_backup(
+        &self,
+        record: &mut BackupRecord,
+        size_bytes: u64,
+        checksum: String,
+    ) {
         record.status = BackupStatus::Completed;
         record.completed_at = Some(Utc::now());
         record.size_bytes = size_bytes;

@@ -243,8 +243,7 @@ impl ConsentManager {
         ip_address: Option<String>,
         user_agent: Option<String>,
     ) -> Result<ConsentRecord> {
-        let record = ConsentRecord::new(user_id, tenant_id, consent_type)
-            .grant(source);
+        let record = ConsentRecord::new(user_id, tenant_id, consent_type).grant(source);
 
         let mut record = record;
         record.ip_address = ip_address;
@@ -298,8 +297,7 @@ impl ConsentManager {
 
     /// 检查是否已授予同意
     pub async fn has_consent(&self, user_id: &str, consent_type: ConsentType) -> bool {
-        self.check_consent(user_id, consent_type).await
-            == Some(ConsentStatus::Granted)
+        self.check_consent(user_id, consent_type).await == Some(ConsentStatus::Granted)
     }
 
     /// 获取用户所有同意记录

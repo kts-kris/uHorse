@@ -48,7 +48,8 @@ impl DistributedConfigClient {
 
         // Check cache first
         {
-            let cache: tokio::sync::RwLockReadGuard<'_, HashMap<String, CachedConfig>> = self.cache.read().await;
+            let cache: tokio::sync::RwLockReadGuard<'_, HashMap<String, CachedConfig>> =
+                self.cache.read().await;
             if let Some(cached) = cache.get(&full_key) {
                 if let Ok(value) = serde_json::from_str::<T>(&cached.value) {
                     return Ok(Some(value));
@@ -66,7 +67,8 @@ impl DistributedConfigClient {
 
             // Update cache
             {
-                let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> = self.cache.write().await;
+                let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> =
+                    self.cache.write().await;
                 cache.insert(full_key.clone(), cached);
             }
 
@@ -87,7 +89,8 @@ impl DistributedConfigClient {
 
         // Update cache
         {
-            let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> = self.cache.write().await;
+            let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> =
+                self.cache.write().await;
             cache.insert(
                 full_key,
                 CachedConfig {
@@ -111,7 +114,8 @@ impl DistributedConfigClient {
 
         // Update cache
         {
-            let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> = self.cache.write().await;
+            let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> =
+                self.cache.write().await;
             cache.remove(&full_key);
         }
 
@@ -208,24 +212,28 @@ impl Default for InMemoryConfigBackend {
 #[async_trait]
 impl ConfigBackend for InMemoryConfigBackend {
     async fn get(&self, key: &str) -> Result<Option<String>> {
-        let data: tokio::sync::RwLockReadGuard<'_, HashMap<String, String>> = self.data.read().await;
+        let data: tokio::sync::RwLockReadGuard<'_, HashMap<String, String>> =
+            self.data.read().await;
         Ok(data.get(key).cloned())
     }
 
     async fn set(&self, key: &str, value: &str) -> Result<()> {
-        let mut data: tokio::sync::RwLockWriteGuard<'_, HashMap<String, String>> = self.data.write().await;
+        let mut data: tokio::sync::RwLockWriteGuard<'_, HashMap<String, String>> =
+            self.data.write().await;
         data.insert(key.to_string(), value.to_string());
         Ok(())
     }
 
     async fn delete(&self, key: &str) -> Result<()> {
-        let mut data: tokio::sync::RwLockWriteGuard<'_, HashMap<String, String>> = self.data.write().await;
+        let mut data: tokio::sync::RwLockWriteGuard<'_, HashMap<String, String>> =
+            self.data.write().await;
         data.remove(key);
         Ok(())
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<String>> {
-        let data: tokio::sync::RwLockReadGuard<'_, HashMap<String, String>> = self.data.read().await;
+        let data: tokio::sync::RwLockReadGuard<'_, HashMap<String, String>> =
+            self.data.read().await;
         let keys: Vec<String> = data
             .keys()
             .filter(|k: &&String| k.starts_with(prefix))
@@ -266,7 +274,10 @@ mod tests {
 
         backend.set("app.server.host", "localhost").await.unwrap();
         backend.set("app.server.port", "8080").await.unwrap();
-        backend.set("app.database.url", "sqlite://db").await.unwrap();
+        backend
+            .set("app.database.url", "sqlite://db")
+            .await
+            .unwrap();
 
         let keys = backend.list("app.").await.unwrap();
         assert_eq!(keys.len(), 3);
@@ -277,7 +288,10 @@ mod tests {
         let client = DistributedConfigClient::in_memory();
 
         // Set and get
-        client.set("test.key", &"test_value".to_string()).await.unwrap();
+        client
+            .set("test.key", &"test_value".to_string())
+            .await
+            .unwrap();
         let value: Option<String> = client.get("test.key").await.unwrap();
         assert_eq!(value, Some("test_value".to_string()));
     }

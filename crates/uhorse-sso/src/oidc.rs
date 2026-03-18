@@ -33,7 +33,12 @@ pub struct OidcConfig {
 
 impl OidcConfig {
     /// 从发现文档创建配置
-    pub fn from_discovery(discovery: &OidcDiscovery, client_id: impl Into<String>, client_secret: impl Into<String>, redirect_uri: impl Into<String>) -> Self {
+    pub fn from_discovery(
+        discovery: &OidcDiscovery,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+        redirect_uri: impl Into<String>,
+    ) -> Self {
         Self {
             issuer: discovery.issuer.clone(),
             authorization_endpoint: discovery.authorization_endpoint.clone(),
@@ -254,11 +259,10 @@ impl OidcClient {
         info!("Discovering OIDC configuration from: {}", discovery_url);
 
         let client = reqwest::Client::new();
-        let response = client
-            .get(&discovery_url)
-            .send()
-            .await
-            .map_err(|e| crate::SsoError::OidcError(format!("Discovery request failed: {}", e)))?;
+        let response =
+            client.get(&discovery_url).send().await.map_err(|e| {
+                crate::SsoError::OidcError(format!("Discovery request failed: {}", e))
+            })?;
 
         if !response.status().is_success() {
             return Err(crate::SsoError::OidcError(format!(
@@ -267,10 +271,9 @@ impl OidcClient {
             )));
         }
 
-        let discovery: OidcDiscovery = response
-            .json()
-            .await
-            .map_err(|e| crate::SsoError::OidcError(format!("Failed to parse discovery document: {}", e)))?;
+        let discovery: OidcDiscovery = response.json().await.map_err(|e| {
+            crate::SsoError::OidcError(format!("Failed to parse discovery document: {}", e))
+        })?;
 
         Ok(discovery)
     }
@@ -306,10 +309,9 @@ impl OidcClient {
             )));
         }
 
-        let token_response: OidcTokenResponse = response
-            .json()
-            .await
-            .map_err(|e| crate::SsoError::OidcError(format!("Failed to parse token response: {}", e)))?;
+        let token_response: OidcTokenResponse = response.json().await.map_err(|e| {
+            crate::SsoError::OidcError(format!("Failed to parse token response: {}", e))
+        })?;
 
         Ok(token_response)
     }
@@ -344,22 +346,30 @@ impl OidcClient {
     pub fn parse_id_token(&self, id_token: &str) -> crate::Result<IdTokenPayload> {
         let parts: Vec<&str> = id_token.split('.').collect();
         if parts.len() != 3 {
-            return Err(crate::SsoError::OidcError("Invalid ID token format".to_string()));
+            return Err(crate::SsoError::OidcError(
+                "Invalid ID token format".to_string(),
+            ));
         }
 
-        let payload_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            parts[1],
-        ).map_err(|e| crate::SsoError::OidcError(format!("Failed to decode ID token: {}", e)))?;
+        let payload_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1])
+                .map_err(|e| {
+                    crate::SsoError::OidcError(format!("Failed to decode ID token: {}", e))
+                })?;
 
-        let payload: IdTokenPayload = serde_json::from_slice(&payload_bytes)
-            .map_err(|e| crate::SsoError::OidcError(format!("Failed to parse ID token payload: {}", e)))?;
+        let payload: IdTokenPayload = serde_json::from_slice(&payload_bytes).map_err(|e| {
+            crate::SsoError::OidcError(format!("Failed to parse ID token payload: {}", e))
+        })?;
 
         Ok(payload)
     }
 
     /// 验证 ID 令牌
-    pub fn verify_id_token(&self, id_token: &IdTokenPayload, nonce: Option<&str>) -> crate::Result<bool> {
+    pub fn verify_id_token(
+        &self,
+        id_token: &IdTokenPayload,
+        nonce: Option<&str>,
+    ) -> crate::Result<bool> {
         // 验证签发者
         if !id_token.verify_issuer(&self.config.issuer) {
             return Err(crate::SsoError::OidcError("Invalid issuer".to_string()));
@@ -410,10 +420,9 @@ impl OidcClient {
             )));
         }
 
-        let token_response: OidcTokenResponse = response
-            .json()
-            .await
-            .map_err(|e| crate::SsoError::OidcError(format!("Failed to parse token response: {}", e)))?;
+        let token_response: OidcTokenResponse = response.json().await.map_err(|e| {
+            crate::SsoError::OidcError(format!("Failed to parse token response: {}", e))
+        })?;
 
         Ok(token_response)
     }
@@ -460,7 +469,11 @@ mod tests {
             grant_types_supported: None,
             subject_types_supported: vec!["public".to_string()],
             id_token_signing_alg_values_supported: vec!["RS256".to_string()],
-            scopes_supported: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            scopes_supported: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
             claims_supported: None,
             token_endpoint_auth_methods_supported: None,
             code_challenge_methods_supported: None,

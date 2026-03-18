@@ -27,7 +27,12 @@ pub struct BlacklistedToken {
 
 impl BlacklistedToken {
     /// Create a new blacklisted token entry
-    pub fn new(token_id: impl Into<String>, tenant_id: impl Into<String>, reason: impl Into<String>, expires_in: Duration) -> Self {
+    pub fn new(
+        token_id: impl Into<String>,
+        tenant_id: impl Into<String>,
+        reason: impl Into<String>,
+        expires_in: Duration,
+    ) -> Self {
         let now = chrono::Utc::now().timestamp();
         Self {
             token_id: token_id.into(),
@@ -96,7 +101,8 @@ impl TokenBlacklist {
     /// Add a token to the blacklist
     pub async fn add(&self, token: BlacklistedToken) -> Result<()> {
         let token_id = token.token_id.clone();
-        let ttl = Duration::from_secs((token.expires_at - chrono::Utc::now().timestamp()).max(0) as u64);
+        let ttl =
+            Duration::from_secs((token.expires_at - chrono::Utc::now().timestamp()).max(0) as u64);
 
         // Add to local cache
         {
@@ -170,7 +176,7 @@ impl TokenBlacklist {
         Ok(removed)
     }
 
-       /// Get blacklisted token details
+    /// Get blacklisted token details
     pub async fn get(&self, token_id: &str) -> Result<Option<BlacklistedToken>> {
         // Only check Redis for full details
         if let Some(ref _redis) = self.redis {
@@ -259,12 +265,8 @@ mod tests {
 
     #[test]
     fn test_token_expiration() {
-        let token = BlacklistedToken::new(
-            "token-123",
-            "tenant-001",
-            "Test",
-            Duration::from_secs(1),
-        );
+        let token =
+            BlacklistedToken::new("token-123", "tenant-001", "Test", Duration::from_secs(1));
 
         assert!(!token.is_expired());
         std::thread::sleep(Duration::from_millis(2100));
@@ -274,12 +276,8 @@ mod tests {
     #[tokio::test]
     async fn test_local_blacklist() {
         let blacklist = TokenBlacklist::new_local(CachePolicy::default());
-        let token = BlacklistedToken::new(
-            "token-123",
-            "tenant-001",
-            "Test",
-            Duration::from_secs(3600),
-        );
+        let token =
+            BlacklistedToken::new("token-123", "tenant-001", "Test", Duration::from_secs(3600));
 
         blacklist.add(token).await.unwrap();
         assert!(blacklist.is_blacklisted("token-123").await.unwrap());
@@ -288,12 +286,8 @@ mod tests {
     #[tokio::test]
     async fn test_blacklist_removal() {
         let blacklist = TokenBlacklist::new_local(CachePolicy::default());
-        let token = BlacklistedToken::new(
-            "token-123",
-            "tenant-001",
-            "Test",
-            Duration::from_secs(3600),
-        );
+        let token =
+            BlacklistedToken::new("token-123", "tenant-001", "Test", Duration::from_secs(3600));
 
         blacklist.add(token).await.unwrap();
         blacklist.remove("token-123").await.unwrap();

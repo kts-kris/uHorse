@@ -173,7 +173,11 @@ pub struct SkillVersion {
 impl SkillVersion {
     /// 创建新的版本号
     pub fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     /// 解析版本字符串 (如 "1.2.3")
@@ -295,11 +299,7 @@ pub struct NodeCapabilities {
 impl Default for NodeCapabilities {
     fn default() -> Self {
         Self {
-            supported_commands: vec![
-                CommandType::File,
-                CommandType::Shell,
-                CommandType::Code,
-            ],
+            supported_commands: vec![CommandType::File, CommandType::Shell, CommandType::Code],
             tags: vec!["default".to_string()],
             max_concurrent_tasks: 5,
             available_tools: vec![],
@@ -399,7 +399,10 @@ impl LoadInfo {
         let cpu_score = self.cpu_usage * 0.4;
         let mem_score = self.memory_usage * 0.3;
         let task_score = (self.task_count as f32 / 10.0).min(1.0) * 0.2;
-        let latency_score = self.latency_ms.map(|l| (l as f32 / 1000.0).min(0.1)).unwrap_or(0.0);
+        let latency_score = self
+            .latency_ms
+            .map(|l| (l as f32 / 1000.0).min(0.1))
+            .unwrap_or(0.0);
 
         (cpu_score + mem_score + task_score + latency_score).min(1.0)
     }

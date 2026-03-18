@@ -18,8 +18,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uhorse_protocol::{
     ApiCommand, BrowserCommand, CodeCommand, CodeLanguage, Command, CommandOutput,
-    CommandResult as ProtocolCommandResult, DatabaseCommand, ExecutionError,
-    FileCommand, HttpMethod, ShellCommand, SkillCommand, TaskContext, TaskId,
+    CommandResult as ProtocolCommandResult, DatabaseCommand, ExecutionError, FileCommand,
+    HttpMethod, ShellCommand, SkillCommand, TaskContext, TaskId,
 };
 
 /// 命令执行器
@@ -65,10 +65,7 @@ pub struct ExecutorStats {
 
 impl CommandExecutor {
     /// 创建新的命令执行器
-    pub fn new(
-        workspace: Arc<Workspace>,
-        permission_manager: Arc<PermissionManager>,
-    ) -> Self {
+    pub fn new(workspace: Arc<Workspace>, permission_manager: Arc<PermissionManager>) -> Self {
         Self {
             workspace,
             permission_manager,
@@ -100,7 +97,8 @@ impl CommandExecutor {
                 let error = ExecutionError::permission_denied(&format!(
                     "Operation requires approval. Request ID: {}, Reason: {}",
                     request_id, reason
-                )).with_retryable(1000); // 1秒后可重试
+                ))
+                .with_retryable(1000); // 1秒后可重试
 
                 return Ok(ProtocolCommandResult::failure(error));
             }
@@ -133,38 +131,49 @@ impl CommandExecutor {
 
         // 4. 返回结果
         result.map(|output| {
-            ProtocolCommandResult::success(output)
-                .with_duration(duration.as_millis() as u64)
+            ProtocolCommandResult::success(output).with_duration(duration.as_millis() as u64)
         })
     }
 
     /// 执行文件操作
     async fn execute_file(&self, cmd: &FileCommand) -> NodeResult<CommandOutput> {
         match cmd {
-            FileCommand::Read { path, limit, offset } => {
-                self.file_read(path, *limit, *offset).await
+            FileCommand::Read {
+                path,
+                limit,
+                offset,
+            } => self.file_read(path, *limit, *offset).await,
+            FileCommand::Write {
+                path,
+                content,
+                overwrite,
+            } => self.file_write(path, content, *overwrite).await,
+            FileCommand::Append { path, content } => self.file_append(path, content).await,
+            FileCommand::Delete { path, recursive } => self.file_delete(path, *recursive).await,
+            FileCommand::List {
+                path,
+                recursive,
+                pattern,
+            } => self.file_list(path, *recursive, pattern.as_deref()).await,
+            FileCommand::Search {
+                pattern,
+                path,
+                recursive,
+                content_pattern,
+            } => {
+                self.file_search(pattern, path, *recursive, content_pattern.as_deref())
+                    .await
             }
-            FileCommand::Write { path, content, overwrite } => {
-                self.file_write(path, content, *overwrite).await
-            }
-            FileCommand::Append { path, content } => {
-                self.file_append(path, content).await
-            }
-            FileCommand::Delete { path, recursive } => {
-                self.file_delete(path, *recursive).await
-            }
-            FileCommand::List { path, recursive, pattern } => {
-                self.file_list(path, *recursive, pattern.as_deref()).await
-            }
-            FileCommand::Search { pattern, path, recursive, content_pattern } => {
-                self.file_search(pattern, path, *recursive, content_pattern.as_deref()).await
-            }
-            FileCommand::Copy { from, to, overwrite } => {
-                self.file_copy(from, to, *overwrite).await
-            }
-            FileCommand::Move { from, to, overwrite } => {
-                self.file_move(from, to, *overwrite).await
-            }
+            FileCommand::Copy {
+                from,
+                to,
+                overwrite,
+            } => self.file_copy(from, to, *overwrite).await,
+            FileCommand::Move {
+                from,
+                to,
+                overwrite,
+            } => self.file_move(from, to, *overwrite).await,
             FileCommand::Info { path } => self.file_info(path).await,
             FileCommand::CreateDir { path, recursive } => {
                 self.file_create_dir(path, *recursive).await
@@ -191,9 +200,9 @@ impl CommandExecutor {
         }
 
         // 读取文件
-        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
-            NodeError::Execution(format!("Failed to read file {:?}: {}", path, e))
-        })?;
+        let content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| NodeError::Execution(format!("Failed to read file {:?}: {}", path, e)))?;
 
         // 应用偏移和限制
         let content = if let Some(offset) = offset {
@@ -247,11 +256,14 @@ impl CommandExecutor {
         }
 
         // 写入文件
-        tokio::fs::write(path, content).await.map_err(|e| {
-            NodeError::Execution(format!("Failed to write file {:?}: {}", path, e))
-        })?;
+        tokio::fs::write(path, content)
+            .await
+            .map_err(|e| NodeError::Execution(format!("Failed to write file {:?}: {}", path, e)))?;
 
-        Ok(CommandOutput::text(format!("Written {} bytes", content.len())))
+        Ok(CommandOutput::text(format!(
+            "Written {} bytes",
+            content.len()
+        )))
     }
 
     /// 追加内容
@@ -272,15 +284,16 @@ impl CommandExecutor {
             .append(true)
             .open(path)
             .await
-            .map_err(|e| {
-                NodeError::Execution(format!("Failed to open file {:?}: {}", path, e))
-            })?;
+            .map_err(|e| NodeError::Execution(format!("Failed to open file {:?}: {}", path, e)))?;
 
         file.write_all(content.as_bytes()).await.map_err(|e| {
             NodeError::Execution(format!("Failed to append to file {:?}: {}", path, e))
         })?;
 
-        Ok(CommandOutput::text(format!("Appended {} bytes", content.len())))
+        Ok(CommandOutput::text(format!(
+            "Appended {} bytes",
+            content.len()
+        )))
     }
 
     /// 删除文件/目录
@@ -289,10 +302,7 @@ impl CommandExecutor {
 
         // 检查访问权限
         if !self.workspace.can_access(path, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot delete: {:?}",
-                path
-            )));
+            return Err(NodeError::Permission(format!("Cannot delete: {:?}", path)));
         }
 
         if path.is_dir() {
@@ -340,9 +350,11 @@ impl CommandExecutor {
                 NodeError::Execution(format!("Failed to read directory {:?}: {}", path, e))
             })?;
 
-            while let Some(entry) = dir.next_entry().await.map_err(|e| {
-                NodeError::Execution(format!("Failed to read entry: {}", e))
-            })? {
+            while let Some(entry) = dir
+                .next_entry()
+                .await
+                .map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?
+            {
                 let entry_path = entry.path();
                 let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
 
@@ -362,7 +374,9 @@ impl CommandExecutor {
             }
         }
 
-        Ok(CommandOutput::json(serde_json::json!({ "entries": entries })))
+        Ok(CommandOutput::json(
+            serde_json::json!({ "entries": entries }),
+        ))
     }
 
     /// 递归列出目录
@@ -377,9 +391,8 @@ impl CommandExecutor {
         })?;
 
         for entry in dir {
-            let entry = entry.map_err(|e| {
-                NodeError::Execution(format!("Failed to read entry: {}", e))
-            })?;
+            let entry =
+                entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let entry_path = entry.path();
             let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
@@ -432,7 +445,9 @@ impl CommandExecutor {
             self.search_single_dir(path, pattern, content_pattern, &mut results)?;
         }
 
-        Ok(CommandOutput::json(serde_json::json!({ "results": results })))
+        Ok(CommandOutput::json(
+            serde_json::json!({ "results": results }),
+        ))
     }
 
     /// 递归搜索
@@ -448,9 +463,8 @@ impl CommandExecutor {
         })?;
 
         for entry in dir {
-            let entry = entry.map_err(|e| {
-                NodeError::Execution(format!("Failed to read entry: {}", e))
-            })?;
+            let entry =
+                entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let entry_path = entry.path();
             let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
@@ -497,9 +511,8 @@ impl CommandExecutor {
         })?;
 
         for entry in dir {
-            let entry = entry.map_err(|e| {
-                NodeError::Execution(format!("Failed to read entry: {}", e))
-            })?;
+            let entry =
+                entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let entry_path = entry.path();
             let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
@@ -530,12 +543,7 @@ impl CommandExecutor {
     }
 
     /// 复制文件
-    async fn file_copy(
-        &self,
-        from: &str,
-        to: &str,
-        overwrite: bool,
-    ) -> NodeResult<CommandOutput> {
+    async fn file_copy(&self, from: &str, to: &str, overwrite: bool) -> NodeResult<CommandOutput> {
         let from = Path::new(from);
         let to = Path::new(to);
 
@@ -547,10 +555,7 @@ impl CommandExecutor {
             )));
         }
         if !self.workspace.can_access(to, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot write to: {:?}",
-                to
-            )));
+            return Err(NodeError::Permission(format!("Cannot write to: {:?}", to)));
         }
 
         // 检查目标是否存在
@@ -562,20 +567,15 @@ impl CommandExecutor {
         }
 
         // 复制文件
-        tokio::fs::copy(from, to).await.map_err(|e| {
-            NodeError::Execution(format!("Failed to copy: {}", e))
-        })?;
+        tokio::fs::copy(from, to)
+            .await
+            .map_err(|e| NodeError::Execution(format!("Failed to copy: {}", e)))?;
 
         Ok(CommandOutput::text("Copied successfully"))
     }
 
     /// 移动文件
-    async fn file_move(
-        &self,
-        from: &str,
-        to: &str,
-        overwrite: bool,
-    ) -> NodeResult<CommandOutput> {
+    async fn file_move(&self, from: &str, to: &str, overwrite: bool) -> NodeResult<CommandOutput> {
         let from = Path::new(from);
         let to = Path::new(to);
 
@@ -587,10 +587,7 @@ impl CommandExecutor {
             )));
         }
         if !self.workspace.can_access(to, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot move to: {:?}",
-                to
-            )));
+            return Err(NodeError::Permission(format!("Cannot move to: {:?}", to)));
         }
 
         // 检查目标是否存在
@@ -602,9 +599,9 @@ impl CommandExecutor {
         }
 
         // 移动文件
-        tokio::fs::rename(from, to).await.map_err(|e| {
-            NodeError::Execution(format!("Failed to move: {}", e))
-        })?;
+        tokio::fs::rename(from, to)
+            .await
+            .map_err(|e| NodeError::Execution(format!("Failed to move: {}", e)))?;
 
         Ok(CommandOutput::text("Moved successfully"))
     }
@@ -661,9 +658,7 @@ impl CommandExecutor {
             command.env(key, value);
         }
 
-        command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // 执行命令
         let output = command
@@ -729,9 +724,8 @@ impl CommandExecutor {
         let temp_path = temp_dir.join(format!("uhorse_code_{}.py", uuid::Uuid::new_v4()));
 
         // 同步写入文件
-        std::fs::write(&temp_path, &cmd.code).map_err(|e| {
-            NodeError::Execution(format!("Failed to write temp file: {}", e))
-        })?;
+        std::fs::write(&temp_path, &cmd.code)
+            .map_err(|e| NodeError::Execution(format!("Failed to write temp file: {}", e)))?;
 
         let path = temp_path.to_string_lossy().to_string();
 
@@ -765,9 +759,8 @@ impl CommandExecutor {
         let temp_path = temp_dir.join(format!("uhorse_code_{}{}", uuid::Uuid::new_v4(), ext));
 
         // 同步写入文件
-        std::fs::write(&temp_path, &cmd.code).map_err(|e| {
-            NodeError::Execution(format!("Failed to write temp file: {}", e))
-        })?;
+        std::fs::write(&temp_path, &cmd.code)
+            .map_err(|e| NodeError::Execution(format!("Failed to write temp file: {}", e)))?;
 
         let path = temp_path.to_string_lossy().to_string();
 
@@ -849,10 +842,7 @@ impl CommandExecutor {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let body = response
-            .json::<serde_json::Value>()
-            .await
-            .ok();
+        let body = response.json::<serde_json::Value>().await.ok();
 
         Ok(CommandOutput::ApiResponse {
             status,

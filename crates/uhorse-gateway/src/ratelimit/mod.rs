@@ -2,15 +2,15 @@
 //!
 //! API 限流模块，支持多种限流策略
 
+mod distributed;
+mod endpoint;
 mod global;
 mod user;
-mod endpoint;
-mod distributed;
 
-pub use global::{GlobalRateLimiter, GlobalRateLimitConfig};
-pub use user::{UserRateLimiter, UserRateLimitConfig, RateLimitKey};
-pub use endpoint::{EndpointRateLimiter, EndpointRateLimitConfig, EndpointLimit};
-pub use distributed::{DistributedRateLimiter, DistributedConfig, RateLimitBackend};
+pub use distributed::{DistributedConfig, DistributedRateLimiter, RateLimitBackend};
+pub use endpoint::{EndpointLimit, EndpointRateLimitConfig, EndpointRateLimiter};
+pub use global::{GlobalRateLimitConfig, GlobalRateLimiter};
+pub use user::{RateLimitKey, UserRateLimitConfig, UserRateLimiter};
 
 /// 限流结果
 #[derive(Debug, Clone)]

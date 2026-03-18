@@ -108,18 +108,14 @@ async fn dashboard_page() -> Html<&'static str> {
 }
 
 /// 获取统计信息
-async fn get_stats(
-    State(state): State<Arc<WebState>>,
-) -> Json<ApiResponse<HubStats>> {
+async fn get_stats(State(state): State<Arc<WebState>>) -> Json<ApiResponse<HubStats>> {
     match state.hub.get_stats().await {
         stats => Json(ApiResponse::success(stats)),
     }
 }
 
 /// 列出所有节点
-async fn list_nodes(
-    State(state): State<Arc<WebState>>,
-) -> Json<ApiResponse<Vec<crate::NodeInfo>>> {
+async fn list_nodes(State(state): State<Arc<WebState>>) -> Json<ApiResponse<Vec<crate::NodeInfo>>> {
     let nodes = state.hub.get_all_nodes().await;
     Json(ApiResponse::success(nodes))
 }
@@ -132,7 +128,10 @@ async fn get_node(
     let nodes = state.hub.get_all_nodes().await;
     match nodes.into_iter().find(|n| n.node_id.as_str() == node_id) {
         Some(node) => (StatusCode::OK, Json(ApiResponse::success(Some(node)))),
-        None => (StatusCode::NOT_FOUND, Json(ApiResponse::error("Node not found"))),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::error("Node not found")),
+        ),
     }
 }
 
@@ -152,9 +151,7 @@ pub struct TaskInfo {
 }
 
 /// 列出任务
-async fn list_tasks(
-    State(_state): State<Arc<WebState>>,
-) -> Json<ApiResponse<Vec<TaskInfo>>> {
+async fn list_tasks(State(_state): State<Arc<WebState>>) -> Json<ApiResponse<Vec<TaskInfo>>> {
     // 简化实现：返回空列表
     Json(ApiResponse::success(vec![]))
 }
@@ -164,7 +161,11 @@ async fn get_task(
     State(state): State<Arc<WebState>>,
     Path(task_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<Option<TaskInfo>>>) {
-    match state.hub.get_task_status(&uhorse_protocol::TaskId::from_string(&task_id)).await {
+    match state
+        .hub
+        .get_task_status(&uhorse_protocol::TaskId::from_string(&task_id))
+        .await
+    {
         Some(status) => {
             let info = TaskInfo {
                 task_id: status.task_id.to_string(),
@@ -175,7 +176,10 @@ async fn get_task(
             };
             (StatusCode::OK, Json(ApiResponse::success(Some(info))))
         }
-        None => (StatusCode::NOT_FOUND, Json(ApiResponse::error("Task not found"))),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::error("Task not found")),
+        ),
     }
 }
 
@@ -184,12 +188,19 @@ async fn cancel_task(
     State(state): State<Arc<WebState>>,
     Path(task_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<&'static str>>) {
-    match state.hub
-        .cancel_task(&uhorse_protocol::TaskId::from_string(&task_id), "User cancelled")
+    match state
+        .hub
+        .cancel_task(
+            &uhorse_protocol::TaskId::from_string(&task_id),
+            "User cancelled",
+        )
         .await
     {
         Ok(()) => (StatusCode::OK, Json(ApiResponse::success("Task cancelled"))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(&e.to_string()))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(&e.to_string())),
+        ),
     }
 }
 
@@ -202,7 +213,10 @@ async fn health_check() -> impl IntoResponse {
 }
 
 /// 启动 Web 服务器
-pub async fn start_server(config: WebConfig, hub: Arc<Hub>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_server(
+    config: WebConfig,
+    hub: Arc<Hub>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let state = WebState { hub };
     let app = create_router(state);
 

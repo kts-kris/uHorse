@@ -168,8 +168,7 @@ impl RestoreManager {
 
         info!(
             "Backup {} verified successfully ({} bytes)",
-            backup.id,
-            backup.size_bytes
+            backup.id, backup.size_bytes
         );
         Ok(true)
     }

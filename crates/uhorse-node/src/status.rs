@@ -71,12 +71,15 @@ impl StatusReporter {
 
     /// 停止状态报告
     pub async fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         info!("Status reporter stopped");
     }
 
     /// 收集节点状态
-    pub async fn collect_status(&self) -> std::result::Result<ProtocolNodeStatus, Box<dyn std::error::Error>> {
+    pub async fn collect_status(
+        &self,
+    ) -> std::result::Result<ProtocolNodeStatus, Box<dyn std::error::Error>> {
         let mut sys = self.system.write().await;
         sys.refresh_all();
 

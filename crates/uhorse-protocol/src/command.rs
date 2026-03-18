@@ -232,7 +232,11 @@ impl FileCommand {
             Self::List { .. } => vec!["file:read".to_string()],
             Self::Search { .. } => vec!["file:read".to_string()],
             Self::Copy { .. } => vec!["file:read".to_string(), "file:write".to_string()],
-            Self::Move { .. } => vec!["file:read".to_string(), "file:write".to_string(), "file:delete".to_string()],
+            Self::Move { .. } => vec![
+                "file:read".to_string(),
+                "file:write".to_string(),
+                "file:delete".to_string(),
+            ],
             Self::Info { .. } => vec!["file:read".to_string()],
             Self::CreateDir { .. } => vec!["file:write".to_string()],
             Self::Exists { .. } => vec!["file:read".to_string()],

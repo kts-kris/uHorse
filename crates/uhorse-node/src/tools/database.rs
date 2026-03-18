@@ -179,7 +179,7 @@ impl DatabaseExecutor {
         cmd: &DatabaseCommand,
     ) -> NodeResult<CommandOutput> {
         use sqlx::postgres::PgPoolOptions;
-        use sqlx::{Row};
+        use sqlx::Row;
 
         debug!("Executing PostgreSQL query: {}", cmd.query);
 
@@ -248,7 +248,7 @@ impl DatabaseExecutor {
         cmd: &DatabaseCommand,
     ) -> NodeResult<CommandOutput> {
         use sqlx::mysql::MySqlPoolOptions;
-        use sqlx::{Row};
+        use sqlx::Row;
 
         debug!("Executing MySQL query: {}", cmd.query);
 
@@ -317,8 +317,8 @@ impl DatabaseExecutor {
         connection: &DatabaseConnection,
         cmd: &DatabaseCommand,
     ) -> NodeResult<CommandOutput> {
-        use mongodb::{bson::doc, Client, Collection};
         use mongodb::options::{ClientOptions, FindOptions};
+        use mongodb::{bson::doc, Client, Collection};
 
         debug!("Executing MongoDB query");
 
@@ -354,9 +354,7 @@ impl DatabaseExecutor {
             };
 
             let limit = cmd.limit.unwrap_or(100) as i64;
-            let find_options = FindOptions::builder()
-                .limit(limit)
-                .build();
+            let find_options = FindOptions::builder().limit(limit).build();
 
             let mut cursor = collection
                 .find(filter, find_options)
@@ -364,12 +362,14 @@ impl DatabaseExecutor {
                 .map_err(|e| NodeError::Execution(format!("Find failed: {}", e)))?;
 
             let mut results = Vec::new();
-            while cursor.advance().await.map_err(|e| {
-                NodeError::Execution(format!("Cursor error: {}", e))
-            })? {
-                let doc = cursor.deserialize_current().map_err(|e| {
-                    NodeError::Execution(format!("Deserialize error: {}", e))
-                })?;
+            while cursor
+                .advance()
+                .await
+                .map_err(|e| NodeError::Execution(format!("Cursor error: {}", e)))?
+            {
+                let doc = cursor
+                    .deserialize_current()
+                    .map_err(|e| NodeError::Execution(format!("Deserialize error: {}", e)))?;
                 results.push(doc);
             }
 
@@ -429,9 +429,10 @@ impl DatabaseExecutor {
                     return Err(NodeError::Execution("GET requires a key".to_string()));
                 }
                 let key = parts[1];
-                let value: Option<String> = conn.get(key).await.map_err(|e| {
-                    NodeError::Execution(format!("GET failed: {}", e))
-                })?;
+                let value: Option<String> = conn
+                    .get(key)
+                    .await
+                    .map_err(|e| NodeError::Execution(format!("GET failed: {}", e)))?;
                 Ok(CommandOutput::json(serde_json::json!({
                     "key": key,
                     "value": value
@@ -439,13 +440,16 @@ impl DatabaseExecutor {
             }
             "SET" => {
                 if parts.len() < 3 {
-                    return Err(NodeError::Execution("SET requires key and value".to_string()));
+                    return Err(NodeError::Execution(
+                        "SET requires key and value".to_string(),
+                    ));
                 }
                 let key = parts[1];
                 let value = parts[2];
-                let _: () = conn.set(key, value).await.map_err(|e| {
-                    NodeError::Execution(format!("SET failed: {}", e))
-                })?;
+                let _: () = conn
+                    .set(key, value)
+                    .await
+                    .map_err(|e| NodeError::Execution(format!("SET failed: {}", e)))?;
                 Ok(CommandOutput::text("OK"))
             }
             "DEL" => {
@@ -453,9 +457,10 @@ impl DatabaseExecutor {
                     return Err(NodeError::Execution("DEL requires keys".to_string()));
                 }
                 let keys: Vec<&str> = parts[1..].to_vec();
-                let count: i64 = conn.del(&keys).await.map_err(|e| {
-                    NodeError::Execution(format!("DEL failed: {}", e))
-                })?;
+                let count: i64 = conn
+                    .del(&keys)
+                    .await
+                    .map_err(|e| NodeError::Execution(format!("DEL failed: {}", e)))?;
                 Ok(CommandOutput::json(serde_json::json!({
                     "deleted": count
                 })))
@@ -465,9 +470,10 @@ impl DatabaseExecutor {
                     return Err(NodeError::Execution("KEYS requires a pattern".to_string()));
                 }
                 let pattern = parts[1];
-                let keys: Vec<String> = conn.keys(pattern).await.map_err(|e| {
-                    NodeError::Execution(format!("KEYS failed: {}", e))
-                })?;
+                let keys: Vec<String> = conn
+                    .keys(pattern)
+                    .await
+                    .map_err(|e| NodeError::Execution(format!("KEYS failed: {}", e)))?;
                 Ok(CommandOutput::json(serde_json::json!({
                     "keys": keys
                 })))

@@ -201,13 +201,15 @@ impl SamlClient {
     /// 解析 SAML 响应
     pub fn parse_response(&self, saml_response: &str) -> crate::Result<SamlResponse> {
         // Base64 解码
-        let decoded = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            saml_response,
-        ).map_err(|e| crate::SsoError::SamlError(format!("Failed to decode SAML response: {}", e)))?;
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, saml_response)
+                .map_err(|e| {
+                    crate::SsoError::SamlError(format!("Failed to decode SAML response: {}", e))
+                })?;
 
-        let raw_xml = String::from_utf8(decoded)
-            .map_err(|e| crate::SsoError::SamlError(format!("Invalid UTF-8 in SAML response: {}", e)))?;
+        let raw_xml = String::from_utf8(decoded).map_err(|e| {
+            crate::SsoError::SamlError(format!("Invalid UTF-8 in SAML response: {}", e))
+        })?;
 
         // 简化解析：提取关键信息
         let assertion = self.parse_assertion(&raw_xml)?;
@@ -260,7 +262,11 @@ impl SamlClient {
     }
 
     /// 生成 SAML 注销请求
-    pub fn generate_logout_request(&self, name_id: &str, session_index: Option<&str>) -> crate::Result<String> {
+    pub fn generate_logout_request(
+        &self,
+        name_id: &str,
+        session_index: Option<&str>,
+    ) -> crate::Result<String> {
         let id = format!("id{}", uuid::Uuid::new_v4().simple());
         let issue_instant = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
 
@@ -306,9 +312,7 @@ impl SamlClient {
             index="1"/>
     </md:SPSSODescriptor>
 </md:EntityDescriptor>"#,
-            self.config.sp_entity_id,
-            self.config.name_id_format,
-            self.config.sp_acs_url,
+            self.config.sp_entity_id, self.config.name_id_format, self.config.sp_acs_url,
         )
     }
 
@@ -321,7 +325,9 @@ impl SamlClient {
             .get(metadata_url)
             .send()
             .await
-            .map_err(|e| crate::SsoError::SamlError(format!("Failed to fetch IdP metadata: {}", e)))?;
+            .map_err(|e| {
+                crate::SsoError::SamlError(format!("Failed to fetch IdP metadata: {}", e))
+            })?;
 
         if !response.status().is_success() {
             return Err(crate::SsoError::SamlError(format!(
@@ -330,10 +336,9 @@ impl SamlClient {
             )));
         }
 
-        let metadata = response
-            .text()
-            .await
-            .map_err(|e| crate::SsoError::SamlError(format!("Failed to read IdP metadata: {}", e)))?;
+        let metadata = response.text().await.map_err(|e| {
+            crate::SsoError::SamlError(format!("Failed to read IdP metadata: {}", e))
+        })?;
 
         // 简化解析：提取关键信息
         self.config.idp_entity_id = extract_element_content(&metadata, "md:EntityID")
@@ -393,7 +398,10 @@ mod tests {
     #[test]
     fn test_saml_config_default() {
         let config = SamlConfig::default();
-        assert_eq!(config.name_id_format, "urn:oasis:names:tc:SAML:2.0:nameid-format:transient");
+        assert_eq!(
+            config.name_id_format,
+            "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+        );
         assert!(config.idp_slo_url.is_none());
     }
 

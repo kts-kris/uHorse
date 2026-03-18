@@ -168,7 +168,9 @@ impl EndpointRateLimiter {
         }
 
         // 查找匹配的限制
-        let limit = self.limits.iter()
+        let limit = self
+            .limits
+            .iter()
             .find(|l| l.matches(method, path))
             .unwrap_or(&self.config.default_limit);
 
@@ -219,7 +221,12 @@ impl EndpointRateLimiter {
     }
 
     /// 获取端点状态
-    pub async fn get_status(&self, method: &str, path: &str, client_id: &str) -> Option<EndpointStatus> {
+    pub async fn get_status(
+        &self,
+        method: &str,
+        path: &str,
+        client_id: &str,
+    ) -> Option<EndpointStatus> {
         let key = format!("{}:{}:{}", client_id, method, path);
         let states = self.states.read().await;
 
@@ -285,8 +292,7 @@ mod tests {
 
     #[test]
     fn test_endpoint_limit_with_method() {
-        let limit = EndpointLimit::new("/api/v1/agents", 60, 100)
-            .with_method("GET");
+        let limit = EndpointLimit::new("/api/v1/agents", 60, 100).with_method("GET");
 
         assert!(limit.matches("GET", "/api/v1/agents"));
         assert!(!limit.matches("POST", "/api/v1/agents"));

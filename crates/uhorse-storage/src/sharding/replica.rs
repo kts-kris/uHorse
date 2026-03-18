@@ -1,8 +1,8 @@
 //! Read-write splitting and replica management
 
 use anyhow::{anyhow, Result};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -102,9 +102,15 @@ impl ReplicaManager {
         let config = selected.config.clone();
 
         // Update stats
-        selected.stats.queries_served.fetch_add(1, Ordering::Relaxed);
+        selected
+            .stats
+            .queries_served
+            .fetch_add(1, Ordering::Relaxed);
 
-        debug!("Selected replica {} for shard {}", config.replica_id, shard_id);
+        debug!(
+            "Selected replica {} for shard {}",
+            config.replica_id, shard_id
+        );
         Ok(Some(config))
     }
 
@@ -145,7 +151,10 @@ impl ReplicaManager {
     pub async fn update_health(&self, replica_id: u32, lag_seconds: f64, is_healthy: bool) {
         let mut replicas = self.replicas.write().await;
 
-        if let Some(replica) = replicas.iter_mut().find(|r| r.config.replica_id == replica_id) {
+        if let Some(replica) = replicas
+            .iter_mut()
+            .find(|r| r.config.replica_id == replica_id)
+        {
             replica.lag_seconds = lag_seconds;
 
             let new_state = if !is_healthy {
@@ -157,7 +166,10 @@ impl ReplicaManager {
             };
 
             if replica.state != new_state {
-                info!("Replica {} state changed: {:?} -> {:?}", replica_id, replica.state, new_state);
+                info!(
+                    "Replica {} state changed: {:?} -> {:?}",
+                    replica_id, replica.state, new_state
+                );
                 replica.state = new_state;
             }
 
@@ -189,7 +201,10 @@ impl ReplicaManager {
             } else {
                 (current * 9 + latency_us) / 10
             };
-            replica.stats.avg_latency_us.store(new_avg, Ordering::Relaxed);
+            replica
+                .stats
+                .avg_latency_us
+                .store(new_avg, Ordering::Relaxed);
         }
     }
 
@@ -206,7 +221,9 @@ impl ReplicaManager {
                     queries_served: AtomicU64::new(r.stats.queries_served.load(Ordering::Relaxed)),
                     queries_failed: AtomicU64::new(r.stats.queries_failed.load(Ordering::Relaxed)),
                     avg_latency_us: AtomicU64::new(r.stats.avg_latency_us.load(Ordering::Relaxed)),
-                    last_health_check: AtomicU64::new(r.stats.last_health_check.load(Ordering::Relaxed)),
+                    last_health_check: AtomicU64::new(
+                        r.stats.last_health_check.load(Ordering::Relaxed),
+                    ),
                 },
                 lag_seconds: r.lag_seconds,
             })
@@ -218,10 +235,7 @@ impl ReplicaManager {
         let replicas = self.replicas.read().await;
         replicas
             .iter()
-            .filter(|r| {
-                r.config.shard_id == shard_id
-                    && r.state == ReplicaState::Healthy
-            })
+            .filter(|r| r.config.shard_id == shard_id && r.state == ReplicaState::Healthy)
             .count()
     }
 }
@@ -274,7 +288,10 @@ impl ReadWriteSplitter {
     ) -> Result<String> {
         if self.should_use_replica(shard_id, is_read).await {
             if let Some(replica) = self.replica_manager.select_replica(shard_id).await? {
-                debug!("Using replica {} for shard {}", replica.replica_id, shard_id);
+                debug!(
+                    "Using replica {} for shard {}",
+                    replica.replica_id, shard_id
+                );
                 return Ok(replica.dsn);
             }
         }
@@ -354,11 +371,17 @@ mod tests {
         let splitter = ReadWriteSplitter::new(manager);
 
         // Write should use primary
-        let dsn = splitter.get_datasource(1, "primary.db", false).await.unwrap();
+        let dsn = splitter
+            .get_datasource(1, "primary.db", false)
+            .await
+            .unwrap();
         assert_eq!(dsn, "primary.db");
 
         // Read should use replica
-        let dsn = splitter.get_datasource(1, "primary.db", true).await.unwrap();
+        let dsn = splitter
+            .get_datasource(1, "primary.db", true)
+            .await
+            .unwrap();
         assert!(dsn.contains("replica"));
     }
 

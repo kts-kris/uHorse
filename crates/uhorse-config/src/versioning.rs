@@ -105,12 +105,9 @@ impl ConfigHistory {
     /// Get a specific version
     pub async fn get_version(&self, key: &str, version: u64) -> Option<ConfigVersion> {
         let history = self.history.read().await;
-        history.get(key).and_then(|h| {
-            h.iter()
-                .rev()
-                .find(|v| v.version == version)
-                .cloned()
-        })
+        history
+            .get(key)
+            .and_then(|h| h.iter().rev().find(|v| v.version == version).cloned())
     }
 
     /// Get current version number

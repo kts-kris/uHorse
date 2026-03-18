@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::{LoadBalancer, InstanceStats};
+use super::{InstanceStats, LoadBalancer};
 use crate::lb::RoundRobinLoadBalancer;
 
 /// Health-aware load balancer that filters out unhealthy instances
@@ -38,7 +38,10 @@ impl Default for HealthAwareLoadBalancer {
 
 #[async_trait]
 impl LoadBalancer for HealthAwareLoadBalancer {
-    async fn select(&self, instances: &[uhorse_discovery::ServiceInstance]) -> Option<uhorse_discovery::ServiceInstance> {
+    async fn select(
+        &self,
+        instances: &[uhorse_discovery::ServiceInstance],
+    ) -> Option<uhorse_discovery::ServiceInstance> {
         if instances.is_empty() {
             return None;
         }
@@ -97,11 +100,15 @@ mod tests {
         assert!(selected.is_some());
 
         // Mark instance 2 as unhealthy
-        lb.update_stats("2", InstanceStats {
-            total_requests: 100,
-            failed_requests: 60,
-            ..Default::default()
-        }).await;
+        lb.update_stats(
+            "2",
+            InstanceStats {
+                total_requests: 100,
+                failed_requests: 60,
+                ..Default::default()
+            },
+        )
+        .await;
 
         // Should not select instance 2
         for _ in 0..100 {
@@ -114,16 +121,20 @@ mod tests {
     async fn test_all_unhealthy() {
         let lb = HealthAwareLoadBalancer::new();
 
-        let instances = vec![
-            uhorse_discovery::ServiceInstance::new("1", "test", "10.0.0.1", 8080),
-        ];
+        let instances = vec![uhorse_discovery::ServiceInstance::new(
+            "1", "test", "10.0.0.1", 8080,
+        )];
 
         // Mark as unhealthy
-        lb.update_stats("1", InstanceStats {
-            total_requests: 100,
-            failed_requests: 80,
-            ..Default::default()
-        }).await;
+        lb.update_stats(
+            "1",
+            InstanceStats {
+                total_requests: 100,
+                failed_requests: 80,
+                ..Default::default()
+            },
+        )
+        .await;
 
         // Should return None when all are unhealthy
         let result = lb.select(&instances).await;

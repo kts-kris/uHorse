@@ -13,8 +13,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 use uhorse_protocol::{
-    Command, NodeCapabilities, NodeId, NodeToHub, Priority, TaskContext, TaskId,
-    WorkspaceInfo,
+    Command, NodeCapabilities, NodeId, NodeToHub, Priority, TaskContext, TaskId, WorkspaceInfo,
 };
 
 /// Hub 配置
@@ -96,8 +95,11 @@ impl Hub {
             config.heartbeat_timeout_secs,
         ));
 
-        let (task_scheduler, task_result_rx) =
-            TaskScheduler::new(node_manager.clone(), config.max_retries, config.task_timeout_secs);
+        let (task_scheduler, task_result_rx) = TaskScheduler::new(
+            node_manager.clone(),
+            config.max_retries,
+            config.task_timeout_secs,
+        );
         let task_scheduler = Arc::new(task_scheduler);
 
         let message_router = Arc::new(MessageRouter::new(
@@ -196,7 +198,9 @@ impl Hub {
 
     /// 处理来自节点的消息
     pub async fn handle_node_message(&self, node_id: &NodeId, message: NodeToHub) -> HubResult<()> {
-        self.message_router.route_node_message(node_id, message).await
+        self.message_router
+            .route_node_message(node_id, message)
+            .await
     }
 
     /// 提交任务

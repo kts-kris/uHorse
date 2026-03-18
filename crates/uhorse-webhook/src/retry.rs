@@ -51,8 +51,8 @@ impl RetryPolicy {
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
         use rand::Rng;
 
-        let base_delay = self.initial_delay_ms as f64
-            * self.multiplier.powi(attempt.saturating_sub(1) as i32);
+        let base_delay =
+            self.initial_delay_ms as f64 * self.multiplier.powi(attempt.saturating_sub(1) as i32);
 
         // 应用最大延迟限制
         let delay = base_delay.min(self.max_delay_ms as f64);
@@ -81,10 +81,7 @@ impl RetryPolicy {
     }
 
     /// 执行带重试的异步操作
-    pub async fn execute<F, Fut, T, E>(
-        &self,
-        mut operation: F,
-    ) -> Result<T, RetryState>
+    pub async fn execute<F, Fut, T, E>(&self, mut operation: F) -> Result<T, RetryState>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<T, E>>,
@@ -112,10 +109,7 @@ impl RetryPolicy {
                         });
                     }
 
-                    warn!(
-                        "Attempt {} failed: {:?}, retrying...",
-                        attempt, error
-                    );
+                    warn!("Attempt {} failed: {:?}, retrying...", attempt, error);
 
                     let delay = self.calculate_delay(attempt);
                     delays_ms.push(delay.as_millis() as u64);
@@ -227,7 +221,8 @@ mod tests {
 
         // 延迟不应超过最大值 + 抖动
         let delay_max = policy.calculate_delay(100);
-        let max_with_jitter = Duration::from_millis((policy.max_delay_ms as f64 * (1.0 + policy.jitter)) as u64);
+        let max_with_jitter =
+            Duration::from_millis((policy.max_delay_ms as f64 * (1.0 + policy.jitter)) as u64);
         assert!(delay_max <= max_with_jitter);
     }
 

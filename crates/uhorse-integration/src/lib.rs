@@ -8,18 +8,18 @@
 //! - GitHub 集成 (Issue/PR 管理)
 //! - Slack 通知 (消息推送)
 
-pub mod jira;
 pub mod github;
+pub mod jira;
 pub mod slack;
 
-pub use jira::{JiraClient, JiraConfig, JiraIssue, JiraPriority, JiraStatus, JiraUser};
 pub use github::{
-    GitHubClient, GitHubConfig, GitHubIssue, GitHubPullRequest, GitHubUser,
-    IssueState, Label, Milestone, PRBranch, Repository,
+    GitHubClient, GitHubConfig, GitHubIssue, GitHubPullRequest, GitHubUser, IssueState, Label,
+    Milestone, PRBranch, Repository,
 };
+pub use jira::{JiraClient, JiraConfig, JiraIssue, JiraPriority, JiraStatus, JiraUser};
 pub use slack::{
-    SlackClient, SlackConfig, SlackMessage, SlackAttachment, SlackField,
-    SlackUser, SlackChannel, AlertSeverity,
+    AlertSeverity, SlackAttachment, SlackChannel, SlackClient, SlackConfig, SlackField,
+    SlackMessage, SlackUser,
 };
 
 use thiserror::Error;

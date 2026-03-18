@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use tokio::signal;
 use tracing::{error, info, warn};
 
-use uhorse_node::{Node, NodeConfig, Workspace, ConnectionConfig};
+use uhorse_node::{ConnectionConfig, Node, NodeConfig, Workspace};
 
 /// uHorse Node - 本地执行节点
 #[derive(Parser, Debug)]
@@ -109,8 +109,7 @@ async fn main() -> anyhow::Result<()> {
 fn init_logging(level: &str) -> anyhow::Result<()> {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)

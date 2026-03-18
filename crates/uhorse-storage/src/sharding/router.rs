@@ -48,7 +48,9 @@ impl ShardingRouter {
             ShardingStrategy::RangeBased => self.route_by_range(key).await?,
         };
 
-        let shard = self.config.get_shard(shard_id)
+        let shard = self
+            .config
+            .get_shard(shard_id)
             .ok_or_else(|| anyhow!("Shard {} not found", shard_id))?
             .clone();
 
@@ -67,7 +69,9 @@ impl ShardingRouter {
 
     /// Route by tenant ID
     async fn route_by_tenant(&self, key: &ShardKey) -> Result<u32> {
-        let tenant_id = key.tenant_id.as_ref()
+        let tenant_id = key
+            .tenant_id
+            .as_ref()
             .ok_or_else(|| anyhow!("Tenant ID required for tenant-based sharding"))?;
 
         // Check cache first
@@ -102,7 +106,8 @@ impl ShardingRouter {
         let ring = self.hash_ring.read().await;
 
         // Find the first shard in the ring with hash >= key hash
-        let shard_id = ring.iter()
+        let shard_id = ring
+            .iter()
             .find(|&&id| {
                 let shard_hash = Self::hash_key(&id.to_string());
                 shard_hash >= hash
@@ -116,14 +121,17 @@ impl ShardingRouter {
 
     /// Route by hash of user ID
     async fn route_by_hash(&self, key: &ShardKey) -> Result<u32> {
-        let user_id = key.user_id.as_ref()
+        let user_id = key
+            .user_id
+            .as_ref()
             .ok_or_else(|| anyhow!("User ID required for hash-based sharding"))?;
 
         let hash = Self::hash_key(user_id);
         let ring = self.hash_ring.read().await;
 
         // Binary search for the appropriate shard
-        let shard_id = ring.iter()
+        let shard_id = ring
+            .iter()
             .find(|&&id| {
                 let shard_hash = Self::hash_key(&id.to_string());
                 shard_hash >= hash
@@ -136,7 +144,8 @@ impl ShardingRouter {
 
     /// Route by time range
     async fn route_by_range(&self, key: &ShardKey) -> Result<u32> {
-        let timestamp = key.timestamp
+        let timestamp = key
+            .timestamp
             .ok_or_else(|| anyhow!("Timestamp required for range-based sharding"))?;
 
         // Use time-based partitioning (e.g., monthly shards)
@@ -151,7 +160,8 @@ impl ShardingRouter {
 
     /// Build consistent hash ring
     fn build_hash_ring(config: &ShardingConfig) -> Vec<u32> {
-        let mut ring: Vec<u32> = config.shards
+        let mut ring: Vec<u32> = config
+            .shards
             .iter()
             .filter(|s| s.active)
             .map(|s| s.id)
@@ -179,7 +189,10 @@ impl ShardingRouter {
         let mut map = self.tenant_shard_map.write().await;
         map.insert(tenant_id.to_string(), shard_id);
 
-        info!("Manually assigned shard {} for tenant {}", shard_id, tenant_id);
+        info!(
+            "Manually assigned shard {} for tenant {}",
+            shard_id, tenant_id
+        );
         Ok(())
     }
 
@@ -279,7 +292,10 @@ mod tests {
         let config = create_test_config();
         let router = ShardingRouter::new(config);
 
-        router.assign_tenant_shard("tenant-custom", 2).await.unwrap();
+        router
+            .assign_tenant_shard("tenant-custom", 2)
+            .await
+            .unwrap();
 
         let key = ShardKey::from_tenant("tenant-custom");
         let result = router.route(&key, false).await.unwrap();

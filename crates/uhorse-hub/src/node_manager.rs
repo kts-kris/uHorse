@@ -170,7 +170,11 @@ impl NodeManager {
     /// 获取所有在线节点
     pub async fn get_online_nodes(&self) -> Vec<NodeInfo> {
         let nodes = self.nodes.read().await;
-        nodes.values().filter(|n| n.state == NodeState::Online).cloned().collect()
+        nodes
+            .values()
+            .filter(|n| n.state == NodeState::Online)
+            .cloned()
+            .collect()
     }
 
     /// 获取所有节点
@@ -226,7 +230,9 @@ impl NodeManager {
         candidates.sort_by(|a, b| {
             let a_load = a.load.score();
             let b_load = b.load.score();
-            a_load.partial_cmp(&b_load).unwrap_or(std::cmp::Ordering::Equal)
+            a_load
+                .partial_cmp(&b_load)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         candidates.first().map(|n| (*n).clone())
@@ -252,7 +258,12 @@ impl NodeManager {
     }
 
     /// 发送消息到节点（通过 sender）
-    pub async fn send_to_node(&self, node_id: &NodeId, message: HubToNode, sender: &mpsc::Sender<HubToNode>) -> HubResult<()> {
+    pub async fn send_to_node(
+        &self,
+        node_id: &NodeId,
+        message: HubToNode,
+        sender: &mpsc::Sender<HubToNode>,
+    ) -> HubResult<()> {
         sender.send(message).await.map_err(|e| {
             HubError::Communication(format!("Failed to send message to {}: {}", node_id, e))
         })?;

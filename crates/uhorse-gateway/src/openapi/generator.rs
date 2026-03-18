@@ -126,8 +126,8 @@ impl ClientGenerator {
 
     /// 从 OpenAPI JSON 生成客户端代码
     pub fn generate(&self, openapi_json: &str) -> Result<GeneratedClient, GeneratorError> {
-        let _spec: serde_json::Value =
-            serde_json::from_str(openapi_json).map_err(|e| GeneratorError::ParseError(e.to_string()))?;
+        let _spec: serde_json::Value = serde_json::from_str(openapi_json)
+            .map_err(|e| GeneratorError::ParseError(e.to_string()))?;
 
         let mut files = Vec::new();
 
@@ -349,10 +349,8 @@ mod tests {
 
     #[test]
     fn test_generate_typescript() {
-        let generator = ClientGenerator::new(
-            ClientLanguage::TypeScript,
-            GeneratorConfig::default(),
-        );
+        let generator =
+            ClientGenerator::new(ClientLanguage::TypeScript, GeneratorConfig::default());
 
         let openapi = r#"{"openapi":"3.0.3","info":{"title":"Test","version":"1.0.0"}}"#;
         let result = generator.generate(openapi).unwrap();

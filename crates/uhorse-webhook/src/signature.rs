@@ -175,10 +175,7 @@ impl SignatureVerifier {
 }
 
 /// 创建签名中间件头
-pub fn create_signature_headers(
-    config: &SigningConfig,
-    payload: &[u8],
-) -> Vec<(String, String)> {
+pub fn create_signature_headers(config: &SigningConfig, payload: &[u8]) -> Vec<(String, String)> {
     let verifier = SignatureVerifier::new(config.clone());
 
     let mut headers = Vec::new();

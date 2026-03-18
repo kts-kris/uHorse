@@ -2,13 +2,13 @@
 //!
 //! 测试 Hub 的吞吐量和延迟
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use uhorse_hub::{Hub, HubConfig};
 use uhorse_protocol::{
-    Command, NodeCapabilities, NodeId, Priority, ShellCommand,
-    TaskContext, WorkspaceInfo, UserId, SessionId,
+    Command, NodeCapabilities, NodeId, Priority, SessionId, ShellCommand, TaskContext, UserId,
+    WorkspaceInfo,
 };
 
 /// 创建测试用的工作空间信息
@@ -79,29 +79,25 @@ fn bench_task_submission(c: &mut Criterion) {
         let (hub, _config) = setup_hub(*node_count);
         let context = create_test_context("bench-user", "bench-session");
 
-        group.bench_with_input(
-            BenchmarkId::new("nodes", node_count),
-            node_count,
-            |b, _| {
-                let rt = Runtime::new().unwrap();
-                b.to_async(&rt).iter(|| {
-                    let hub = Arc::clone(&hub);
-                    let ctx = context.clone();
-                    async move {
-                        hub.submit_task(
-                            Command::Shell(ShellCommand::new("echo benchmark")),
-                            ctx,
-                            Priority::Normal,
-                            None,
-                            vec![],
-                            None,
-                        )
-                        .await
-                        .unwrap()
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("nodes", node_count), node_count, |b, _| {
+            let rt = Runtime::new().unwrap();
+            b.to_async(&rt).iter(|| {
+                let hub = Arc::clone(&hub);
+                let ctx = context.clone();
+                async move {
+                    hub.submit_task(
+                        Command::Shell(ShellCommand::new("echo benchmark")),
+                        ctx,
+                        Priority::Normal,
+                        None,
+                        vec![],
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                }
+            });
+        });
     }
 
     group.finish();
@@ -131,16 +127,17 @@ fn bench_batch_task_submission(c: &mut Criterion) {
                                 &format!("user-{}", i),
                                 &format!("session-{}", i),
                             );
-                            let task = hub.submit_task(
-                                Command::Shell(ShellCommand::new(&format!("echo {}", i))),
-                                ctx,
-                                Priority::Normal,
-                                None,
-                                vec![],
-                                None,
-                            )
-                            .await
-                            .unwrap();
+                            let task = hub
+                                .submit_task(
+                                    Command::Shell(ShellCommand::new(&format!("echo {}", i))),
+                                    ctx,
+                                    Priority::Normal,
+                                    None,
+                                    vec![],
+                                    None,
+                                )
+                                .await
+                                .unwrap();
                             tasks.push(task);
                         }
                         tasks
@@ -163,24 +160,22 @@ fn bench_node_registration(c: &mut Criterion) {
 
     c.bench_function("node_registration", |b| {
         let rt = Runtime::new().unwrap();
-        b.to_async(&rt).iter(|| {
-            async {
-                let (hub, _rx) = Hub::new(config.clone());
-                let node_id = NodeId::new();
-                let workspace = create_test_workspace("bench-workspace", "/tmp/bench");
+        b.to_async(&rt).iter(|| async {
+            let (hub, _rx) = Hub::new(config.clone());
+            let node_id = NodeId::new();
+            let workspace = create_test_workspace("bench-workspace", "/tmp/bench");
 
-                hub.handle_node_connection(
-                    node_id,
-                    "Benchmark Node".to_string(),
-                    NodeCapabilities::default(),
-                    workspace,
-                    vec![],
-                )
-                .await
-                .unwrap();
+            hub.handle_node_connection(
+                node_id,
+                "Benchmark Node".to_string(),
+                NodeCapabilities::default(),
+                workspace,
+                vec![],
+            )
+            .await
+            .unwrap();
 
-                hub
-            }
+            hub
         });
     });
 }
@@ -267,8 +262,8 @@ fn bench_concurrent_submission(c: &mut Criterion) {
 
 /// 基准测试：消息编解码
 fn bench_message_encoding(c: &mut Criterion) {
-    use uhorse_protocol::{HubToNode, MessageCodec, MessageId};
     use chrono::Utc;
+    use uhorse_protocol::{HubToNode, MessageCodec, MessageId};
 
     let mut group = c.benchmark_group("message_codec");
 
@@ -278,17 +273,13 @@ fn bench_message_encoding(c: &mut Criterion) {
     };
 
     group.bench_function("encode_heartbeat", |b| {
-        b.iter(|| {
-            MessageCodec::encode_hub_to_node(black_box(&heartbeat)).unwrap()
-        });
+        b.iter(|| MessageCodec::encode_hub_to_node(black_box(&heartbeat)).unwrap());
     });
 
     let encoded = MessageCodec::encode_hub_to_node(&heartbeat).unwrap();
 
     group.bench_function("decode_heartbeat", |b| {
-        b.iter(|| {
-            MessageCodec::decode_hub_to_node(black_box(&encoded)).unwrap()
-        });
+        b.iter(|| MessageCodec::decode_hub_to_node(black_box(&encoded)).unwrap());
     });
 
     group.finish();

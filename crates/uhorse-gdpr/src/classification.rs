@@ -194,17 +194,23 @@ impl PersonalDataClassifier {
             DataSensitivity::Confidential,
         ));
 
-        self.register_field(DataFieldClassification::new(
-            "email",
-            DataCategory::PersonalIdentifiableInformation,
-            DataSensitivity::Confidential,
-        ).with_description("User email address"));
+        self.register_field(
+            DataFieldClassification::new(
+                "email",
+                DataCategory::PersonalIdentifiableInformation,
+                DataSensitivity::Confidential,
+            )
+            .with_description("User email address"),
+        );
 
-        self.register_field(DataFieldClassification::new(
-            "phone",
-            DataCategory::PersonalIdentifiableInformation,
-            DataSensitivity::Confidential,
-        ).with_description("Phone number"));
+        self.register_field(
+            DataFieldClassification::new(
+                "phone",
+                DataCategory::PersonalIdentifiableInformation,
+                DataSensitivity::Confidential,
+            )
+            .with_description("Phone number"),
+        );
 
         self.register_field(DataFieldClassification::new(
             "name",
@@ -225,31 +231,43 @@ impl PersonalDataClassifier {
         ));
 
         // 会话数据
-        self.register_field(DataFieldClassification::new(
-            "session_id",
-            DataCategory::TechnicalData,
-            DataSensitivity::Internal,
-        ).with_retention(30));
+        self.register_field(
+            DataFieldClassification::new(
+                "session_id",
+                DataCategory::TechnicalData,
+                DataSensitivity::Internal,
+            )
+            .with_retention(30),
+        );
 
         // 消息内容
-        self.register_field(DataFieldClassification::new(
-            "message_content",
-            DataCategory::UserGeneratedContent,
-            DataSensitivity::Confidential,
-        ).with_retention(365));
+        self.register_field(
+            DataFieldClassification::new(
+                "message_content",
+                DataCategory::UserGeneratedContent,
+                DataSensitivity::Confidential,
+            )
+            .with_retention(365),
+        );
 
         // 认证令牌
-        self.register_field(DataFieldClassification::new(
-            "access_token",
-            DataCategory::TechnicalData,
-            DataSensitivity::Restricted,
-        ).with_retention(1));
+        self.register_field(
+            DataFieldClassification::new(
+                "access_token",
+                DataCategory::TechnicalData,
+                DataSensitivity::Restricted,
+            )
+            .with_retention(1),
+        );
 
-        self.register_field(DataFieldClassification::new(
-            "refresh_token",
-            DataCategory::TechnicalData,
-            DataSensitivity::Restricted,
-        ).with_retention(30));
+        self.register_field(
+            DataFieldClassification::new(
+                "refresh_token",
+                DataCategory::TechnicalData,
+                DataSensitivity::Restricted,
+            )
+            .with_retention(30),
+        );
 
         info!(
             "Registered {} default field classifications",
@@ -304,7 +322,8 @@ impl PersonalDataClassifier {
 
     /// 注册表级分类
     pub fn register_table(&mut self, table_name: impl Into<String>, category: DataCategory) {
-        self.table_classifications.insert(table_name.into(), category);
+        self.table_classifications
+            .insert(table_name.into(), category);
     }
 
     /// 获取表分类

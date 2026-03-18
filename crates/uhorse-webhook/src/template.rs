@@ -58,11 +58,7 @@ impl WebhookTemplate {
     }
 
     /// 添加变量
-    pub fn add_variable(
-        mut self,
-        name: impl Into<String>,
-        definition: VariableDefinition,
-    ) -> Self {
+    pub fn add_variable(mut self, name: impl Into<String>, definition: VariableDefinition) -> Self {
         self.variables.insert(name.into(), definition);
         self
     }
@@ -185,7 +181,8 @@ impl TemplateEngine {
         for (key, definition) in &template.variables {
             if !variables.contains_key(key) {
                 if let Some(ref default) = definition.default {
-                    let placeholder = format!("{}{}{}", self.left_delimiter, key, self.right_delimiter);
+                    let placeholder =
+                        format!("{}{}{}", self.left_delimiter, key, self.right_delimiter);
                     let value_str = self.value_to_string(default);
                     result = result.replace(&placeholder, &value_str);
                 }
@@ -240,9 +237,7 @@ impl TemplateEngine {
             Value::String(s) => s.clone(),
             Value::Number(n) => n.to_string(),
             Value::Bool(b) => b.to_string(),
-            Value::Object(_) | Value::Array(_) => {
-                serde_json::to_string(value).unwrap_or_default()
-            }
+            Value::Object(_) | Value::Array(_) => serde_json::to_string(value).unwrap_or_default(),
             Value::Null => String::new(),
         }
     }
@@ -306,7 +301,10 @@ pub fn default_templates() -> Vec<WebhookTemplate> {
 }"#,
         )
         .with_description("Slack 消息格式")
-        .add_variable("message", VariableDefinition::new(VariableType::String).required())
+        .add_variable(
+            "message",
+            VariableDefinition::new(VariableType::String).required(),
+        )
         .add_variable(
             "username",
             VariableDefinition::new(VariableType::String)
@@ -363,8 +361,10 @@ mod tests {
     #[test]
     fn test_template_required_variable() {
         let engine = TemplateEngine::new();
-        let template = WebhookTemplate::new("Test", "Hello {{name}}!")
-            .add_variable("name", VariableDefinition::new(VariableType::String).required());
+        let template = WebhookTemplate::new("Test", "Hello {{name}}!").add_variable(
+            "name",
+            VariableDefinition::new(VariableType::String).required(),
+        );
 
         let variables = HashMap::new();
         let result = engine.render(&template, &variables);
@@ -375,12 +375,10 @@ mod tests {
     #[test]
     fn test_template_default_value() {
         let engine = TemplateEngine::new();
-        let template = WebhookTemplate::new("Test", "Hello {{name}}!")
-            .add_variable(
-                "name",
-                VariableDefinition::new(VariableType::String)
-                    .with_default(json!("World")),
-            );
+        let template = WebhookTemplate::new("Test", "Hello {{name}}!").add_variable(
+            "name",
+            VariableDefinition::new(VariableType::String).with_default(json!("World")),
+        );
 
         let variables = HashMap::new();
         let result = engine.render(&template, &variables).unwrap();

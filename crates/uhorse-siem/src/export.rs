@@ -236,7 +236,11 @@ impl AuditExporter {
     }
 
     /// 写入文件
-    pub fn write_to_file(&self, events: &[AuditEvent], path: &std::path::Path) -> crate::Result<()> {
+    pub fn write_to_file(
+        &self,
+        events: &[AuditEvent],
+        path: &std::path::Path,
+    ) -> crate::Result<()> {
         let content = self.export_events(events)?;
         let mut file = std::fs::File::create(path)?;
         file.write_all(content.as_bytes())?;
@@ -256,7 +260,8 @@ mod tests {
             "user-123",
             "/auth/login",
             "login",
-        ).with_ip("192.168.1.1");
+        )
+        .with_ip("192.168.1.1");
 
         assert!(!event.id.is_empty());
         assert_eq!(event.event_type, "user.login");
@@ -288,7 +293,8 @@ mod tests {
             "user-123",
             "/auth/login",
             "login",
-        ).with_result("success");
+        )
+        .with_result("success");
 
         let exporter = AuditExporter::new(ExportFormat::Cef);
         let cef = exporter.export_event(&event).unwrap();

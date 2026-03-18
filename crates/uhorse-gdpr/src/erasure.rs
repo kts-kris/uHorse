@@ -288,8 +288,12 @@ impl DataErasureManager {
         }
 
         // 确定最终状态
-        let all_verified = verification_results.iter().all(|r| *r == VerificationResult::Verified);
-        let any_failed = verification_results.iter().any(|r| *r == VerificationResult::Failed);
+        let all_verified = verification_results
+            .iter()
+            .all(|r| *r == VerificationResult::Verified);
+        let any_failed = verification_results
+            .iter()
+            .any(|r| *r == VerificationResult::Failed);
 
         request.status = if all_verified {
             request.completed_at = Some(chrono::Utc::now().timestamp_millis() as u64);
@@ -332,11 +336,7 @@ impl DataErasureManager {
     }
 
     /// 拒绝删除请求 (存在法律义务)
-    pub async fn reject_request(
-        &self,
-        request_id: &Uuid,
-        reason: &str,
-    ) -> Result<ErasureRequest> {
+    pub async fn reject_request(&self, request_id: &Uuid, reason: &str) -> Result<ErasureRequest> {
         let mut requests = self.requests.write().await;
 
         let request = requests
@@ -347,10 +347,7 @@ impl DataErasureManager {
         request.notes = Some(reason.to_string());
         request.completed_at = Some(chrono::Utc::now().timestamp_millis() as u64);
 
-        warn!(
-            "Erasure request {} rejected: {}",
-            request_id, reason
-        );
+        warn!("Erasure request {} rejected: {}", request_id, reason);
         Ok(request.clone())
     }
 }

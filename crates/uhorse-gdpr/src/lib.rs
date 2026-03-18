@@ -12,12 +12,8 @@ pub mod erasure;
 pub mod export;
 
 pub use classification::{DataCategory, DataSensitivity, PersonalDataClassifier};
-pub use consent::{
-    ConsentManager, ConsentRecord, ConsentStatus, ConsentType, ProcessingPurpose,
-};
-pub use erasure::{
-    DataErasureManager, ErasureRequest, ErasureStatus, ErasureVerification,
-};
+pub use consent::{ConsentManager, ConsentRecord, ConsentStatus, ConsentType, ProcessingPurpose};
+pub use erasure::{DataErasureManager, ErasureRequest, ErasureStatus, ErasureVerification};
 pub use export::{DataExportFormat, DataExportManager, DataExportRequest, ExportResult};
 
 /// GDPR 合规错误类型

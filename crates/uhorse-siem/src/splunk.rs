@@ -85,7 +85,10 @@ impl SplunkEvent {
     /// 从审计事件创建
     pub fn from_audit(audit: &crate::export::AuditEvent) -> Self {
         let mut fields = HashMap::new();
-        fields.insert("event_type".to_string(), serde_json::json!(audit.event_type));
+        fields.insert(
+            "event_type".to_string(),
+            serde_json::json!(audit.event_type),
+        );
         fields.insert("tenant_id".to_string(), serde_json::json!(audit.tenant_id));
         fields.insert("actor".to_string(), serde_json::json!(audit.actor));
         fields.insert("resource".to_string(), serde_json::json!(audit.resource));
@@ -302,11 +305,7 @@ mod tests {
 
     #[test]
     fn test_splunk_config() {
-        let config = SplunkConfig::new(
-            "https://splunk.example.com:8088",
-            "token-123",
-            "main",
-        );
+        let config = SplunkConfig::new("https://splunk.example.com:8088", "token-123", "main");
 
         assert_eq!(config.hec_url, "https://splunk.example.com:8088");
         assert_eq!(config.index, "main");

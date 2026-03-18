@@ -165,12 +165,15 @@ impl UserRateLimiter {
             quota.user_type = user_type;
             quota.quota = user_type.quota(&self.config);
         } else {
-            quotas.insert(key.clone(), UserQuota {
-                user_type,
-                quota: user_type.quota(&self.config),
-                current_usage: 0,
-                window_start: Instant::now(),
-            });
+            quotas.insert(
+                key.clone(),
+                UserQuota {
+                    user_type,
+                    quota: user_type.quota(&self.config),
+                    current_usage: 0,
+                    window_start: Instant::now(),
+                },
+            );
         }
     }
 
@@ -203,9 +206,7 @@ impl UserRateLimiter {
         let window_duration = Duration::from_secs(self.config.base.window_size);
 
         let mut quotas = self.quotas.write().await;
-        quotas.retain(|_, quota| {
-            now.duration_since(quota.window_start) < window_duration * 2
-        });
+        quotas.retain(|_, quota| now.duration_since(quota.window_start) < window_duration * 2);
     }
 }
 

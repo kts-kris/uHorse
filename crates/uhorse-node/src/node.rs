@@ -306,10 +306,16 @@ impl Node {
                     tasks.remove(task_id);
                 }
 
-                info!("Task {} completed: {:?}", task_id, result.as_ref().map(|_| "success").unwrap_or("failed"));
+                info!(
+                    "Task {} completed: {:?}",
+                    task_id,
+                    result.as_ref().map(|_| "success").unwrap_or("failed")
+                );
             }
 
-            HubToNode::TaskCancellation { task_id, reason, .. } => {
+            HubToNode::TaskCancellation {
+                task_id, reason, ..
+            } => {
                 info!("Task cancelled: {} - {}", task_id, reason);
 
                 // 取消运行中的任务
@@ -349,7 +355,10 @@ impl Node {
 
     /// 停止节点
     pub async fn stop(&self) -> NodeResult<()> {
-        if !self.running.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if !self
+            .running
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
             return Ok(()); // 已经停止
         }
 

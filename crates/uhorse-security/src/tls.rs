@@ -129,10 +129,13 @@ impl TlsServerBuilder {
         let server_config = match self.config.min_tls_version {
             TlsVersion::V1_2 => {
                 warn!("TLS 1.2 enabled - consider using TLS 1.3 for better security");
-                ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
-                    .with_no_client_auth()
-                    .with_single_cert(cert, key)
-                    .map_err(|e| anyhow!("Failed to create server config: {}", e))?
+                ServerConfig::builder_with_protocol_versions(&[
+                    &rustls::version::TLS12,
+                    &rustls::version::TLS13,
+                ])
+                .with_no_client_auth()
+                .with_single_cert(cert, key)
+                .map_err(|e| anyhow!("Failed to create server config: {}", e))?
             }
             TlsVersion::V1_3 => {
                 ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
@@ -197,7 +200,7 @@ impl CertificateManager {
 
         // Consider renewal if certificate is older than threshold
         let threshold_duration = std::time::Duration::from_secs(
-            (365 - self.renewal_threshold_days as u64) * 24 * 60 * 60
+            (365 - self.renewal_threshold_days as u64) * 24 * 60 * 60,
         );
 
         Ok(age > threshold_duration)

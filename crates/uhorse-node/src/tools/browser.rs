@@ -82,14 +82,16 @@ impl BrowserExecutor {
 
         match cmd {
             BrowserCommand::Navigate { url } => self.navigate(url).await,
-            BrowserCommand::Screenshot { selector, full_page } => {
-                self.screenshot(selector.as_deref(), *full_page).await
-            }
+            BrowserCommand::Screenshot {
+                selector,
+                full_page,
+            } => self.screenshot(selector.as_deref(), *full_page).await,
             BrowserCommand::Click { selector } => self.click(selector).await,
             BrowserCommand::Type { selector, text } => self.type_text(selector, text).await,
-            BrowserCommand::WaitFor { selector, timeout_secs } => {
-                self.wait_for(selector, *timeout_secs).await
-            }
+            BrowserCommand::WaitFor {
+                selector,
+                timeout_secs,
+            } => self.wait_for(selector, *timeout_secs).await,
             BrowserCommand::GetText { selector } => self.get_text(selector).await,
             BrowserCommand::Evaluate { script } => self.evaluate(script).await,
             BrowserCommand::Close => self.close().await,
@@ -112,7 +114,9 @@ impl BrowserExecutor {
                     .headless(self.config.headless)
                     .window_size(Some((self.config.width, self.config.height)))
                     .build()
-                    .map_err(|e| NodeError::Execution(format!("Failed to launch browser: {}", e)))?,
+                    .map_err(|e| {
+                        NodeError::Execution(format!("Failed to launch browser: {}", e))
+                    })?,
             )
             .map_err(|e| NodeError::Execution(format!("Failed to create browser: {}", e)))?;
 
@@ -155,17 +159,26 @@ impl BrowserExecutor {
 
     /// 截图
     #[cfg(feature = "browser")]
-    async fn screenshot(&self, _selector: Option<&str>, _full_page: bool) -> NodeResult<CommandOutput> {
+    async fn screenshot(
+        &self,
+        _selector: Option<&str>,
+        _full_page: bool,
+    ) -> NodeResult<CommandOutput> {
         // TODO: headless_chrome 1.0 API changed - need to update for new capture_screenshot signature
         // The new API requires different parameters. This needs to be fixed.
         Err(NodeError::Execution(
-            "Screenshot feature temporarily disabled due to headless_chrome API changes".to_string(),
+            "Screenshot feature temporarily disabled due to headless_chrome API changes"
+                .to_string(),
         ))
     }
 
     /// 截图 (未启用 feature)
     #[cfg(not(feature = "browser"))]
-    async fn screenshot(&self, _selector: Option<&str>, _full_page: bool) -> NodeResult<CommandOutput> {
+    async fn screenshot(
+        &self,
+        _selector: Option<&str>,
+        _full_page: bool,
+    ) -> NodeResult<CommandOutput> {
         Err(NodeError::Execution(
             "Browser support not enabled. Compile with 'browser' feature".to_string(),
         ))
@@ -184,9 +197,9 @@ impl BrowserExecutor {
         let tab = &session.tab;
 
         // 使用选择器查找元素并点击
-        let element = tab
-            .find_element(selector)
-            .map_err(|e| NodeError::Execution(format!("Element not found '{}': {}", selector, e)))?;
+        let element = tab.find_element(selector).map_err(|e| {
+            NodeError::Execution(format!("Element not found '{}': {}", selector, e))
+        })?;
 
         element
             .click()
@@ -215,9 +228,9 @@ impl BrowserExecutor {
 
         let tab = &session.tab;
 
-        let element = tab
-            .find_element(selector)
-            .map_err(|e| NodeError::Execution(format!("Element not found '{}': {}", selector, e)))?;
+        let element = tab.find_element(selector).map_err(|e| {
+            NodeError::Execution(format!("Element not found '{}': {}", selector, e))
+        })?;
 
         // 先点击聚焦
         element
@@ -292,9 +305,9 @@ impl BrowserExecutor {
 
         let tab = &session.tab;
 
-        let element = tab
-            .find_element(selector)
-            .map_err(|e| NodeError::Execution(format!("Element not found '{}': {}", selector, e)))?;
+        let element = tab.find_element(selector).map_err(|e| {
+            NodeError::Execution(format!("Element not found '{}': {}", selector, e))
+        })?;
 
         // 使用 JavaScript 获取文本内容
         let text = tab
@@ -324,7 +337,10 @@ impl BrowserExecutor {
     /// 执行 JavaScript
     #[cfg(feature = "browser")]
     async fn evaluate(&self, script: &str) -> NodeResult<CommandOutput> {
-        debug!("Evaluating JavaScript: {}...", &script[..script.len().min(50)]);
+        debug!(
+            "Evaluating JavaScript: {}...",
+            &script[..script.len().min(50)]
+        );
 
         let session = self.session.lock().await;
         let session = session

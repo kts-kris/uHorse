@@ -10,8 +10,8 @@ pub mod sqlite;
 
 pub use jsonl::JsonlLogger;
 pub use sharding::{
-    MigrationManager, MigrationStatus, ReadWriteSplitter, ReplicaManager, RouteResult,
-    ShardingRouter, ShardConfig, ShardKey, ShardingConfig, ShardingStrategy,
+    MigrationManager, MigrationStatus, ReadWriteSplitter, ReplicaManager, RouteResult, ShardConfig,
+    ShardKey, ShardingConfig, ShardingRouter, ShardingStrategy,
 };
 pub use sqlite::SqliteStore;
 

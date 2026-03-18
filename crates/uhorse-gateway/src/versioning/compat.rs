@@ -28,17 +28,31 @@ pub enum BreakingChange {
     /// 删除请求字段
     RequestFieldRemoved { endpoint: String, field: String },
     /// 修改请求字段类型
-    RequestFieldTypeChanged { endpoint: String, field: String, old_type: String, new_type: String },
+    RequestFieldTypeChanged {
+        endpoint: String,
+        field: String,
+        old_type: String,
+        new_type: String,
+    },
     /// 必填字段新增
     RequiredFieldAdded { endpoint: String, field: String },
     /// 响应字段删除
     ResponseFieldRemoved { endpoint: String, field: String },
     /// 响应字段类型修改
-    ResponseFieldTypeChanged { endpoint: String, field: String, old_type: String, new_type: String },
+    ResponseFieldTypeChanged {
+        endpoint: String,
+        field: String,
+        old_type: String,
+        new_type: String,
+    },
     /// 认证方式变更
     AuthenticationChanged { endpoint: String },
     /// 权限要求变更
-    PermissionChanged { endpoint: String, old: String, new: String },
+    PermissionChanged {
+        endpoint: String,
+        old: String,
+        new: String,
+    },
 }
 
 impl BreakingChange {
@@ -50,8 +64,16 @@ impl BreakingChange {
             Self::RequestFieldRemoved { endpoint, field } => {
                 format!("请求字段已删除: {} / {}", endpoint, field)
             }
-            Self::RequestFieldTypeChanged { endpoint, field, old_type, new_type } => {
-                format!("请求字段类型已修改: {} / {} ({} -> {})", endpoint, field, old_type, new_type)
+            Self::RequestFieldTypeChanged {
+                endpoint,
+                field,
+                old_type,
+                new_type,
+            } => {
+                format!(
+                    "请求字段类型已修改: {} / {} ({} -> {})",
+                    endpoint, field, old_type, new_type
+                )
             }
             Self::RequiredFieldAdded { endpoint, field } => {
                 format!("新增必填字段: {} / {}", endpoint, field)
@@ -59,8 +81,16 @@ impl BreakingChange {
             Self::ResponseFieldRemoved { endpoint, field } => {
                 format!("响应字段已删除: {} / {}", endpoint, field)
             }
-            Self::ResponseFieldTypeChanged { endpoint, field, old_type, new_type } => {
-                format!("响应字段类型已修改: {} / {} ({} -> {})", endpoint, field, old_type, new_type)
+            Self::ResponseFieldTypeChanged {
+                endpoint,
+                field,
+                old_type,
+                new_type,
+            } => {
+                format!(
+                    "响应字段类型已修改: {} / {} ({} -> {})",
+                    endpoint, field, old_type, new_type
+                )
             }
             Self::AuthenticationChanged { endpoint } => {
                 format!("认证方式已变更: {}", endpoint)
@@ -128,11 +158,13 @@ pub struct CompatibilityChecker {
 impl CompatibilityChecker {
     /// 创建新的兼容性检查器
     pub fn new(old_spec: Vec<EndpointSpec>, new_spec: Vec<EndpointSpec>) -> Self {
-        let old_map = old_spec.into_iter()
+        let old_map = old_spec
+            .into_iter()
             .map(|s| (format!("{}:{}", s.method, s.path), s))
             .collect();
 
-        let new_map = new_spec.into_iter()
+        let new_map = new_spec
+            .into_iter()
             .map(|s| (format!("{}:{}", s.method, s.path), s))
             .collect();
 
@@ -141,7 +173,6 @@ impl CompatibilityChecker {
             new_spec: new_map,
         }
     }
-
 }
 
 impl CompatibilityChecker {
@@ -162,12 +193,20 @@ impl CompatibilityChecker {
             if let Some(old_endpoint) = self.old_spec.get(key) {
                 // 检查请求参数
                 for old_field in &old_endpoint.request_params {
-                    if !new_endpoint.request_params.iter().any(|f| f.name == old_field.name) {
+                    if !new_endpoint
+                        .request_params
+                        .iter()
+                        .any(|f| f.name == old_field.name)
+                    {
                         breaking_changes.push(BreakingChange::RequestFieldRemoved {
                             endpoint: new_endpoint.path.clone(),
                             field: old_field.name.clone(),
                         });
-                    } else if let Some(new_field) = new_endpoint.request_params.iter().find(|f| f.name == old_field.name) {
+                    } else if let Some(new_field) = new_endpoint
+                        .request_params
+                        .iter()
+                        .find(|f| f.name == old_field.name)
+                    {
                         if new_field.field_type != old_field.field_type {
                             breaking_changes.push(BreakingChange::RequestFieldTypeChanged {
                                 endpoint: new_endpoint.path.clone(),
@@ -187,12 +226,20 @@ impl CompatibilityChecker {
 
                 // 检查响应字段
                 for old_field in &old_endpoint.response_fields {
-                    if !new_endpoint.response_fields.iter().any(|f| f.name == old_field.name) {
+                    if !new_endpoint
+                        .response_fields
+                        .iter()
+                        .any(|f| f.name == old_field.name)
+                    {
                         breaking_changes.push(BreakingChange::ResponseFieldRemoved {
                             endpoint: new_endpoint.path.clone(),
                             field: old_field.name.clone(),
                         });
-                    } else if let Some(new_field) = new_endpoint.response_fields.iter().find(|f| f.name == old_field.name) {
+                    } else if let Some(new_field) = new_endpoint
+                        .response_fields
+                        .iter()
+                        .find(|f| f.name == old_field.name)
+                    {
                         if new_field.field_type != old_field.field_type {
                             breaking_changes.push(BreakingChange::ResponseFieldTypeChanged {
                                 endpoint: new_endpoint.path.clone(),
@@ -226,7 +273,11 @@ impl CompatibilityChecker {
         let level = if breaking_changes.is_empty() {
             CompatibilityLevel::FullyCompatible
         } else {
-            let max_severity = breaking_changes.iter().map(|c| c.severity()).max().unwrap_or(0);
+            let max_severity = breaking_changes
+                .iter()
+                .map(|c| c.severity())
+                .max()
+                .unwrap_or(0);
             if max_severity >= 4 {
                 CompatibilityLevel::Incompatible
             } else {
@@ -256,7 +307,10 @@ pub struct CompatibilityReport {
 impl CompatibilityReport {
     /// 是否兼容
     pub fn is_compatible(&self) -> bool {
-        matches!(self.level, CompatibilityLevel::FullyCompatible | CompatibilityLevel::BackwardCompatible)
+        matches!(
+            self.level,
+            CompatibilityLevel::FullyCompatible | CompatibilityLevel::BackwardCompatible
+        )
     }
 
     /// 是否有破坏性变更
@@ -287,5 +341,4 @@ mod tests {
         };
         assert_eq!(change.severity(), 2);
     }
-
 }

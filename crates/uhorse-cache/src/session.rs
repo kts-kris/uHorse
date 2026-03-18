@@ -76,7 +76,8 @@ pub struct SessionCache {
 impl SessionCache {
     /// Create a new session cache with local cache only
     pub fn new_local(policy: CachePolicy) -> Self {
-        let max_items = NonZeroUsize::new(policy.max_items).unwrap_or(NonZeroUsize::new(1000).unwrap());
+        let max_items =
+            NonZeroUsize::new(policy.max_items).unwrap_or(NonZeroUsize::new(1000).unwrap());
 
         Self {
             local: Arc::new(RwLock::new(LruCache::new(max_items))),
@@ -88,7 +89,8 @@ impl SessionCache {
 
     /// Create a new session cache with Redis backend
     pub fn new_with_redis(redis: RedisCache, policy: CachePolicy) -> Self {
-        let max_items = NonZeroUsize::new(policy.max_items).unwrap_or(NonZeroUsize::new(1000).unwrap());
+        let max_items =
+            NonZeroUsize::new(policy.max_items).unwrap_or(NonZeroUsize::new(1000).unwrap());
 
         Self {
             local: Arc::new(RwLock::new(LruCache::new(max_items))),

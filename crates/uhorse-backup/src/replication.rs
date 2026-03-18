@@ -27,7 +27,11 @@ pub struct ReplicationTarget {
 
 impl ReplicationTarget {
     /// 创建新的复制目标
-    pub fn new(name: impl Into<String>, region: impl Into<String>, endpoint: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        region: impl Into<String>,
+        endpoint: impl Into<String>,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.into(),
@@ -166,14 +170,13 @@ impl ReplicationManager {
 
         info!(
             "Created replication task: {} -> {}",
-            task.source_backup_id,
-            task.target_id
+            task.source_backup_id, task.target_id
         );
 
         task
     }
 
-       /// 开始复制任务
+    /// 开始复制任务
     pub async fn start_task(&self, task_id: &str) -> super::Result<()> {
         let mut tasks = self.tasks.write().await;
 
@@ -213,10 +216,7 @@ impl ReplicationManager {
             task.completed_at = Some(Utc::now());
             task.error_message = Some(error.clone());
 
-            tracing::error!(
-                "Failed replication task {}: {}",
-                task_id, error
-            );
+            tracing::error!("Failed replication task {}: {}", task_id, error);
         } else {
             return Err(super::BackupError::NotFound(task_id.to_string()));
         }
@@ -343,10 +343,7 @@ mod tests {
         manager.start_task(&task.id).await.unwrap();
 
         // 完成任务
-        manager
-            .complete_task(&task.id, 1024 * 1024)
-            .await
-            .unwrap();
+        manager.complete_task(&task.id, 1024 * 1024).await.unwrap();
 
         let completed = manager.get_task(&task.id).await.unwrap();
         assert_eq!(completed.status, ReplicationStatus::Completed);

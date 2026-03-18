@@ -272,7 +272,9 @@ impl RetentionPolicyManager {
 
     /// 检查数据记录的保留状态
     pub async fn check_retention(&self, record: &DataRecord) -> Option<RetentionCheckResult> {
-        let policy = self.find_applicable_policy(&record.data_type, record.sensitivity).await?;
+        let policy = self
+            .find_applicable_policy(&record.data_type, record.sensitivity)
+            .await?;
 
         Some(RetentionCheckResult {
             record_id: record.id.clone(),
@@ -313,9 +315,7 @@ impl RetentionPolicyManager {
 
         checks
             .into_iter()
-            .filter(|c| {
-                !c.is_expired && (c.expiry_date - Utc::now()) < threshold
-            })
+            .filter(|c| !c.is_expired && (c.expiry_date - Utc::now()) < threshold)
             .collect()
     }
 }
@@ -332,12 +332,8 @@ mod tests {
 
     #[test]
     fn test_retention_policy_creation() {
-        let policy = RetentionPolicy::new(
-            "test-policy",
-            "Test Policy",
-            30,
-            RetentionAction::Delete,
-        );
+        let policy =
+            RetentionPolicy::new("test-policy", "Test Policy", 30, RetentionAction::Delete);
 
         assert_eq!(policy.retention_days, 30);
         assert!(policy.enabled);
@@ -345,12 +341,8 @@ mod tests {
 
     #[test]
     fn test_expiry_calculation() {
-        let policy = RetentionPolicy::new(
-            "test-policy",
-            "Test Policy",
-            30,
-            RetentionAction::Delete,
-        );
+        let policy =
+            RetentionPolicy::new("test-policy", "Test Policy", 30, RetentionAction::Delete);
 
         let created = Utc::now() - chrono::Duration::days(31);
         assert!(policy.is_expired(created));
@@ -372,10 +364,7 @@ mod tests {
         let manager = RetentionPolicyManager::new();
 
         let policy = manager
-            .find_applicable_policy(
-                &DataType::TechnicalLogs,
-                SensitivityLevel::Internal,
-            )
+            .find_applicable_policy(&DataType::TechnicalLogs, SensitivityLevel::Internal)
             .await;
 
         assert!(policy.is_some());

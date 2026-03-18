@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::{LoadBalancer, InstanceStats};
+use super::{InstanceStats, LoadBalancer};
 
 /// Round-robin load balancer
 pub struct RoundRobinLoadBalancer {
@@ -27,7 +27,10 @@ impl Default for RoundRobinLoadBalancer {
 
 #[async_trait]
 impl LoadBalancer for RoundRobinLoadBalancer {
-    async fn select(&self, instances: &[uhorse_discovery::ServiceInstance]) -> Option<uhorse_discovery::ServiceInstance> {
+    async fn select(
+        &self,
+        instances: &[uhorse_discovery::ServiceInstance],
+    ) -> Option<uhorse_discovery::ServiceInstance> {
         if instances.is_empty() {
             return None;
         }

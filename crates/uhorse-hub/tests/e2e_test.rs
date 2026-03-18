@@ -2,15 +2,15 @@
 //!
 //! 测试 Hub-Node 完整通信流程
 
+use chrono::Utc;
 use std::sync::Arc;
 use std::time::Duration;
 use uhorse_hub::{Hub, HubConfig};
 use uhorse_protocol::{
-    Command, FileCommand, HubToNode, MessageCodec, MessageId, NodeCapabilities,
-    NodeId, NodeStatus, LoadInfo, NodeToHub, Priority, ShellCommand,
-    TaskContext, TaskId, WorkspaceInfo, UserId, SessionId,
+    Command, FileCommand, HubToNode, LoadInfo, MessageCodec, MessageId, NodeCapabilities, NodeId,
+    NodeStatus, NodeToHub, Priority, SessionId, ShellCommand, TaskContext, TaskId, UserId,
+    WorkspaceInfo,
 };
-use chrono::Utc;
 
 // ============================================================================
 // 消息编解码测试
@@ -233,7 +233,14 @@ async fn test_multi_node_parallel_tasks() {
     for i in 1..=10 {
         let command = Command::Shell(ShellCommand::new(&format!("echo task-{}", i)));
         let task_id = hub
-            .submit_task(command, context.clone(), Priority::Normal, None, vec![], None)
+            .submit_task(
+                command,
+                context.clone(),
+                Priority::Normal,
+                None,
+                vec![],
+                None,
+            )
             .await
             .unwrap();
         task_ids.push(task_id);
@@ -243,7 +250,11 @@ async fn test_multi_node_parallel_tasks() {
     assert_eq!(task_ids.len(), 10);
 
     // 验证每个任务 ID 唯一
-    let unique_count = task_ids.iter().map(|t| t.to_string()).collect::<std::collections::HashSet<_>>().len();
+    let unique_count = task_ids
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
     assert_eq!(unique_count, 10);
 
     let stats = hub.get_stats().await;
@@ -622,7 +633,11 @@ async fn test_concurrent_task_submission() {
     assert_eq!(task_ids.len(), 50);
 
     // 验证任务 ID 唯一
-    let unique_count = task_ids.iter().map(|t| t.to_string()).collect::<std::collections::HashSet<_>>().len();
+    let unique_count = task_ids
+        .iter()
+        .map(|t| t.to_string())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
     assert_eq!(unique_count, 50);
 }
 

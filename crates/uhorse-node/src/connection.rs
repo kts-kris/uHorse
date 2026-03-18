@@ -155,7 +155,9 @@ impl HubConnection {
     /// 启动连接
     pub async fn start(&mut self) -> NodeResult<mpsc::Receiver<HubToNode>> {
         if self.running.load(Ordering::SeqCst) {
-            return Err(NodeError::Connection("Connection already running".to_string()));
+            return Err(NodeError::Connection(
+                "Connection already running".to_string(),
+            ));
         }
 
         let (tx, rx) = mpsc::channel(100);
@@ -252,7 +254,10 @@ impl HubConnection {
         let register_msg = NodeToHub::Register {
             message_id: uhorse_protocol::MessageId::new(),
             node_id: node_id.clone(),
-            name: format!("node-{}", node_id.as_str().split('-').next().unwrap_or("unknown")),
+            name: format!(
+                "node-{}",
+                node_id.as_str().split('-').next().unwrap_or("unknown")
+            ),
             capabilities: uhorse_protocol::NodeCapabilities::default(),
             workspace: uhorse_protocol::WorkspaceInfo {
                 name: "default".to_string(),
@@ -266,9 +271,12 @@ impl HubConnection {
         };
 
         let encoded = MessageCodec::encode_node_to_hub(&register_msg)?;
-        ws_sender.send(WsMessage::Binary(encoded)).await.map_err(|e| {
-            NodeError::Connection(format!("Failed to send register message: {}", e))
-        })?;
+        ws_sender
+            .send(WsMessage::Binary(encoded))
+            .await
+            .map_err(|e| {
+                NodeError::Connection(format!("Failed to send register message: {}", e))
+            })?;
 
         // 更新状态
         *state.write().await = ConnectionState::Authenticated {

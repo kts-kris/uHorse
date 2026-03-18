@@ -272,10 +272,7 @@ impl AuditStorage for InMemoryAuditStorage {
 
     async fn get(&self, sequence: u64) -> AuditResult<Option<SignedAuditEvent>> {
         let events = self.events.read().await;
-        Ok(events
-            .iter()
-            .find(|e| e.sequence == sequence)
-            .cloned())
+        Ok(events.iter().find(|e| e.sequence == sequence).cloned())
     }
 
     async fn get_latest(&self) -> AuditResult<Option<SignedAuditEvent>> {
@@ -385,15 +382,16 @@ impl<S: AuditStorage + 'static> AuditPersistor<S> {
         // 存储事件
         self.storage.store(&signed).await?;
 
-        info!("Persisted audit event seq={} hash={}", sequence, &signed.hash[..16]);
+        info!(
+            "Persisted audit event seq={} hash={}",
+            sequence,
+            &signed.hash[..16]
+        );
         Ok(signed)
     }
 
     /// 批量导出审计日志
-    pub async fn export(
-        &self,
-        filter: &AuditQueryFilter,
-    ) -> AuditResult<Vec<SignedAuditEvent>> {
+    pub async fn export(&self, filter: &AuditQueryFilter) -> AuditResult<Vec<SignedAuditEvent>> {
         self.storage.query(filter).await
     }
 

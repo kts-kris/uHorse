@@ -52,23 +52,23 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod error;
-pub mod workspace;
-pub mod permission;
-pub mod executor;
 pub mod connection;
-pub mod status;
+pub mod error;
+pub mod executor;
 pub mod node;
+pub mod permission;
+pub mod status;
 pub mod tools;
+pub mod workspace;
 
+pub use connection::{ConnectionConfig, ConnectionState, HubConnection};
 pub use error::{NodeError, NodeResult};
-pub use workspace::{Workspace, WorkspaceConfig};
-pub use permission::{PermissionManager, PermissionRule, PermissionResult};
 pub use executor::{CommandExecutor, ExecutionContext};
-pub use connection::{HubConnection, ConnectionConfig, ConnectionState};
-pub use status::{StatusReporter, Metrics};
 pub use node::{Node, NodeConfig};
-pub use tools::{DatabaseExecutor, BrowserExecutor, SkillExecutor};
+pub use permission::{PermissionManager, PermissionResult, PermissionRule};
+pub use status::{Metrics, StatusReporter};
+pub use tools::{BrowserExecutor, DatabaseExecutor, SkillExecutor};
+pub use workspace::{Workspace, WorkspaceConfig};
 
 /// 节点版本
 pub const NODE_VERSION: &str = env!("CARGO_PKG_VERSION");

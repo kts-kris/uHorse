@@ -297,10 +297,7 @@ impl JiraClient {
 
     /// 获取 Issue
     pub async fn get_issue(&self, issue_key: &str) -> crate::Result<JiraIssue> {
-        let url = format!(
-            "{}/rest/api/3/issue/{}",
-            self.config.site_url, issue_key
-        );
+        let url = format!("{}/rest/api/3/issue/{}", self.config.site_url, issue_key);
 
         let response = self
             .http_client

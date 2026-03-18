@@ -9,15 +9,15 @@
 //! - SAML 2.0 企业 SSO
 //! - 多 IdP 集成 (Okta/Auth0/Azure AD)
 
+pub mod idp;
 pub mod oauth2;
 pub mod oidc;
 pub mod saml;
-pub mod idp;
 
-pub use oauth2::{OAuth2Server, OAuth2Config, AuthorizationCode, TokenResponse};
+pub use idp::{IdpClient, IdpConfig, IdpType};
+pub use oauth2::{AuthorizationCode, OAuth2Config, OAuth2Server, TokenResponse};
 pub use oidc::{OidcClient, OidcConfig, UserInfo};
 pub use saml::{SamlClient, SamlConfig, SamlResponse};
-pub use idp::{IdpClient, IdpType, IdpConfig};
 
 use thiserror::Error;
 

@@ -75,7 +75,12 @@ pub struct ServiceInstance {
 
 impl ServiceInstance {
     /// Create a new service instance
-    pub fn new(id: impl Into<String>, name: impl Into<String>, address: impl Into<String>, port: u16) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        address: impl Into<String>,
+        port: u16,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -147,7 +152,7 @@ pub enum HealthStatus {
     Unknown,
 }
 
- impl Default for HealthStatus {
+impl Default for HealthStatus {
     fn default() -> Self {
         HealthStatus::Unknown
     }
@@ -170,7 +175,7 @@ pub struct HealthCheckConfig {
     pub ttl_secs: Option<u64>,
 }
 
- impl Default for HealthCheckConfig {
+impl Default for HealthCheckConfig {
     fn default() -> Self {
         Self {
             path: "/health".to_string(),
@@ -194,7 +199,7 @@ pub struct RegistrationOptions {
     pub overwrite: bool,
 }
 
- impl Default for RegistrationOptions {
+impl Default for RegistrationOptions {
     fn default() -> Self {
         Self {
             ttl_secs: 30,

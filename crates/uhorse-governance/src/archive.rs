@@ -152,7 +152,9 @@ impl ArchiveManager {
 
         // 生成归档路径
         let date_path = Utc::now().format("%Y/%m/%d").to_string();
-        record.archive_path = self.config.archive_dir
+        record.archive_path = self
+            .config
+            .archive_dir
             .join(&date_path)
             .join(format!("{}.archive", record.id));
 
@@ -301,9 +303,7 @@ impl ArchiveManager {
 
         let to_delete: Vec<String> = records
             .iter()
-            .filter(|(_, r)| {
-                r.archived_at.map(|t| t < threshold).unwrap_or(false)
-            })
+            .filter(|(_, r)| r.archived_at.map(|t| t < threshold).unwrap_or(false))
             .map(|(id, _)| id.clone())
             .collect();
 

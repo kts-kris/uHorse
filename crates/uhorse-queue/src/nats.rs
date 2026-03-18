@@ -83,7 +83,9 @@ impl NatsClient {
 
     /// Publish a message
     pub async fn publish(&self, subject: &str, payload: Vec<u8>) -> Result<()> {
-        let connection = self.connection.as_ref()
+        let connection = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("Not connected to NATS"))?;
 
         connection
@@ -97,7 +99,9 @@ impl NatsClient {
 
     /// Subscribe to a subject
     pub async fn subscribe(&self, subject: &str) -> Result<async_nats::Subscriber> {
-        let connection = self.connection.as_ref()
+        let connection = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("Not connected to NATS"))?;
 
         let subscriber = connection
@@ -110,8 +114,15 @@ impl NatsClient {
     }
 
     /// Request-reply pattern
-    pub async fn request(&self, subject: &str, payload: Vec<u8>, timeout: Duration) -> Result<Option<Vec<u8>>> {
-        let connection = self.connection.as_ref()
+    pub async fn request(
+        &self,
+        subject: &str,
+        payload: Vec<u8>,
+        timeout: Duration,
+    ) -> Result<Option<Vec<u8>>> {
+        let connection = self
+            .connection
+            .as_ref()
             .ok_or_else(|| anyhow!("Not connected to NATS"))?;
 
         let result = tokio::time::timeout(

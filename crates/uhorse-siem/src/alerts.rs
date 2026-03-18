@@ -2,7 +2,7 @@
 //!
 //! 安全告警管理
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -135,20 +135,14 @@ impl AlertCondition {
             AlertCondition::Always => true,
             AlertCondition::ResultEquals(result) => event.result == *result,
             AlertCondition::ActorEquals(actor) => event.actor == *actor,
-            AlertCondition::ResourceMatches(pattern) => {
-                event.resource.contains(pattern)
-            }
+            AlertCondition::ResourceMatches(pattern) => event.resource.contains(pattern),
             AlertCondition::ActionEquals(action) => event.action == *action,
             AlertCondition::Custom(_) => {
                 // 简化实现，实际应解析并执行表达式
                 true
             }
-            AlertCondition::And(conditions) => {
-                conditions.iter().all(|c| c.evaluate(event))
-            }
-            AlertCondition::Or(conditions) => {
-                conditions.iter().any(|c| c.evaluate(event))
-            }
+            AlertCondition::And(conditions) => conditions.iter().all(|c| c.evaluate(event)),
+            AlertCondition::Or(conditions) => conditions.iter().any(|c| c.evaluate(event)),
             AlertCondition::Not(condition) => !condition.evaluate(event),
         }
     }
@@ -239,7 +233,9 @@ impl AlertManager {
             }
 
             // 更新事件计数器
-            let should_alert = self.update_counter(rule_id, event.timestamp, rule.window_secs).await;
+            let should_alert = self
+                .update_counter(rule_id, event.timestamp, rule.window_secs)
+                .await;
 
             if should_alert && self.check_threshold(rule_id, rule.threshold).await {
                 // 创建告警
@@ -264,7 +260,8 @@ impl AlertManager {
                 triggered_alerts.push(alert.clone());
 
                 // 发送通知
-                self.send_notifications(&alert, &rule.notification_channels).await;
+                self.send_notifications(&alert, &rule.notification_channels)
+                    .await;
             }
         }
 
@@ -272,7 +269,12 @@ impl AlertManager {
     }
 
     /// 更新计数器
-    async fn update_counter(&self, rule_id: &str, timestamp: DateTime<Utc>, window_secs: u64) -> bool {
+    async fn update_counter(
+        &self,
+        rule_id: &str,
+        timestamp: DateTime<Utc>,
+        window_secs: u64,
+    ) -> bool {
         let mut counters = self.event_counters.write().await;
         let counter = counters.entry(rule_id.to_string()).or_insert_with(Vec::new);
 
@@ -301,10 +303,7 @@ impl AlertManager {
         for channel in channels {
             warn!(
                 "Alert notification [{}] {}: {} - {}",
-                alert.severity,
-                alert.rule_name,
-                alert.id,
-                channel
+                alert.severity, alert.rule_name, alert.id, channel
             );
             // 实际实现应发送到对应渠道 (email/slack/pagerduty 等)
         }
@@ -320,7 +319,10 @@ impl AlertManager {
             alert.acknowledged_at = Some(Utc::now());
             Ok(())
         } else {
-            Err(crate::SiemError::AlertError(format!("Alert not found: {}", alert_id)))
+            Err(crate::SiemError::AlertError(format!(
+                "Alert not found: {}",
+                alert_id
+            )))
         }
     }
 
@@ -333,7 +335,10 @@ impl AlertManager {
             alert.notes = notes.map(|n| n.to_string());
             Ok(())
         } else {
-            Err(crate::SiemError::AlertError(format!("Alert not found: {}", alert_id)))
+            Err(crate::SiemError::AlertError(format!(
+                "Alert not found: {}",
+                alert_id
+            )))
         }
     }
 
@@ -427,7 +432,8 @@ mod tests {
             "user-123",
             "/auth/login",
             "login",
-        ).with_result("failure");
+        )
+        .with_result("failure");
 
         let condition = AlertCondition::ResultEquals("failure".to_string());
         assert!(condition.evaluate(&event));
@@ -444,7 +450,8 @@ mod tests {
             "user-123",
             "/auth/login",
             "login",
-        ).with_result("failure");
+        )
+        .with_result("failure");
 
         let condition = AlertCondition::And(vec![
             AlertCondition::ResultEquals("failure".to_string()),
@@ -481,7 +488,8 @@ mod tests {
             "user-123",
             "/auth/login",
             "login",
-        ).with_result("failure");
+        )
+        .with_result("failure");
 
         let alerts = manager.process_event(&event).await;
         assert_eq!(alerts.len(), 1);

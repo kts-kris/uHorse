@@ -156,7 +156,8 @@ impl<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static> DeadLetter
     pub async fn stats(&self) -> DeadLetterStats {
         let entries = self.entries.read().await;
         let total_count = entries.len();
-        let mut by_type: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut by_type: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for e in entries.iter() {
             *by_type.entry(e.task.task_type.clone()).or_insert(0) += 1;
         }
@@ -184,9 +185,7 @@ impl<T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static> DeadLetter
         let retention_ms = self.config.retention.as_millis() as u64;
         let initial_len = entries.len();
 
-        entries.retain(|e| {
-            now.saturating_sub(e.dead_lettered_at) < retention_ms
-        });
+        entries.retain(|e| now.saturating_sub(e.dead_lettered_at) < retention_ms);
 
         let purged = initial_len - entries.len();
         if purged > 0 {

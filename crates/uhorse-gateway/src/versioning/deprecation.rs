@@ -64,10 +64,7 @@ impl DeprecationInfo {
 
     /// 获取废弃头信息
     pub fn to_header(&self) -> DeprecationHeader {
-        let mut header = DeprecationHeader::new(
-            self.deprecated_at,
-            self.removal_date,
-        );
+        let mut header = DeprecationHeader::new(self.deprecated_at, self.removal_date);
 
         if let Some(ref replacement) = self.replacement {
             header = header.with_replacement(replacement.clone());
@@ -190,12 +187,17 @@ impl DeprecationManager {
 
     /// 检查端点是否已移除
     pub fn is_removed(&self, path: &str) -> bool {
-        self.deprecations.get(path).map(|d| d.is_expired()).unwrap_or(false)
+        self.deprecations
+            .get(path)
+            .map(|d| d.is_expired())
+            .unwrap_or(false)
     }
 
     /// 获取废弃头
     pub fn get_headers(&self, path: &str) -> Option<Vec<(String, String)>> {
-        self.deprecations.get(path).map(|d| d.to_header().to_headers())
+        self.deprecations
+            .get(path)
+            .map(|d| d.to_header().to_headers())
     }
 
     /// 列出所有废弃端点
@@ -205,7 +207,10 @@ impl DeprecationManager {
 
     /// 列出已过期端点
     pub fn list_expired(&self) -> Vec<&DeprecationInfo> {
-        self.deprecations.values().filter(|d| d.is_expired()).collect()
+        self.deprecations
+            .values()
+            .filter(|d| d.is_expired())
+            .collect()
     }
 
     /// 列出即将移除的端点 (30 天内)
@@ -256,8 +261,7 @@ mod tests {
         let now = Utc::now();
         let removal = now + chrono::Duration::days(90);
 
-        let header = DeprecationHeader::new(now, removal)
-            .with_replacement("/api/v2/endpoint");
+        let header = DeprecationHeader::new(now, removal).with_replacement("/api/v2/endpoint");
 
         let headers = header.to_headers();
         assert!(headers.iter().any(|(k, _)| k == "Deprecation"));
@@ -271,9 +275,7 @@ mod tests {
         let now = Utc::now();
         let removal = now + chrono::Duration::days(90);
 
-        manager.add(
-            DeprecationInfo::new("/api/v1/old", now, removal)
-        );
+        manager.add(DeprecationInfo::new("/api/v1/old", now, removal));
 
         assert!(manager.is_deprecated("/api/v1/old"));
         assert!(!manager.is_removed("/api/v1/old"));

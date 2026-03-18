@@ -237,7 +237,10 @@ impl TaskScheduler {
     }
 
     /// 调度下一个任务
-    pub async fn schedule_next(&self, sender: &mpsc::Sender<HubToNode>) -> HubResult<Option<ScheduledTask>> {
+    pub async fn schedule_next(
+        &self,
+        sender: &mpsc::Sender<HubToNode>,
+    ) -> HubResult<Option<ScheduledTask>> {
         let priorities = [
             Priority::Critical,
             Priority::Urgent,
@@ -278,7 +281,9 @@ impl TaskScheduler {
                         task_id: task.task_id.clone(),
                         command: task.command.clone(),
                         priority: task.priority,
-                        deadline: Some(Utc::now() + chrono::Duration::seconds(self.task_timeout_secs as i64)),
+                        deadline: Some(
+                            Utc::now() + chrono::Duration::seconds(self.task_timeout_secs as i64),
+                        ),
                         context: uhorse_protocol::TaskContext {
                             user_id: task.context.user_id.clone(),
                             session_id: task.context.session_id.clone(),
@@ -291,7 +296,11 @@ impl TaskScheduler {
                         max_retries: task.max_retries,
                     };
 
-                    if let Err(e) = self.node_manager.send_to_node(&node.node_id, assignment, sender).await {
+                    if let Err(e) = self
+                        .node_manager
+                        .send_to_node(&node.node_id, assignment, sender)
+                        .await
+                    {
                         warn!("Failed to send task to node: {}", e);
 
                         // 如果发送失败，将任务放回队列
@@ -313,7 +322,8 @@ impl TaskScheduler {
                         context: task.context,
                         node_id: node.node_id.clone(),
                         started_at: Utc::now(),
-                        timeout_at: Utc::now() + chrono::Duration::seconds(self.task_timeout_secs as i64),
+                        timeout_at: Utc::now()
+                            + chrono::Duration::seconds(self.task_timeout_secs as i64),
                         retry_count: task.retry_count,
                     };
 
@@ -376,7 +386,11 @@ impl TaskScheduler {
                     let tasks: Vec<_> = completed_tasks.iter().collect();
                     let mut sorted_tasks: Vec<_> = tasks.into_iter().collect();
                     sorted_tasks.sort_by_key(|(_, t)| t.completed_at);
-                    let ids_to_remove: Vec<_> = sorted_tasks.iter().take(250).map(|(id, _)| (*id).clone()).collect();
+                    let ids_to_remove: Vec<_> = sorted_tasks
+                        .iter()
+                        .take(250)
+                        .map(|(id, _)| (*id).clone())
+                        .collect();
                     for id in ids_to_remove {
                         completed_tasks.remove(&id);
                     }

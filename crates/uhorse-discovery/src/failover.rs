@@ -148,10 +148,7 @@ pub struct FailoverRecord {
 
 impl FailoverRecord {
     /// 创建新的故障转移记录
-    pub fn new(
-        service_name: impl Into<String>,
-        source_instance_id: impl Into<String>,
-    ) -> Self {
+    pub fn new(service_name: impl Into<String>, source_instance_id: impl Into<String>) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             service_name: service_name.into(),
@@ -429,15 +426,14 @@ mod tests {
     #[tokio::test]
     async fn test_detect_failure() {
         let manager = FailoverManager::default();
-        let instance = ServiceInstance::new(
-            "instance-1",
-            "test-service",
-            "127.0.0.1",
-            8080,
-        );
+        let instance = ServiceInstance::new("instance-1", "test-service", "127.0.0.1", 8080);
 
         let record = manager
-            .detect_failure(&instance, FailureType::ConnectionTimeout, "Connection timed out")
+            .detect_failure(
+                &instance,
+                FailureType::ConnectionTimeout,
+                "Connection timed out",
+            )
             .await
             .unwrap();
 

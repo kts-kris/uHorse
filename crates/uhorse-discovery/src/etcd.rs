@@ -49,14 +49,18 @@ impl EtcdClient {
 
     /// Parse a service instance from etcd key-value
     fn parse_instance(kv: &etcd_client::KeyValue) -> Result<ServiceInstance> {
-                let value = kv.value_str()?;
-                serde_json::from_str(value).map_err(Error::from)
-            }
+        let value = kv.value_str()?;
+        serde_json::from_str(value).map_err(Error::from)
+    }
 }
 
 #[async_trait]
 impl ServiceRegistry for EtcdClient {
-    async fn register(&self, instance: &ServiceInstance, options: &RegistrationOptions) -> Result<()> {
+    async fn register(
+        &self,
+        instance: &ServiceInstance,
+        options: &RegistrationOptions,
+    ) -> Result<()> {
         let key = Self::service_key(&instance.name, &instance.id);
         let value = serde_json::to_string(instance)?;
 
@@ -86,7 +90,11 @@ impl ServiceRegistry for EtcdClient {
         let mut client = self.client.lock().await;
         client.delete(key, None).await?;
 
-        tracing::info!("Deregistered service {} instance {}", service_name, instance_id);
+        tracing::info!(
+            "Deregistered service {} instance {}",
+            service_name,
+            instance_id
+        );
 
         Ok(())
     }
@@ -102,12 +110,20 @@ impl ServiceRegistry for EtcdClient {
             .filter_map(|kv| Self::parse_instance(kv).ok())
             .collect();
 
-        tracing::debug!("Discovered {} instances for service {}", instances.len(), service_name);
+        tracing::debug!(
+            "Discovered {} instances for service {}",
+            instances.len(),
+            service_name
+        );
 
         Ok(instances)
     }
 
-    async fn discover_instance(&self, service_name: &str, instance_id: &str) -> Result<Option<ServiceInstance>> {
+    async fn discover_instance(
+        &self,
+        service_name: &str,
+        instance_id: &str,
+    ) -> Result<Option<ServiceInstance>> {
         let key = Self::service_key(service_name, instance_id);
         let mut client = self.client.lock().await;
         let response = client.get(key.as_str(), None).await?;
@@ -156,7 +172,11 @@ impl ServiceRegistry for EtcdClient {
             let mut lease_client = client.lease_client();
             lease_client.keep_alive(lease_id).await?;
 
-            tracing::debug!("Heartbeat sent for {} instance {}", service_name, instance_id);
+            tracing::debug!(
+                "Heartbeat sent for {} instance {}",
+                service_name,
+                instance_id
+            );
         } else {
             return Err(Error::ServiceNotFound(format!(
                 "{}/{}",

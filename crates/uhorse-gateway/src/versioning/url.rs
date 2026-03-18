@@ -20,7 +20,11 @@ pub struct ApiVersion {
 impl ApiVersion {
     /// 创建新版本
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     /// v1 版本
@@ -40,18 +44,30 @@ impl ApiVersion {
         let parts: Vec<&str> = s.split('.').collect();
         match parts.len() {
             1 => {
-                let major: u32 = parts[0].parse().map_err(|_| VersionParseError::InvalidFormat)?;
+                let major: u32 = parts[0]
+                    .parse()
+                    .map_err(|_| VersionParseError::InvalidFormat)?;
                 Ok(Self::new(major, 0, 0))
             }
             2 => {
-                let major: u32 = parts[0].parse().map_err(|_| VersionParseError::InvalidFormat)?;
-                let minor: u32 = parts[1].parse().map_err(|_| VersionParseError::InvalidFormat)?;
+                let major: u32 = parts[0]
+                    .parse()
+                    .map_err(|_| VersionParseError::InvalidFormat)?;
+                let minor: u32 = parts[1]
+                    .parse()
+                    .map_err(|_| VersionParseError::InvalidFormat)?;
                 Ok(Self::new(major, minor, 0))
             }
             3 => {
-                let major: u32 = parts[0].parse().map_err(|_| VersionParseError::InvalidFormat)?;
-                let minor: u32 = parts[1].parse().map_err(|_| VersionParseError::InvalidFormat)?;
-                let patch: u32 = parts[2].parse().map_err(|_| VersionParseError::InvalidFormat)?;
+                let major: u32 = parts[0]
+                    .parse()
+                    .map_err(|_| VersionParseError::InvalidFormat)?;
+                let minor: u32 = parts[1]
+                    .parse()
+                    .map_err(|_| VersionParseError::InvalidFormat)?;
+                let patch: u32 = parts[2]
+                    .parse()
+                    .map_err(|_| VersionParseError::InvalidFormat)?;
                 Ok(Self::new(major, minor, patch))
             }
             _ => Err(VersionParseError::InvalidFormat),
@@ -149,7 +165,11 @@ impl VersionedPath {
 
     /// 转换为完整 URL 路径
     pub fn to_url(&self) -> String {
-        format!("/api/{}/{}", self.version.to_path(), self.path.trim_start_matches('/'))
+        format!(
+            "/api/{}/{}",
+            self.version.to_path(),
+            self.path.trim_start_matches('/')
+        )
     }
 }
 
@@ -172,10 +192,7 @@ impl VersionParser {
 
     /// 创建默认解析器 (支持 v1 和 v2)
     pub fn default_parser() -> Self {
-        Self::new(
-            vec![ApiVersion::v1(), ApiVersion::v2()],
-            ApiVersion::v1(),
-        )
+        Self::new(vec![ApiVersion::v1(), ApiVersion::v2()], ApiVersion::v1())
     }
 
     /// 解析请求路径中的版本
@@ -185,7 +202,9 @@ impl VersionParser {
 
     /// 检查版本是否支持
     pub fn is_version_supported(&self, version: &ApiVersion) -> bool {
-        self.supported_versions.iter().any(|v| v.major == version.major)
+        self.supported_versions
+            .iter()
+            .any(|v| v.major == version.major)
     }
 
     /// 获取默认版本

@@ -23,9 +23,7 @@ pub use distributed::{
 pub use hot_reload::{
     ConfigChangeEvent, ConfigReloader, HotReloadBuilder, HotReloadManager, ReloadableConfig,
 };
-pub use versioning::{
-    ConfigDiff, ConfigHistory, ConfigRollback, ConfigVersion, DiffLine,
-};
+pub use versioning::{ConfigDiff, ConfigHistory, ConfigRollback, ConfigVersion, DiffLine};
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

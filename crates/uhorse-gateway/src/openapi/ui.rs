@@ -248,8 +248,7 @@ pub fn generate_redoc_html(api_url: &str) -> String {
 
 /// 创建文档路由器
 pub fn create_docs_router(openapi_json: String) -> Router {
-    let swagger = SwaggerUi::default()
-        .with_openapi(openapi_json.clone());
+    let swagger = SwaggerUi::default().with_openapi(openapi_json.clone());
 
     let openapi_json = Arc::new(openapi_json);
     let redoc_json = openapi_json.clone();
@@ -276,9 +275,7 @@ pub fn create_docs_router(openapi_json: String) -> Router {
         // ReDoc
         .route(
             "/redoc",
-            get(move || {
-                async move { Html(generate_redoc_html("/openapi.json")) }
-            }),
+            get(move || async move { Html(generate_redoc_html("/openapi.json")) }),
         )
 }
 

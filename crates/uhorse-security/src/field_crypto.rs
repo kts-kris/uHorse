@@ -37,7 +37,10 @@ impl EncryptionKey {
             .map_err(|e| anyhow!("Failed to decode base64 key: {}", e))?;
 
         if bytes.len() != 32 {
-            return Err(anyhow!("Invalid key length: expected 32 bytes, got {}", bytes.len()));
+            return Err(anyhow!(
+                "Invalid key length: expected 32 bytes, got {}",
+                bytes.len()
+            ));
         }
 
         let mut key = [0u8; 32];
@@ -191,7 +194,10 @@ impl FieldEncryptor {
 
     /// Encrypt a value
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<EncryptedField> {
-        let key_manager = self.key_manager.read().map_err(|e| anyhow!("Lock error: {}", e))?;
+        let key_manager = self
+            .key_manager
+            .read()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         let key = key_manager.primary_key();
         let key_id = key_manager.primary_key_id().clone();
 
@@ -218,14 +224,17 @@ impl FieldEncryptor {
 
     /// Encrypt a JSON-serializable value
     pub fn encrypt_json<T: Serialize>(&self, value: &T) -> Result<EncryptedField> {
-        let json = serde_json::to_vec(value)
-            .map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
+        let json =
+            serde_json::to_vec(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
         self.encrypt(&json)
     }
 
     /// Decrypt a value
     pub fn decrypt(&self, encrypted: &EncryptedField) -> Result<Vec<u8>> {
-        let key_manager = self.key_manager.read().map_err(|e| anyhow!("Lock error: {}", e))?;
+        let key_manager = self
+            .key_manager
+            .read()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         let key = key_manager
             .get_key(&encrypted.key_id)
             .ok_or_else(|| anyhow!("Key not found: {}", encrypted.key_id))?;
@@ -252,7 +261,10 @@ impl FieldEncryptor {
 
     /// Rotate encryption key
     pub fn rotate_key(&self, new_key: EncryptionKey) -> Result<KeyId> {
-        let mut key_manager = self.key_manager.write().map_err(|e| anyhow!("Lock error: {}", e))?;
+        let mut key_manager = self
+            .key_manager
+            .write()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         Ok(key_manager.rotate(new_key))
     }
 }
@@ -307,7 +319,9 @@ impl EncryptedField {
 }
 
 /// Data classification levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum DataClassification {
     /// Public data - no encryption required
     Public,

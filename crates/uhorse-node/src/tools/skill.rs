@@ -133,10 +133,15 @@ impl SkillExecutor {
 
     /// 执行技能
     pub async fn execute(&self, cmd: &SkillCommand) -> NodeResult<CommandOutput> {
-        info!("Executing skill: {} (version: {:?})", cmd.skill_name, cmd.version);
+        info!(
+            "Executing skill: {} (version: {:?})",
+            cmd.skill_name, cmd.version
+        );
 
         // 查找技能
-        let skill = self.find_skill(&cmd.skill_name, cmd.version.as_deref()).await?;
+        let skill = self
+            .find_skill(&cmd.skill_name, cmd.version.as_deref())
+            .await?;
 
         // 验证输入
         if let Some(schema) = &skill.input_schema {
@@ -165,11 +170,7 @@ impl SkillExecutor {
     }
 
     /// 查找技能
-    async fn find_skill(
-        &self,
-        name: &str,
-        version: Option<&str>,
-    ) -> NodeResult<SkillDefinition> {
+    async fn find_skill(&self, name: &str, version: Option<&str>) -> NodeResult<SkillDefinition> {
         let skills = self.skills.read().await;
 
         // 如果指定了版本，精确匹配
@@ -192,10 +193,7 @@ impl SkillExecutor {
             }
         }
 
-        Err(NodeError::Execution(format!(
-            "Skill '{}' not found",
-            name
-        )))
+        Err(NodeError::Execution(format!("Skill '{}' not found", name)))
     }
 
     /// 验证输入
@@ -272,9 +270,8 @@ impl SkillExecutor {
 
         if output.status.success() {
             // 解析输出
-            let output_value = serde_json::from_str(&stdout).unwrap_or_else(|_| {
-                serde_json::json!({ "raw_output": stdout })
-            });
+            let output_value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| serde_json::json!({ "raw_output": stdout }));
 
             Ok(SkillResult {
                 skill_name: skill.name.clone(),
@@ -301,14 +298,12 @@ impl SkillExecutor {
         }
 
         let mut count = 0;
-        let entries = std::fs::read_dir(dir).map_err(|e| {
-            NodeError::Execution(format!("Failed to read skill directory: {}", e))
-        })?;
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| NodeError::Execution(format!("Failed to read skill directory: {}", e)))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| {
-                NodeError::Execution(format!("Failed to read entry: {}", e))
-            })?;
+            let entry =
+                entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let path = entry.path();
             if path.is_dir() {
@@ -339,9 +334,8 @@ impl SkillExecutor {
 
     /// 从 SKILL.md 解析技能定义
     async fn parse_skill_md(&self, path: &PathBuf) -> NodeResult<Option<SkillDefinition>> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            NodeError::Execution(format!("Failed to read SKILL.md: {}", e))
-        })?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| NodeError::Execution(format!("Failed to read SKILL.md: {}", e)))?;
 
         // 简单解析 SKILL.md 格式
         let mut name = String::new();

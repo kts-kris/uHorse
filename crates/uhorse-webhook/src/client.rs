@@ -12,7 +12,7 @@ use tracing::{info, warn};
 
 use crate::history::{WebhookHistory, WebhookRecord, WebhookStatus};
 use crate::retry::{RetryPolicy, RetryableError};
-use crate::signature::{SigningConfig, SignatureVerifier};
+use crate::signature::{SignatureVerifier, SigningConfig};
 use crate::template::{TemplateEngine, WebhookTemplate};
 
 /// Webhook 配置
@@ -245,8 +245,14 @@ impl WebhookClient {
         if let Some(ref template) = config.template {
             // 使用模板
             let mut variables = HashMap::new();
-            variables.insert("event_type".to_string(), serde_json::json!(event.event_type));
-            variables.insert("timestamp".to_string(), serde_json::json!(event.timestamp.to_rfc3339()));
+            variables.insert(
+                "event_type".to_string(),
+                serde_json::json!(event.event_type),
+            );
+            variables.insert(
+                "timestamp".to_string(),
+                serde_json::json!(event.timestamp.to_rfc3339()),
+            );
             variables.insert("data".to_string(), event.data.clone());
             variables.insert("tenant_id".to_string(), serde_json::json!(event.tenant_id));
 
@@ -318,7 +324,10 @@ impl WebhookClient {
                     let retryable = if error.is_timeout() || error.is_connect() {
                         true
                     } else if let Some(status) = error.status() {
-                        config.retry_policy.retryable_status_codes.contains(&status.as_u16())
+                        config
+                            .retry_policy
+                            .retryable_status_codes
+                            .contains(&status.as_u16())
                     } else {
                         false
                     };
@@ -378,11 +387,7 @@ mod tests {
 
     #[test]
     fn test_webhook_event() {
-        let event = WebhookEvent::new(
-            "user.created",
-            json!({"user_id": "123"}),
-            "tenant-001",
-        );
+        let event = WebhookEvent::new("user.created", json!({"user_id": "123"}), "tenant-001");
 
         assert_eq!(event.event_type, "user.created");
         assert_eq!(event.tenant_id, "tenant-001");
@@ -393,8 +398,7 @@ mod tests {
 
     #[test]
     fn test_webhook_config_with_signing() {
-        let config = WebhookConfig::new("https://example.com/webhook")
-            .with_signing("my-secret");
+        let config = WebhookConfig::new("https://example.com/webhook").with_signing("my-secret");
 
         assert!(config.signing_config.is_some());
     }

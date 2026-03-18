@@ -5,19 +5,15 @@
 //! - 通信加密
 //! - 敏感操作保护
 
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
-use uhorse_security::{
-    ApprovalLevel, ApprovalManager, ApprovalStatus,
-    JwtAuthService, TokenPair,
-    FieldEncryptor, EncryptionKey, EncryptedField,
-    TlsConfig,
-    IdempotencyCache,
-    approval::Approver,
-};
 use uhorse_protocol::NodeId;
+use uhorse_security::{
+    approval::Approver, ApprovalLevel, ApprovalManager, ApprovalStatus, EncryptedField,
+    EncryptionKey, FieldEncryptor, IdempotencyCache, JwtAuthService, TlsConfig, TokenPair,
+};
 
 use crate::error::{HubError, HubResult};
 
@@ -52,7 +48,9 @@ impl NodeAuthenticator {
     pub fn new(jwt_service: Arc<JwtAuthService>) -> Self {
         Self {
             jwt_service,
-            authenticated_nodes: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            authenticated_nodes: Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 
@@ -63,14 +61,23 @@ impl NodeAuthenticator {
     }
 
     /// 认证节点
-    pub async fn authenticate_node(&self, node_id: &NodeId, credentials: &str) -> HubResult<NodeAuthInfo> {
+    pub async fn authenticate_node(
+        &self,
+        node_id: &NodeId,
+        credentials: &str,
+    ) -> HubResult<NodeAuthInfo> {
         if credentials.is_empty() {
             return Err(HubError::Permission("Empty credentials".to_string()));
         }
 
         // 生成令牌对
-        let token_pair = self.jwt_service
-            .create_token_pair(None, Some(node_id.as_str().to_string()), vec!["node".to_string()])
+        let token_pair = self
+            .jwt_service
+            .create_token_pair(
+                None,
+                Some(node_id.as_str().to_string()),
+                vec!["node".to_string()],
+            )
             .await
             .map_err(|e| HubError::Permission(format!("Token generation failed: {}", e)))?;
 
@@ -94,20 +101,23 @@ impl NodeAuthenticator {
 
     /// 验证节点令牌
     pub async fn verify_token(&self, token: &str) -> HubResult<NodeId> {
-        let access_token = self.jwt_service
+        let access_token = self
+            .jwt_service
             .verify_with_auto_refresh(token)
             .await
             .map_err(|e| HubError::Permission(format!("Token verification failed: {}", e)))?;
 
         // 使用 user_id 作为节点标识
-        let node_id = access_token.user_id
+        let node_id = access_token
+            .user_id
             .unwrap_or_else(|| "unknown".to_string());
         Ok(NodeId::from_string(node_id))
     }
 
     /// 刷新令牌
     pub async fn refresh_token(&self, refresh_token: &str) -> HubResult<TokenPair> {
-        let token_pair = self.jwt_service
+        let token_pair = self
+            .jwt_service
             .refresh_access_token(refresh_token)
             .await
             .map_err(|e| HubError::Permission(format!("Token refresh failed: {}", e)))?;
@@ -163,15 +173,14 @@ impl SensitiveOperationApprover {
         approval_level: ApprovalLevel,
         context: serde_json::Value,
     ) -> HubResult<String> {
-        let approvers = vec![
-            Approver {
-                user_id: "hub-admin".to_string(),
-                name: "Hub Administrator".to_string(),
-                role: "admin".to_string(),
-            },
-        ];
+        let approvers = vec![Approver {
+            user_id: "hub-admin".to_string(),
+            name: "Hub Administrator".to_string(),
+            role: "admin".to_string(),
+        }];
 
-        let request = self.approval_manager
+        let request = self
+            .approval_manager
             .create_request(
                 operation.to_string(),
                 node_id.as_str().to_string(),
@@ -182,7 +191,10 @@ impl SensitiveOperationApprover {
             .await
             .map_err(|e| HubError::Permission(format!("Failed to create approval: {}", e)))?;
 
-        info!("Approval request {} created for operation {}", request.id, operation);
+        info!(
+            "Approval request {} created for operation {}",
+            request.id, operation
+        );
         Ok(request.id)
     }
 
@@ -190,25 +202,41 @@ impl SensitiveOperationApprover {
     pub fn requires_approval(&self, operation: &str) -> bool {
         matches!(
             operation,
-            "file_delete" | "system_command" | "network_access" | "credential_access" | "config_change"
+            "file_delete"
+                | "system_command"
+                | "network_access"
+                | "credential_access"
+                | "config_change"
         )
     }
 
     /// 获取审批状态
     pub async fn get_approval_status(&self, request_id: &str) -> HubResult<ApprovalStatus> {
-        let request = self.approval_manager
+        let request = self
+            .approval_manager
             .get_request(request_id)
             .await
             .map_err(|e| HubError::Permission(format!("Failed to get approval: {}", e)))?
-            .ok_or_else(|| HubError::Permission(format!("Approval request {} not found", request_id)))?;
+            .ok_or_else(|| {
+                HubError::Permission(format!("Approval request {} not found", request_id))
+            })?;
 
         Ok(request.status)
     }
 
     /// 批准操作
-    pub async fn approve(&self, request_id: &str, approver: &str, comment: Option<&str>) -> HubResult<()> {
+    pub async fn approve(
+        &self,
+        request_id: &str,
+        approver: &str,
+        comment: Option<&str>,
+    ) -> HubResult<()> {
         self.approval_manager
-            .approve_request(request_id, approver.to_string(), comment.map(|s| s.to_string()))
+            .approve_request(
+                request_id,
+                approver.to_string(),
+                comment.map(|s| s.to_string()),
+            )
             .await
             .map_err(|e| HubError::Permission(format!("Failed to approve: {}", e)))?;
 
@@ -217,9 +245,18 @@ impl SensitiveOperationApprover {
     }
 
     /// 拒绝操作
-    pub async fn reject(&self, request_id: &str, rejecter: &str, comment: Option<&str>) -> HubResult<()> {
+    pub async fn reject(
+        &self,
+        request_id: &str,
+        rejecter: &str,
+        comment: Option<&str>,
+    ) -> HubResult<()> {
         self.approval_manager
-            .reject_request(request_id, rejecter.to_string(), comment.map(|s| s.to_string()))
+            .reject_request(
+                request_id,
+                rejecter.to_string(),
+                comment.map(|s| s.to_string()),
+            )
             .await
             .map_err(|e| HubError::Permission(format!("Failed to reject: {}", e)))?;
 
@@ -231,7 +268,8 @@ impl SensitiveOperationApprover {
     pub async fn check_idempotency(&self, operation_id: &str, ttl_seconds: u64) -> HubResult<bool> {
         use uhorse_core::IdempotencyService;
 
-        let result = self.idempotency_cache
+        let result = self
+            .idempotency_cache
             .check_or_record(operation_id, ttl_seconds)
             .await
             .map_err(|e| HubError::Internal(format!("Idempotency check failed: {}", e)))?;
@@ -256,7 +294,9 @@ impl SensitiveOperationApprover {
         self.idempotency_cache
             .store_response(operation_id, response, ttl_seconds)
             .await
-            .map_err(|e| HubError::Internal(format!("Failed to store idempotency response: {}", e)))?;
+            .map_err(|e| {
+                HubError::Internal(format!("Failed to store idempotency response: {}", e))
+            })?;
 
         Ok(())
     }
@@ -264,8 +304,7 @@ impl SensitiveOperationApprover {
 
 impl std::fmt::Debug for SensitiveOperationApprover {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SensitiveOperationApprover")
-            .finish()
+        f.debug_struct("SensitiveOperationApprover").finish()
     }
 }
 
@@ -334,7 +373,10 @@ impl HubFieldEncryptor {
     }
 
     /// 解密 JSON 数据
-    pub fn decrypt_json<T: for<'de> Deserialize<'de>>(&self, encrypted: &EncryptedField) -> HubResult<T> {
+    pub fn decrypt_json<T: for<'de> Deserialize<'de>>(
+        &self,
+        encrypted: &EncryptedField,
+    ) -> HubResult<T> {
         self.encryptor
             .decrypt_json(encrypted)
             .map_err(|e| HubError::Internal(format!("JSON decryption failed: {}", e)))
@@ -343,8 +385,7 @@ impl HubFieldEncryptor {
 
 impl std::fmt::Debug for HubFieldEncryptor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HubFieldEncryptor")
-            .finish()
+        f.debug_struct("HubFieldEncryptor").finish()
     }
 }
 
@@ -364,10 +405,7 @@ pub struct SecurityManager {
 
 impl SecurityManager {
     /// 创建新的安全管理器
-    pub fn new(
-        jwt_secret: &str,
-        approval_manager: Arc<ApprovalManager>,
-    ) -> HubResult<Self> {
+    pub fn new(jwt_secret: &str, approval_manager: Arc<ApprovalManager>) -> HubResult<Self> {
         let node_authenticator = NodeAuthenticator::with_secret(jwt_secret)?;
         let operation_approver = SensitiveOperationApprover::new(approval_manager);
 

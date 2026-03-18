@@ -5,16 +5,16 @@
 //! - 任务规划
 //! - 结果汇总
 
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uhorse_agent::SkillRegistry;
-use uhorse_protocol::{Command, TaskContext, TaskId, NodeId, Priority, ShellCommand};
+use uhorse_protocol::{Command, NodeId, Priority, ShellCommand, TaskContext, TaskId};
 
 use crate::error::{HubError, HubResult};
-use crate::task_scheduler::TaskScheduler;
 use crate::node_manager::NodeManager;
+use crate::task_scheduler::TaskScheduler;
 
 /// 编排计划
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,10 +107,7 @@ impl Orchestrator {
     }
 
     /// 创建默认编排器
-    pub fn create(
-        task_scheduler: Arc<TaskScheduler>,
-        node_manager: Arc<NodeManager>,
-    ) -> Self {
+    pub fn create(task_scheduler: Arc<TaskScheduler>, node_manager: Arc<NodeManager>) -> Self {
         let skill_registry = Arc::new(SkillRegistry::new());
         Self::new(skill_registry, task_scheduler, node_manager)
     }
@@ -126,7 +123,11 @@ impl Orchestrator {
         // 简化的意图理解：基于关键词识别
         let subtasks = self.parse_intent_to_subtasks(user_input, context)?;
 
-        info!("Orchestration plan {} created with {} subtasks", plan_id, subtasks.len());
+        info!(
+            "Orchestration plan {} created with {} subtasks",
+            plan_id,
+            subtasks.len()
+        );
 
         Ok(OrchestrationPlan {
             plan_id,
@@ -138,13 +139,20 @@ impl Orchestrator {
     }
 
     /// 解析意图为子任务
-    fn parse_intent_to_subtasks(&self, input: &str, _context: &TaskContext) -> HubResult<Vec<SubTask>> {
+    fn parse_intent_to_subtasks(
+        &self,
+        input: &str,
+        _context: &TaskContext,
+    ) -> HubResult<Vec<SubTask>> {
         let mut subtasks = Vec::new();
 
         // 基于关键词识别命令类型
         let lower_input = input.to_lowercase();
 
-        if lower_input.contains("run") || lower_input.contains("execute") || lower_input.contains("执行") {
+        if lower_input.contains("run")
+            || lower_input.contains("execute")
+            || lower_input.contains("执行")
+        {
             // Shell 命令
             subtasks.push(SubTask {
                 id: "subtask-0".to_string(),
@@ -201,18 +209,26 @@ impl Orchestrator {
             // 找出所有依赖已满足的子任务
             let ready: Vec<_> = remaining
                 .iter()
-                .filter(|st| st.dependencies.iter().all(|dep| completed_ids.contains(dep)))
+                .filter(|st| {
+                    st.dependencies
+                        .iter()
+                        .all(|dep| completed_ids.contains(dep))
+                })
                 .collect();
 
             if ready.is_empty() && !remaining.is_empty() {
-                warn!("Circular dependency or unmet dependencies in plan {}", plan.plan_id);
+                warn!(
+                    "Circular dependency or unmet dependencies in plan {}",
+                    plan.plan_id
+                );
                 break;
             }
 
             // 并行提交就绪的子任务
             let mut task_ids = Vec::new();
             for subtask in &ready {
-                let task_id = self.task_scheduler
+                let task_id = self
+                    .task_scheduler
                     .submit_task(
                         subtask.command.clone(),
                         context.clone(),
@@ -271,7 +287,9 @@ impl Orchestrator {
                     uhorse_protocol::TaskStatus::Completed => {
                         return Ok(TaskCompletion {
                             task_id: task_id.clone(),
-                            node_id: status.node_id.unwrap_or_else(|| NodeId::from_string("unknown")),
+                            node_id: status
+                                .node_id
+                                .unwrap_or_else(|| NodeId::from_string("unknown")),
                             success: true,
                             output: None,
                             error: status.error,
@@ -280,7 +298,9 @@ impl Orchestrator {
                     uhorse_protocol::TaskStatus::Failed => {
                         return Ok(TaskCompletion {
                             task_id: task_id.clone(),
-                            node_id: status.node_id.unwrap_or_else(|| NodeId::from_string("unknown")),
+                            node_id: status
+                                .node_id
+                                .unwrap_or_else(|| NodeId::from_string("unknown")),
                             success: false,
                             output: None,
                             error: status.error,
@@ -292,7 +312,10 @@ impl Orchestrator {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
-        Err(HubError::Timeout(format!("Task {} did not complete in time", task_id)))
+        Err(HubError::Timeout(format!(
+            "Task {} did not complete in time",
+            task_id
+        )))
     }
 
     /// 汇总结果

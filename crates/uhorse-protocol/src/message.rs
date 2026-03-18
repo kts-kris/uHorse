@@ -2,11 +2,7 @@
 //!
 //! 定义 Hub 和 Node 之间的通信消息格式
 
-use crate::{
-    types::*,
-    command::*,
-    result::*,
-};
+use crate::{command::*, result::*, types::*};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

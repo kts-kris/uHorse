@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info};
 
-use uhorse_hub::{Hub, HubConfig, WebState, create_router};
+use uhorse_hub::{create_router, Hub, HubConfig, WebState};
 
 /// uHorse Hub - 云端中枢
 #[derive(Parser, Debug)]
@@ -75,12 +75,13 @@ async fn main() -> anyhow::Result<()> {
     // 启动 Hub
     hub.start().await?;
 
-    info!("📡 Hub {} listening on {}:{}", config.hub_id, config.bind_address, config.port);
+    info!(
+        "📡 Hub {} listening on {}:{}",
+        config.hub_id, config.bind_address, config.port
+    );
 
     // 创建 Web 状态
-    let web_state = WebState {
-        hub: Arc::new(hub),
-    };
+    let web_state = WebState { hub: Arc::new(hub) };
 
     // 创建路由
     let app = create_router(web_state);
@@ -107,8 +108,7 @@ async fn main() -> anyhow::Result<()> {
 fn init_logging(level: &str) -> anyhow::Result<()> {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)

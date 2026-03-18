@@ -78,7 +78,11 @@ impl IdpConfig {
             userinfo_endpoint: Some(format!("https://{}/oauth2/v1/userinfo", domain)),
             jwks_uri: Some(format!("https://{}/oauth2/v1/keys", domain)),
             redirect_uri: redirect_uri.to_string(),
-            scopes: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
             extra_params: HashMap::new(),
         }
     }
@@ -95,13 +99,22 @@ impl IdpConfig {
             userinfo_endpoint: Some(format!("https://{}/userinfo", domain)),
             jwks_uri: Some(format!("https://{}/.well-known/jwks.json", domain)),
             redirect_uri: redirect_uri.to_string(),
-            scopes: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
             extra_params: HashMap::new(),
         }
     }
 
     /// 创建 Azure AD 配置
-    pub fn azure_ad(tenant_id: &str, client_id: &str, client_secret: &str, redirect_uri: &str) -> Self {
+    pub fn azure_ad(
+        tenant_id: &str,
+        client_id: &str,
+        client_secret: &str,
+        redirect_uri: &str,
+    ) -> Self {
         Self {
             idp_type: IdpType::AzureAd,
             client_id: client_id.to_string(),
@@ -121,7 +134,11 @@ impl IdpConfig {
                 tenant_id
             )),
             redirect_uri: redirect_uri.to_string(),
-            scopes: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
             extra_params: HashMap::new(),
         }
     }
@@ -133,12 +150,18 @@ impl IdpConfig {
             client_id: client_id.to_string(),
             client_secret: client_secret.to_string(),
             issuer_url: "https://accounts.google.com".to_string(),
-            authorization_endpoint: Some("https://accounts.google.com/o/oauth2/v2/auth".to_string()),
+            authorization_endpoint: Some(
+                "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+            ),
             token_endpoint: Some("https://oauth2.googleapis.com/token".to_string()),
             userinfo_endpoint: Some("https://openidconnect.googleapis.com/v1/userinfo".to_string()),
             jwks_uri: Some("https://www.googleapis.com/oauth2/v3/certs".to_string()),
             redirect_uri: redirect_uri.to_string(),
-            scopes: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
             extra_params: HashMap::new(),
         }
     }
@@ -160,7 +183,11 @@ impl IdpConfig {
 
         // 添加额外参数
         for (key, value) in &self.extra_params {
-            url.push_str(&format!("&{}={}", urlencoding::encode(key), urlencoding::encode(value)));
+            url.push_str(&format!(
+                "&{}={}",
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            ));
         }
 
         url
@@ -235,7 +262,10 @@ impl IdpClient {
             ("client_secret", &self.config.client_secret),
         ];
 
-        info!("Exchanging authorization code with {}", self.config.idp_type);
+        info!(
+            "Exchanging authorization code with {}",
+            self.config.idp_type
+        );
 
         let response = self
             .http_client
@@ -253,10 +283,9 @@ impl IdpClient {
             )));
         }
 
-        let token_response: IdpTokenResponse = response
-            .json()
-            .await
-            .map_err(|e| crate::SsoError::IdpError(format!("Failed to parse token response: {}", e)))?;
+        let token_response: IdpTokenResponse = response.json().await.map_err(|e| {
+            crate::SsoError::IdpError(format!("Failed to parse token response: {}", e))
+        })?;
 
         Ok(token_response)
     }
@@ -324,11 +353,15 @@ impl IdpClient {
             .map(|s| s.to_string());
 
         let groups = raw["groups"].as_array().map(|arr| {
-            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
         });
 
         let roles = raw["roles"].as_array().map(|arr| {
-            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
         });
 
         // 收集非标准字段为自定义属性
@@ -336,10 +369,22 @@ impl IdpClient {
             for (key, value) in map {
                 if !matches!(
                     key.as_str(),
-                    "sub" | "email" | "email_verified" | "name" | "given_name" |
-                    "family_name" | "picture" | "locale" | "organization_id" |
-                    "tenant_id" | "department" | "dept" | "title" | "job_title" |
-                    "groups" | "roles"
+                    "sub"
+                        | "email"
+                        | "email_verified"
+                        | "name"
+                        | "given_name"
+                        | "family_name"
+                        | "picture"
+                        | "locale"
+                        | "organization_id"
+                        | "tenant_id"
+                        | "department"
+                        | "dept"
+                        | "title"
+                        | "job_title"
+                        | "groups"
+                        | "roles"
                 ) {
                     custom_attributes.insert(key.clone(), value.clone());
                 }
@@ -391,10 +436,9 @@ impl IdpClient {
             )));
         }
 
-        let token_response: IdpTokenResponse = response
-            .json()
-            .await
-            .map_err(|e| crate::SsoError::IdpError(format!("Failed to parse token response: {}", e)))?;
+        let token_response: IdpTokenResponse = response.json().await.map_err(|e| {
+            crate::SsoError::IdpError(format!("Failed to parse token response: {}", e))
+        })?;
 
         Ok(token_response)
     }
@@ -512,11 +556,8 @@ mod tests {
 
     #[test]
     fn test_google_workspace_config() {
-        let config = IdpConfig::google_workspace(
-            "client-123",
-            "secret-456",
-            "https://myapp.com/callback",
-        );
+        let config =
+            IdpConfig::google_workspace("client-123", "secret-456", "https://myapp.com/callback");
 
         assert_eq!(config.idp_type, IdpType::GoogleWorkspace);
         assert_eq!(config.issuer_url, "https://accounts.google.com");

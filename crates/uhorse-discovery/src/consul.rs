@@ -47,7 +47,11 @@ impl ConsulClient {
 
 #[async_trait]
 impl ServiceRegistry for ConsulClient {
-    async fn register(&self, instance: &ServiceInstance, options: &RegistrationOptions) -> Result<()> {
+    async fn register(
+        &self,
+        instance: &ServiceInstance,
+        options: &RegistrationOptions,
+    ) -> Result<()> {
         #[cfg(feature = "health-check")]
         {
             let url = self.api_url("/v1/agent/service/register");
@@ -93,7 +97,9 @@ impl ServiceRegistry for ConsulClient {
         #[cfg(not(feature = "health-check"))]
         {
             tracing::warn!("Consul registration requires health-check feature");
-            return Err(Error::Config("health-check feature not enabled".to_string()));
+            return Err(Error::Config(
+                "health-check feature not enabled".to_string(),
+            ));
         }
 
         Ok(())
@@ -187,7 +193,11 @@ impl ServiceRegistry for ConsulClient {
         }
     }
 
-    async fn discover_instance(&self, service_name: &str, instance_id: &str) -> Result<Option<ServiceInstance>> {
+    async fn discover_instance(
+        &self,
+        service_name: &str,
+        instance_id: &str,
+    ) -> Result<Option<ServiceInstance>> {
         let instances = self.discover(service_name).await?;
         Ok(instances.into_iter().find(|i| i.id == instance_id))
     }
@@ -261,11 +271,7 @@ mod tests {
 
     #[test]
     fn test_api_url() {
-        let client = ConsulClient::new(
-            "http://localhost:8500".to_string(),
-            None,
-            None,
-        ).unwrap();
+        let client = ConsulClient::new("http://localhost:8500".to_string(), None, None).unwrap();
         assert_eq!(
             client.api_url("/v1/catalog/services"),
             "http://localhost:8500/v1/catalog/services"

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::{LoadBalancer, InstanceStats};
+use super::{InstanceStats, LoadBalancer};
 
 /// Least connection load balancer
 pub struct LeastConnectionLoadBalancer {
@@ -35,7 +35,10 @@ impl Default for LeastConnectionLoadBalancer {
 
 #[async_trait]
 impl LoadBalancer for LeastConnectionLoadBalancer {
-    async fn select(&self, instances: &[uhorse_discovery::ServiceInstance]) -> Option<uhorse_discovery::ServiceInstance> {
+    async fn select(
+        &self,
+        instances: &[uhorse_discovery::ServiceInstance],
+    ) -> Option<uhorse_discovery::ServiceInstance> {
         if instances.is_empty() {
             return None;
         }
@@ -74,7 +77,7 @@ impl LoadBalancer for LeastConnectionLoadBalancer {
 
 impl Drop for LeastConnectionLoadBalancer {
     fn drop(&mut self) {
-                // Cleanup is handled by Arc
+        // Cleanup is handled by Arc
     }
 }
 
@@ -93,20 +96,32 @@ mod tests {
         ];
 
         // Set different connection counts
-        lb.update_stats("1", InstanceStats {
-            active_connections: 10,
-            ..Default::default()
-        }).await;
+        lb.update_stats(
+            "1",
+            InstanceStats {
+                active_connections: 10,
+                ..Default::default()
+            },
+        )
+        .await;
 
-        lb.update_stats("2", InstanceStats {
-            active_connections: 5,
-            ..Default::default()
-        }).await;
+        lb.update_stats(
+            "2",
+            InstanceStats {
+                active_connections: 5,
+                ..Default::default()
+            },
+        )
+        .await;
 
-        lb.update_stats("3", InstanceStats {
-            active_connections: 20,
-            ..Default::default()
-        }).await;
+        lb.update_stats(
+            "3",
+            InstanceStats {
+                active_connections: 20,
+                ..Default::default()
+            },
+        )
+        .await;
 
         // Should select instance 2 (least connections)
         let selected = lb.select(&instances).await.unwrap();

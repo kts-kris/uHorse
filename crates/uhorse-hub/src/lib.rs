@@ -35,40 +35,42 @@
 
 // Hub 特有模块（4.0 新增）
 pub mod error;
-pub mod node_manager;
-pub mod task_scheduler;
-pub mod message_router;
 pub mod hub;
+pub mod message_router;
+pub mod node_manager;
 pub mod orchestrator;
 pub mod security_integration;
+pub mod task_scheduler;
 pub mod web;
 
 // 重新导出 Hub 特有模块
 pub use error::{HubError, HubResult};
-pub use node_manager::{NodeManager, NodeInfo, NodeState, NodeManagerStats};
-pub use task_scheduler::{TaskScheduler, QueuedTask, ScheduledTask, TaskStatusInfo, SchedulerStats, TaskResult};
-pub use message_router::MessageRouter;
 pub use hub::{Hub, HubConfig, HubStats};
-pub use orchestrator::{Orchestrator, OrchestrationPlan, OrchestrationResult, SubTask, SubTaskResult};
+pub use message_router::MessageRouter;
+pub use node_manager::{NodeInfo, NodeManager, NodeManagerStats, NodeState};
+pub use orchestrator::{
+    OrchestrationPlan, OrchestrationResult, Orchestrator, SubTask, SubTaskResult,
+};
 pub use security_integration::{
-    NodeAuthenticator, NodeAuthInfo,
+    HubFieldEncryptor, HubTlsConfig, NodeAuthInfo, NodeAuthenticator, SecurityManager,
     SensitiveOperationApprover,
-    HubTlsConfig, HubFieldEncryptor,
-    SecurityManager,
+};
+pub use task_scheduler::{
+    QueuedTask, ScheduledTask, SchedulerStats, TaskResult, TaskScheduler, TaskStatusInfo,
 };
 
 // Web 管理界面
-pub use web::{WebState, WebConfig, ApiResponse, TaskInfo, create_router, start_server};
+pub use web::{create_router, start_server, ApiResponse, TaskInfo, WebConfig, WebState};
 
 // 重新导出复用的 3.x 模块（方便下游使用）
-pub use uhorse_llm as llm;
 pub use uhorse_agent as agent;
 pub use uhorse_channel as channel;
+pub use uhorse_config as config;
+pub use uhorse_llm as llm;
+pub use uhorse_observability as observability;
+pub use uhorse_security as security;
 pub use uhorse_session as session;
 pub use uhorse_storage as storage;
-pub use uhorse_security as security;
-pub use uhorse_observability as observability;
-pub use uhorse_config as config;
 
 /// Hub 版本
 pub const HUB_VERSION: &str = env!("CARGO_PKG_VERSION");

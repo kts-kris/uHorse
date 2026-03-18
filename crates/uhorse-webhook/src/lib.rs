@@ -9,17 +9,17 @@
 //! - 模板系统
 //! - 历史查询
 
+pub mod client;
+pub mod history;
 pub mod retry;
 pub mod signature;
 pub mod template;
-pub mod history;
-pub mod client;
 
+pub use client::{WebhookClient, WebhookConfig, WebhookEvent};
+pub use history::{WebhookHistory, WebhookRecord, WebhookStatus};
 pub use retry::{RetryPolicy, RetryState, RetryableError};
 pub use signature::{SignatureVerifier, SigningConfig};
-pub use template::{WebhookTemplate, TemplateEngine};
-pub use history::{WebhookHistory, WebhookRecord, WebhookStatus};
-pub use client::{WebhookClient, WebhookConfig, WebhookEvent};
+pub use template::{TemplateEngine, WebhookTemplate};
 
 use thiserror::Error;
 

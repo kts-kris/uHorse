@@ -164,7 +164,11 @@ impl DataExportManager {
     }
 
     /// 注册数据提供者
-    pub async fn register_provider(&self, category: impl Into<String>, provider: Arc<dyn DataProvider>) {
+    pub async fn register_provider(
+        &self,
+        category: impl Into<String>,
+        provider: Arc<dyn DataProvider>,
+    ) {
         let mut providers = self.providers.write().await;
         providers.insert(category.into(), provider);
     }
@@ -182,7 +186,10 @@ impl DataExportManager {
         let mut requests = self.requests.write().await;
         requests.insert(request.id, request.clone());
 
-        info!("Created data export request {} for user {}", request.id, user_id);
+        info!(
+            "Created data export request {} for user {}",
+            request.id, user_id
+        );
         Ok(request)
     }
 
@@ -247,7 +254,13 @@ impl DataExportManager {
         // 生成校验和 (使用简单哈希)
         let data_string = serde_json::to_string(&exported_data)
             .map_err(|e| super::GdprError::ExportFailed(e.to_string()))?;
-        let checksum = format!("{:x}", data_string.len() as u32 ^ data_string.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32)));
+        let checksum = format!(
+            "{:x}",
+            data_string.len() as u32
+                ^ data_string
+                    .bytes()
+                    .fold(0u32, |acc, b| acc.wrapping_add(b as u32))
+        );
 
         // 创建结果
         let result = ExportResult {
@@ -307,7 +320,10 @@ impl DataExportManager {
             let mut results = self.results.write().await;
             results.remove(request_id);
 
-            info!("Cancelled export request {} for user {}", request_id, request.user_id);
+            info!(
+                "Cancelled export request {} for user {}",
+                request_id, request.user_id
+            );
             Ok(true)
         } else {
             Ok(false)
@@ -317,10 +333,8 @@ impl DataExportManager {
     /// 将导出结果序列化为指定格式
     pub fn serialize_result(result: &ExportResult, format: DataExportFormat) -> Result<Vec<u8>> {
         match format {
-            DataExportFormat::Json => {
-                serde_json::to_vec_pretty(&result)
-                    .map_err(|e| super::GdprError::ExportFailed(e.to_string()))
-            }
+            DataExportFormat::Json => serde_json::to_vec_pretty(&result)
+                .map_err(|e| super::GdprError::ExportFailed(e.to_string())),
             DataExportFormat::Csv => {
                 // 简化实现：将 JSON 转换为 CSV 格式
                 let mut csv_output = String::new();
@@ -328,7 +342,10 @@ impl DataExportManager {
 
                 for (category, data) in &result.data {
                     let data_str = serde_json::to_string(data).unwrap_or_default();
-                    csv_output.push_str(&format!("{},{},{}\n", category, data_str, result.exported_at));
+                    csv_output.push_str(&format!(
+                        "{},{},{}\n",
+                        category, data_str, result.exported_at
+                    ));
                 }
 
                 Ok(csv_output.into_bytes())

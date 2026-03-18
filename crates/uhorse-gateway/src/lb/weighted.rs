@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{LoadBalancer, InstanceStats};
+use super::{InstanceStats, LoadBalancer};
 
 /// Weighted round-robin load balancer
 pub struct WeightedLoadBalancer {
@@ -32,16 +32,16 @@ impl Default for WeightedLoadBalancer {
 
 #[async_trait]
 impl LoadBalancer for WeightedLoadBalancer {
-    async fn select(&self, instances: &[uhorse_discovery::ServiceInstance]) -> Option<uhorse_discovery::ServiceInstance> {
+    async fn select(
+        &self,
+        instances: &[uhorse_discovery::ServiceInstance],
+    ) -> Option<uhorse_discovery::ServiceInstance> {
         if instances.is_empty() {
             return None;
         }
 
         // Calculate total weight
-        let total_weight: u64 = instances
-            .iter()
-            .map(|i| Self::get_weight(i) as u64)
-            .sum();
+        let total_weight: u64 = instances.iter().map(|i| Self::get_weight(i) as u64).sum();
 
         if total_weight == 0 {
             // Fall back to round-robin if all weights are 0
@@ -83,12 +83,9 @@ mod tests {
         let lb = WeightedLoadBalancer::new();
 
         let instances = vec![
-            uhorse_discovery::ServiceInstance::new("1", "test", "10.0.0.1", 8080)
-                .with_weight(10), // 10% traffic
-            uhorse_discovery::ServiceInstance::new("2", "test", "10.0.0.2", 8080)
-                .with_weight(30), // 30% traffic
-            uhorse_discovery::ServiceInstance::new("3", "test", "10.0.0.3", 8080)
-                .with_weight(60), // 60% traffic
+            uhorse_discovery::ServiceInstance::new("1", "test", "10.0.0.1", 8080).with_weight(10), // 10% traffic
+            uhorse_discovery::ServiceInstance::new("2", "test", "10.0.0.2", 8080).with_weight(30), // 30% traffic
+            uhorse_discovery::ServiceInstance::new("3", "test", "10.0.0.3", 8080).with_weight(60), // 60% traffic
         ];
 
         // Run multiple selections and count distribution
@@ -100,7 +97,11 @@ mod tests {
 
         // Instance 3 with weight 60 should get approximately 60% of traffic
         let count3 = counts.get("3").unwrap_or(&0);
-        assert!(*count3 > 500 && *count3 < 700, "Expected ~600 for instance 3, got {}", count3);
+        assert!(
+            *count3 > 500 && *count3 < 700,
+            "Expected ~600 for instance 3, got {}",
+            count3
+        );
     }
 
     #[tokio::test]

@@ -304,7 +304,10 @@ impl DataClassifier {
         // 模糊匹配
         for (mapped_field, &idx) in &self.field_map {
             if normalized.contains(&mapped_field.to_lowercase().replace('_', ""))
-                || mapped_field.to_lowercase().replace('_', "").contains(&normalized)
+                || mapped_field
+                    .to_lowercase()
+                    .replace('_', "")
+                    .contains(&normalized)
             {
                 let rule = &self.rules[idx];
                 return Some(ClassificationResult {

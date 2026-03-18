@@ -144,7 +144,12 @@ impl SlackAttachment {
     }
 
     /// 添加字段
-    pub fn add_field(mut self, title: impl Into<String>, value: impl Into<String>, short: bool) -> Self {
+    pub fn add_field(
+        mut self,
+        title: impl Into<String>,
+        value: impl Into<String>,
+        short: bool,
+    ) -> Self {
         self.fields.push(SlackField {
             title: title.into(),
             value: value.into(),
@@ -328,12 +333,9 @@ impl SlackClient {
     }
 
     /// 发送简单文本消息
-    pub async fn send_message(
-        &self,
-        channel: &str,
-        text: &str,
-    ) -> crate::Result<SlackMessage> {
-        self.send_message_with_options(channel, text, None, None, None).await
+    pub async fn send_message(&self, channel: &str, text: &str) -> crate::Result<SlackMessage> {
+        self.send_message_with_options(channel, text, None, None, None)
+            .await
     }
 
     /// 发送带选项的消息
@@ -663,8 +665,7 @@ mod tests {
 
     #[test]
     fn test_slack_config() {
-        let config = SlackConfig::new("xoxb-test-token")
-            .with_default_channel("#general");
+        let config = SlackConfig::new("xoxb-test-token").with_default_channel("#general");
 
         assert_eq!(config.bot_token, "xoxb-test-token");
         assert_eq!(config.default_channel, Some("#general".to_string()));

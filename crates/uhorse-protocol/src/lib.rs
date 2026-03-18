@@ -22,17 +22,17 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod error;
-pub mod types;
 pub mod command;
+pub mod error;
 pub mod message;
 pub mod result;
+pub mod types;
 
-pub use error::{ProtocolError, ProtocolResult};
-pub use types::*;
 pub use command::*;
+pub use error::{ProtocolError, ProtocolResult};
 pub use message::*;
 pub use result::*;
+pub use types::*;
 
 /// 协议版本
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");

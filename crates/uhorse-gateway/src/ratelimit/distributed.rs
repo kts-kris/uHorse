@@ -163,7 +163,11 @@ impl<B: RateLimitBackend> DistributedRateLimiter<B> {
         let full_key = format!("{}{}", self.config.key_prefix, key);
 
         // 增加计数
-        let count = match self.backend.increment(&full_key, self.config.base.window_size).await {
+        let count = match self
+            .backend
+            .increment(&full_key, self.config.base.window_size)
+            .await
+        {
             Ok(c) => c,
             Err(_) => {
                 // 后端错误时降级为允许
@@ -229,8 +233,8 @@ pub struct RedisBackend {
 impl RedisBackend {
     /// 创建新的 Redis 后端
     pub async fn new(url: &str) -> Result<Self, BackendError> {
-        let client = redis::Client::open(url)
-            .map_err(|e| BackendError::RedisError(e.to_string()))?;
+        let client =
+            redis::Client::open(url).map_err(|e| BackendError::RedisError(e.to_string()))?;
 
         let connection = redis::aio::ConnectionManager::new(client.clone())
             .await
@@ -273,7 +277,8 @@ impl RateLimitBackend for RedisBackend {
         use redis::AsyncCommands;
 
         let mut conn = (*self.connection).clone();
-        let count: u64 = conn.get(key)
+        let count: u64 = conn
+            .get(key)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
 
@@ -284,7 +289,8 @@ impl RateLimitBackend for RedisBackend {
         use redis::AsyncCommands;
 
         let mut conn = (*self.connection).clone();
-        let _: () = conn.del(key)
+        let _: () = conn
+            .del(key)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
 
@@ -295,7 +301,8 @@ impl RateLimitBackend for RedisBackend {
         use redis::AsyncCommands;
 
         let mut conn = (*self.connection).clone();
-        let ttl: i64 = conn.ttl(key)
+        let ttl: i64 = conn
+            .ttl(key)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
 

@@ -11,10 +11,17 @@ pub mod replication;
 pub mod restore;
 pub mod scheduler;
 
-pub use encryption::{EncryptionConfig, EncryptionKey, EncryptionManager, EncryptedData};
-pub use replication::{ReplicationConfig, ReplicationManager, ReplicationStatus, ReplicationStats, ReplicationTarget, ReplicationTask};
-pub use restore::{RestoreConfig, RestoreManager, RestoreRecord, RestoreStats, RestoreStatus, RollbackInfo};
-pub use scheduler::{BackupRecord, BackupScheduleConfig, BackupScheduler, BackupStats, BackupStatus, BackupType};
+pub use encryption::{EncryptedData, EncryptionConfig, EncryptionKey, EncryptionManager};
+pub use replication::{
+    ReplicationConfig, ReplicationManager, ReplicationStats, ReplicationStatus, ReplicationTarget,
+    ReplicationTask,
+};
+pub use restore::{
+    RestoreConfig, RestoreManager, RestoreRecord, RestoreStats, RestoreStatus, RollbackInfo,
+};
+pub use scheduler::{
+    BackupRecord, BackupScheduleConfig, BackupScheduler, BackupStats, BackupStatus, BackupType,
+};
 
 use thiserror::Error;
 

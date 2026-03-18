@@ -5,18 +5,16 @@
 use std::sync::Arc;
 use uhorse_hub::{
     security_integration::{
-        NodeAuthenticator,
+        HubFieldEncryptor, HubTlsConfig, NodeAuthenticator, SecurityManager,
         SensitiveOperationApprover,
-        HubFieldEncryptor, HubTlsConfig,
-        SecurityManager,
     },
     Hub, HubConfig,
 };
 use uhorse_protocol::{
-    Command, NodeCapabilities, NodeId, Priority, ShellCommand,
-    TaskContext, WorkspaceInfo, UserId, SessionId,
+    Command, NodeCapabilities, NodeId, Priority, SessionId, ShellCommand, TaskContext, UserId,
+    WorkspaceInfo,
 };
-use uhorse_security::{ApprovalManager, ApprovalLevel, EncryptionKey};
+use uhorse_security::{ApprovalLevel, ApprovalManager, EncryptionKey};
 
 /// 创建测试用的工作空间信息
 fn create_test_workspace(name: &str, path: &str) -> WorkspaceInfo {
@@ -191,12 +189,7 @@ async fn test_approval_request_creation() {
     });
 
     let request_id = approver
-        .request_approval(
-            &node_id,
-            "file_delete",
-            ApprovalLevel::Single,
-            context,
-        )
+        .request_approval(&node_id, "file_delete", ApprovalLevel::Single, context)
         .await
         .unwrap();
 
@@ -274,10 +267,7 @@ async fn test_idempotency_check() {
     let operation_id = "op-123";
 
     // 第一次检查
-    let is_duplicate = approver
-        .check_idempotency(operation_id, 60)
-        .await
-        .unwrap();
+    let is_duplicate = approver.check_idempotency(operation_id, 60).await.unwrap();
     assert!(!is_duplicate);
 
     // 存储响应
@@ -287,10 +277,7 @@ async fn test_idempotency_check() {
         .unwrap();
 
     // 第二次检查（应该是重复的）
-    let is_duplicate = approver
-        .check_idempotency(operation_id, 60)
-        .await
-        .unwrap();
+    let is_duplicate = approver.check_idempotency(operation_id, 60).await.unwrap();
     assert!(is_duplicate);
 }
 
@@ -533,14 +520,16 @@ async fn test_sensitive_command_submission() {
     // 提交敏感命令
     let context = create_test_context("test-user", "test-session");
 
-    let result = hub.submit_task(
-        Command::Shell(ShellCommand::new("rm -rf /tmp/test")),
-        context,
-        Priority::High,
-        None,
-        vec![],
-        None,
-    ).await;
+    let result = hub
+        .submit_task(
+            Command::Shell(ShellCommand::new("rm -rf /tmp/test")),
+            context,
+            Priority::High,
+            None,
+            vec![],
+            None,
+        )
+        .await;
 
     // 任务应该被提交
     assert!(result.is_ok());
@@ -564,8 +553,12 @@ async fn test_workspace_access_control() {
 
     // 验证只读标志
     assert!(readonly_workspace.read_only);
-    assert!(readonly_workspace.allowed_patterns.contains(&"*.txt".to_string()));
-    assert!(readonly_workspace.denied_patterns.contains(&"secret/*".to_string()));
+    assert!(readonly_workspace
+        .allowed_patterns
+        .contains(&"*.txt".to_string()));
+    assert!(readonly_workspace
+        .denied_patterns
+        .contains(&"secret/*".to_string()));
 
     // 完全访问工作空间
     let full_workspace = WorkspaceInfo {

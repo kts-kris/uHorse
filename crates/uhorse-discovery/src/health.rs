@@ -1,6 +1,5 @@
 //! Health checking for service instances
 
-
 use crate::types::{HealthCheckConfig, HealthStatus, ServiceInstance};
 
 /// Health check result
@@ -42,7 +41,10 @@ impl HealthChecker {
 
     /// Check the health of a service instance
     #[cfg(feature = "health-check")]
-    pub async fn check(&self, instance: &ServiceInstance) -> crate::error::Result<HealthCheckResult> {
+    pub async fn check(
+        &self,
+        instance: &ServiceInstance,
+    ) -> crate::error::Result<HealthCheckResult> {
         let url = format!("{}{}", instance.http_url(), self.config.path);
         let start = std::time::Instant::now();
 
@@ -81,7 +83,10 @@ impl HealthChecker {
 
     /// Check health without HTTP client (stub implementation)
     #[cfg(not(feature = "health-check"))]
-    pub async fn check(&self, instance: &ServiceInstance) -> crate::error::Result<HealthCheckResult> {
+    pub async fn check(
+        &self,
+        instance: &ServiceInstance,
+    ) -> crate::error::Result<HealthCheckResult> {
         Ok(HealthCheckResult {
             instance_id: instance.id.clone(),
             status: HealthStatus::Unknown,

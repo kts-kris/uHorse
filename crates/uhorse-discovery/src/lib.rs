@@ -42,10 +42,10 @@
 //! ```
 
 pub mod error;
-pub mod types;
-pub mod registry;
-pub mod health;
 pub mod failover;
+pub mod health;
+pub mod registry;
+pub mod types;
 
 #[cfg(feature = "etcd")]
 pub mod etcd;
@@ -54,15 +54,14 @@ pub mod etcd;
 pub mod consul;
 
 pub use error::{Error, Result};
-pub use types::{
-    Backend, ServiceInstance, ServiceMetadata,
-    HealthCheckConfig, RegistrationOptions, HealthStatus,
-};
-pub use registry::{DiscoveryClient, ServiceRegistry, InMemoryRegistry};
-pub use health::{HealthChecker, HealthCheckResult, HealthTracker};
 pub use failover::{
-    FailoverConfig, FailoverManager, FailoverRecord, FailoverStatus, FailoverStats, FailoverStrategy,
-    FailureRecord, FailureType,
+    FailoverConfig, FailoverManager, FailoverRecord, FailoverStats, FailoverStatus,
+    FailoverStrategy, FailureRecord, FailureType,
+};
+pub use health::{HealthCheckResult, HealthChecker, HealthTracker};
+pub use registry::{DiscoveryClient, InMemoryRegistry, ServiceRegistry};
+pub use types::{
+    Backend, HealthCheckConfig, HealthStatus, RegistrationOptions, ServiceInstance, ServiceMetadata,
 };
 
 // Re-exports for convenience

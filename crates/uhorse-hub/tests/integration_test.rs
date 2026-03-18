@@ -4,8 +4,8 @@
 
 use uhorse_hub::{Hub, HubConfig};
 use uhorse_protocol::{
-    Command, FileCommand, NodeCapabilities, NodeId, Priority, ShellCommand,
-    TaskContext, WorkspaceInfo, UserId, SessionId,
+    Command, FileCommand, NodeCapabilities, NodeId, Priority, SessionId, ShellCommand, TaskContext,
+    UserId, WorkspaceInfo,
 };
 
 /// 创建测试用的工作空间信息
@@ -117,14 +117,7 @@ async fn test_task_submission() {
     let context = create_test_context("test-user", "test-session");
 
     let task_id = hub
-        .submit_task(
-            command,
-            context,
-            Priority::Normal,
-            None,
-            vec![],
-            None,
-        )
+        .submit_task(command, context, Priority::Normal, None, vec![], None)
         .await
         .unwrap();
 
@@ -164,14 +157,7 @@ async fn test_file_command() {
     let context = create_test_context("test-user", "test-session");
 
     let task_id = hub
-        .submit_task(
-            command,
-            context,
-            Priority::Normal,
-            None,
-            vec![],
-            None,
-        )
+        .submit_task(command, context, Priority::Normal, None, vec![], None)
         .await
         .unwrap();
 

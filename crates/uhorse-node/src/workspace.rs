@@ -5,8 +5,8 @@
 use crate::error::{NodeError, NodeResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 /// 工作空间配置
@@ -260,7 +260,8 @@ impl Workspace {
             .map_err(|e| NodeError::Workspace(format!("Failed to read directory: {}", e)))?;
 
         for entry in dir {
-            let entry = entry.map_err(|e| NodeError::Workspace(format!("Failed to read entry: {}", e)))?;
+            let entry =
+                entry.map_err(|e| NodeError::Workspace(format!("Failed to read entry: {}", e)))?;
 
             if let Ok(info) = self.get_file_info(entry.path()) {
                 entries.push(info);
@@ -291,11 +292,13 @@ impl Workspace {
 
     /// 递归遍历目录
     fn walk_directory(&mut self, dir: &Path, count: &mut usize) -> NodeResult<()> {
-        let entries = std::fs::read_dir(dir)
-            .map_err(|e| NodeError::Workspace(format!("Failed to read directory {:?}: {}", dir, e)))?;
+        let entries = std::fs::read_dir(dir).map_err(|e| {
+            NodeError::Workspace(format!("Failed to read directory {:?}: {}", dir, e))
+        })?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| NodeError::Workspace(format!("Failed to read entry: {}", e)))?;
+            let entry =
+                entry.map_err(|e| NodeError::Workspace(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
 
             // 检查是否可访问

@@ -42,7 +42,7 @@ impl Default for CachePolicy {
     fn default() -> Self {
         Self {
             max_items: 10_000,
-            max_memory_bytes: 0, // Unlimited
+            max_memory_bytes: 0,                   // Unlimited
             default_ttl: Duration::from_secs(300), // 5 minutes
             eviction_policy: EvictionPolicy::default(),
             refresh_ttl_on_access: true,
@@ -131,8 +131,11 @@ impl CacheEntryMeta {
 
     /// Get remaining TTL
     pub fn remaining_ttl(&self) -> Option<Duration> {
-        self.expires_at
-            .map(|exp| (exp - chrono::Utc::now()).to_std().unwrap_or(Duration::ZERO))
+        self.expires_at.map(|exp| {
+            (exp - chrono::Utc::now())
+                .to_std()
+                .unwrap_or(Duration::ZERO)
+        })
     }
 }
 

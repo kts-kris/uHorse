@@ -57,7 +57,7 @@ impl Default for EncryptionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            key_length: 32,  // AES-256
+            key_length: 32, // AES-256
             salt_length: 16,
             nonce_length: 12, // GCM nonce
         }
@@ -190,11 +190,7 @@ impl EncryptionManager {
         // 计算认证标签 (简化)
         let tag = self.compute_tag(&encrypted, &nonce);
 
-        info!(
-            "Encrypted {} bytes with key {}",
-            data.len(),
-            key_id
-        );
+        info!("Encrypted {} bytes with key {}", data.len(), key_id);
 
         Ok(EncryptedData {
             key_id: key_id.to_string(),
@@ -241,7 +237,10 @@ impl EncryptionManager {
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
-        Utc::now().timestamp_nanos_opt().unwrap_or(0).hash(&mut hasher);
+        Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or(0)
+            .hash(&mut hasher);
         let hash = hasher.finish();
 
         let nonce: Vec<u8> = hash
@@ -312,8 +311,7 @@ impl EncryptedData {
 
     /// 从字节数组反序列化
     pub fn from_bytes(data: &[u8]) -> super::Result<Self> {
-        serde_json::from_slice(data)
-            .map_err(|e| super::BackupError::EncryptionError(e.to_string()))
+        serde_json::from_slice(data).map_err(|e| super::BackupError::EncryptionError(e.to_string()))
     }
 }
 

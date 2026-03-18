@@ -17,7 +17,11 @@ use crate::consul::ConsulClient;
 #[async_trait]
 pub trait ServiceRegistry: Send + Sync {
     /// Register a service instance
-    async fn register(&self, instance: &ServiceInstance, options: &RegistrationOptions) -> Result<()>;
+    async fn register(
+        &self,
+        instance: &ServiceInstance,
+        options: &RegistrationOptions,
+    ) -> Result<()>;
 
     /// Deregister a service instance
     async fn deregister(&self, service_name: &str, instance_id: &str) -> Result<()>;
@@ -26,7 +30,11 @@ pub trait ServiceRegistry: Send + Sync {
     async fn discover(&self, service_name: &str) -> Result<Vec<ServiceInstance>>;
 
     /// Discover a specific instance
-    async fn discover_instance(&self, service_name: &str, instance_id: &str) -> Result<Option<ServiceInstance>>;
+    async fn discover_instance(
+        &self,
+        service_name: &str,
+        instance_id: &str,
+    ) -> Result<Option<ServiceInstance>>;
 
     /// List all registered services
     async fn list_services(&self) -> Result<Vec<String>>;
@@ -48,21 +56,30 @@ impl DiscoveryClient {
     pub async fn new(backend: Backend) -> Result<Self> {
         let registry: Arc<dyn ServiceRegistry> = match backend {
             #[cfg(feature = "etcd")]
-            Backend::Etcd { endpoints, username, password, ca_cert_path } => {
-                Arc::new(EtcdClient::new(endpoints, username, password, ca_cert_path).await?)
-            }
+            Backend::Etcd {
+                endpoints,
+                username,
+                password,
+                ca_cert_path,
+            } => Arc::new(EtcdClient::new(endpoints, username, password, ca_cert_path).await?),
             #[cfg(not(feature = "etcd"))]
             Backend::Etcd { .. } => {
-                return Err(crate::error::Error::Config("etcd feature not enabled".to_string()));
+                return Err(crate::error::Error::Config(
+                    "etcd feature not enabled".to_string(),
+                ));
             }
 
             #[cfg(feature = "consul")]
-            Backend::Consul { address, token, datacenter } => {
-                Arc::new(ConsulClient::new(address, token, datacenter)?)
-            }
+            Backend::Consul {
+                address,
+                token,
+                datacenter,
+            } => Arc::new(ConsulClient::new(address, token, datacenter)?),
             #[cfg(not(feature = "consul"))]
             Backend::Consul { .. } => {
-                return Err(crate::error::Error::Config("consul feature not enabled".to_string()));
+                return Err(crate::error::Error::Config(
+                    "consul feature not enabled".to_string(),
+                ));
             }
         };
 
@@ -83,11 +100,17 @@ impl DiscoveryClient {
 
     /// Register a service instance with default options
     pub async fn register(&self, instance: &ServiceInstance) -> Result<()> {
-        self.registry.register(instance, &RegistrationOptions::default()).await
+        self.registry
+            .register(instance, &RegistrationOptions::default())
+            .await
     }
 
     /// Register a service instance with custom options
-    pub async fn register_with_options(&self, instance: &ServiceInstance, options: &RegistrationOptions) -> Result<()> {
+    pub async fn register_with_options(
+        &self,
+        instance: &ServiceInstance,
+        options: &RegistrationOptions,
+    ) -> Result<()> {
         self.registry.register(instance, options).await
     }
 
@@ -102,8 +125,14 @@ impl DiscoveryClient {
     }
 
     /// Discover a specific instance
-    pub async fn discover_instance(&self, service_name: &str, instance_id: &str) -> Result<Option<ServiceInstance>> {
-        self.registry.discover_instance(service_name, instance_id).await
+    pub async fn discover_instance(
+        &self,
+        service_name: &str,
+        instance_id: &str,
+    ) -> Result<Option<ServiceInstance>> {
+        self.registry
+            .discover_instance(service_name, instance_id)
+            .await
     }
 
     /// List all registered services
@@ -149,9 +178,15 @@ impl Default for InMemoryRegistry {
 
 #[async_trait]
 impl ServiceRegistry for InMemoryRegistry {
-    async fn register(&self, instance: &ServiceInstance, _options: &RegistrationOptions) -> Result<()> {
+    async fn register(
+        &self,
+        instance: &ServiceInstance,
+        _options: &RegistrationOptions,
+    ) -> Result<()> {
         let mut services = self.services.write().await;
-        let instances = services.entry(instance.name.clone()).or_insert_with(Vec::new);
+        let instances = services
+            .entry(instance.name.clone())
+            .or_insert_with(Vec::new);
 
         // Check for existing instance with same ID
         if let Some(existing) = instances.iter_mut().find(|i| i.id == instance.id) {
@@ -179,7 +214,11 @@ impl ServiceRegistry for InMemoryRegistry {
         Ok(services.get(service_name).cloned().unwrap_or_default())
     }
 
-    async fn discover_instance(&self, service_name: &str, instance_id: &str) -> Result<Option<ServiceInstance>> {
+    async fn discover_instance(
+        &self,
+        service_name: &str,
+        instance_id: &str,
+    ) -> Result<Option<ServiceInstance>> {
         let services = self.services.read().await;
         Ok(services
             .get(service_name)
@@ -211,7 +250,10 @@ mod tests {
         let registry = InMemoryRegistry::new();
 
         let instance = ServiceInstance::new("test-1", "test-service", "127.0.0.1", 8080);
-        registry.register(&instance, &RegistrationOptions::default()).await.unwrap();
+        registry
+            .register(&instance, &RegistrationOptions::default())
+            .await
+            .unwrap();
 
         let instances = registry.discover("test-service").await.unwrap();
         assert_eq!(instances.len(), 1);
