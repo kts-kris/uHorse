@@ -28,12 +28,13 @@ pub struct HealthChecker {
 impl HealthChecker {
     /// Create a new health checker with the given configuration
     pub fn new(config: HealthCheckConfig) -> Self {
-        let _timeout_secs = config.timeout_secs;
+        #[cfg(feature = "health-check")]
+        let timeout_secs = config.timeout_secs;
         Self {
             config,
             #[cfg(feature = "health-check")]
             client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(timeout_secs))
+                .timeout(std::time::Duration::from_secs(timeout_secs))
                 .build()
                 .unwrap_or_default(),
         }
