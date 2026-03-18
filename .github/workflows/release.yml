@@ -83,11 +83,6 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-          # Linux ARM64 - temporarily disabled due to cross-compilation issues
-          # - target: aarch64-unknown-linux-gnu
-          #   os: ubuntu-latest
-          #   archive: tar.gz
-          #   use_cross: true
 
     steps:
       - name: Checkout repository
@@ -98,9 +93,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install protobuf compiler (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Install protobuf compiler (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -115,60 +114,92 @@ jobs:
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
 
-      - name: Build binary (native)
-        if: ${{ !matrix.use_cross }}
-        run: cargo build --release --target ${{ matrix.target }} -p uhorse
+      - name: Build Hub
+        run: cargo build --release --target ${{ matrix.target }} -p uhorse-hub
 
-      - name: Build binary (cross)
-        if: matrix.use_cross
-        run: cross build --release --target ${{ matrix.target }} -p uhorse
+      - name: Build Node
+        run: cargo build --release --target ${{ matrix.target }} -p uhorse-node
 
-      - name: Prepare binary (Unix)
+      - name: Prepare binaries (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          strip uhorse 2>/dev/null || true
-          chmod +x uhorse
+          strip uhorse-hub uhorse-node 2>/dev/null || true
+          chmod +x uhorse-hub uhorse-node
 
-      - name: Prepare binary (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd target/${{ matrix.target }}/release
-
-      - name: Create archive (Unix)
+      - name: Create Hub archive (Unix)
         if: runner.os != 'Windows'
         run: |
           VERSION="${{ needs.resolve-version.outputs.version }}"
-          ARCHIVE_NAME="uhorse-${VERSION}-${{ matrix.target }}"
+          ARCHIVE_NAME="uhorse-hub-${VERSION}-${{ matrix.target }}"
 
           mkdir -p package
-          cp target/${{ matrix.target }}/release/uhorse package/
+          cp target/${{ matrix.target }}/release/uhorse-hub package/
           cp README.md package/ 2>/dev/null || true
+          cp CHANGELOG.md package/ 2>/dev/null || true
           cp LICENSE* package/ 2>/dev/null || true
 
           tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
-          echo "archive_name=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+          echo "hub_archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
 
-      - name: Create archive (Windows)
+      - name: Create Node archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          ARCHIVE_NAME="uhorse-node-${VERSION}-${{ matrix.target }}"
+
+          mkdir -p package
+          cp target/${{ matrix.target }}/release/uhorse-node package/
+          cp README.md package/ 2>/dev/null || true
+          cp CHANGELOG.md package/ 2>/dev/null || true
+          cp LICENSE* package/ 2>/dev/null || true
+
+          tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
+          echo "node_archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+
+      - name: Create Hub archive (Windows)
         if: runner.os == 'Windows'
         run: |
           $VERSION = "${{ needs.resolve-version.outputs.version }}"
-          $ARCHIVE_NAME = "uhorse-${VERSION}-${{ matrix.target }}"
+          $ARCHIVE_NAME = "uhorse-hub-${VERSION}-${{ matrix.target }}"
 
           New-Item -ItemType Directory -Path package -Force
-          Copy-Item target/${{ matrix.target }}/release/uhorse.exe package/
+          Copy-Item target/${{ matrix.target }}/release/uhorse-hub.exe package/
           Copy-Item README.md package/ -ErrorAction SilentlyContinue
+          Copy-Item CHANGELOG.md package/ -ErrorAction SilentlyContinue
           Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
 
           Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
-          echo "archive_name=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
+          echo "hub_archive=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
 
-      - name: Upload artifact
+      - name: Create Node archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $VERSION = "${{ needs.resolve-version.outputs.version }}"
+          $ARCHIVE_NAME = "uhorse-node-${VERSION}-${{ matrix.target }}"
+
+          New-Item -ItemType Directory -Path package -Force
+          Copy-Item target/${{ matrix.target }}/release/uhorse-node.exe package/
+          Copy-Item README.md package/ -ErrorAction SilentlyContinue
+          Copy-Item CHANGELOG.md package/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
+          echo "node_archive=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
+
+      - name: Upload Hub artifact
         uses: actions/upload-artifact@v4
         with:
-          name: uhorse-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
+          name: uhorse-hub-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
           path: |
-            ${{ github.workspace }}/uhorse-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
+            ${{ github.workspace }}/uhorse-hub-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
+
+      - name: Upload Node artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uhorse-node-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
+          path: |
+            ${{ github.workspace }}/uhorse-node-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
 
   # ==================== 发布到 GitHub Releases ====================
   release:

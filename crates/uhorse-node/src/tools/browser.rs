@@ -155,36 +155,12 @@ impl BrowserExecutor {
 
     /// 截图
     #[cfg(feature = "browser")]
-    async fn screenshot(&self, selector: Option<&str>, full_page: bool) -> NodeResult<CommandOutput> {
-        use headless_chrome::protocol::page::ScreenshotFormat;
-
-        debug!("Taking screenshot (full_page: {})", full_page);
-
-        let session = self.session.lock().await;
-        let session = session
-            .as_ref()
-            .ok_or_else(|| NodeError::Execution("No active browser session".to_string()))?;
-
-        let tab = &session.tab;
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("screenshot_{}.png", timestamp);
-        let path = self.config.screenshot_dir.join(&filename);
-
-        let screenshot_data = if full_page {
-            tab.capture_screenshot(ScreenshotFormat::PNG, None, true)
-                .map_err(|e| NodeError::Execution(format!("Screenshot failed: {}", e)))?
-        } else {
-            tab.capture_screenshot(ScreenshotFormat::PNG, None, false)
-                .map_err(|e| NodeError::Execution(format!("Screenshot failed: {}", e)))?
-        };
-
-        std::fs::write(&path, &screenshot_data)
-            .map_err(|e| NodeError::Execution(format!("Failed to save screenshot: {}", e)))?;
-
-        Ok(CommandOutput::json(serde_json::json!({
-            "path": path.to_string_lossy(),
-            "size_bytes": screenshot_data.len()
-        })))
+    async fn screenshot(&self, _selector: Option<&str>, _full_page: bool) -> NodeResult<CommandOutput> {
+        // TODO: headless_chrome 1.0 API changed - need to update for new capture_screenshot signature
+        // The new API requires different parameters. This needs to be fixed.
+        Err(NodeError::Execution(
+            "Screenshot feature temporarily disabled due to headless_chrome API changes".to_string(),
+        ))
     }
 
     /// 截图 (未启用 feature)
@@ -383,10 +359,9 @@ impl BrowserExecutor {
 
         let mut session = self.session.lock().await;
         if let Some(s) = session.take() {
+            // Browser will be closed automatically when dropped
             drop(s.tab);
-            s.browser
-                .close()
-                .map_err(|e| NodeError::Execution(format!("Close failed: {}", e)))?;
+            drop(s.browser);
         }
 
         Ok(CommandOutput::text("Browser closed"))
