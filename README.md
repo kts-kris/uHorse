@@ -348,7 +348,8 @@ weather,api,utility
 
 | 文档 | 说明 |
 |------|------|
-| [部署指南](deployments/DEPLOYMENT.md) | 生产环境部署 |
+| **[v4.0 Hub-Node 部署指南](deployments/DEPLOYMENT_V4.md)** | ⭐ **最新** - Hub 云端 + Node 本地分离部署 |
+| [部署指南 (v3.x)](deployments/DEPLOYMENT.md) | 单体部署 (兼容旧版本) |
 | **[企业最佳实践](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **推荐** - 5 大场景、安全合规、成本优化 |
 
 ---
