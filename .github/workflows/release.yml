@@ -222,7 +222,6 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: artifacts
-          pattern: uhorse-${{ needs.resolve-version.outputs.version }}-*
 
       - name: Display structure of downloaded files
         run: find artifacts -type f -ls
