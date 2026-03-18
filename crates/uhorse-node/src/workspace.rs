@@ -80,7 +80,7 @@ pub struct Workspace {
 impl Workspace {
     /// 创建新的工作空间
     pub fn new<P: AsRef<Path>>(path: P) -> NodeResult<Self> {
-        let path = path.as_ref().to_path_buf();
+        let path = path.as_ref();
 
         // 检查路径是否存在
         if !path.exists() {
@@ -98,13 +98,18 @@ impl Workspace {
             )));
         }
 
+        // 规范化路径（解析符号链接、相对路径等）
+        let canonical_path = path
+            .canonicalize()
+            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))?;
+
         let config = WorkspaceConfig {
-            name: path
+            name: canonical_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("workspace")
                 .to_string(),
-            root_path: path,
+            root_path: canonical_path,
             ..Default::default()
         };
 
@@ -117,7 +122,7 @@ impl Workspace {
     }
 
     /// 使用配置创建工作空间
-    pub fn with_config(config: WorkspaceConfig) -> NodeResult<Self> {
+    pub fn with_config(mut config: WorkspaceConfig) -> NodeResult<Self> {
         // 检查路径是否存在
         if !config.root_path.exists() {
             return Err(NodeError::Workspace(format!(
@@ -125,6 +130,12 @@ impl Workspace {
                 config.root_path
             )));
         }
+
+        // 规范化路径
+        config.root_path = config
+            .root_path
+            .canonicalize()
+            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))?;
 
         Ok(Self {
             config,
@@ -322,7 +333,7 @@ impl Workspace {
     }
 
     /// 更新配置
-    pub fn update_config(&mut self, config: WorkspaceConfig) -> NodeResult<()> {
+    pub fn update_config(&mut self, mut config: WorkspaceConfig) -> NodeResult<()> {
         // 检查新路径是否存在
         if !config.root_path.exists() {
             return Err(NodeError::Workspace(format!(
@@ -330,6 +341,12 @@ impl Workspace {
                 config.root_path
             )));
         }
+
+        // 规范化路径
+        config.root_path = config
+            .root_path
+            .canonicalize()
+            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))?;
 
         self.config = config;
         self.file_index.clear();
@@ -385,8 +402,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let workspace = Workspace::new(temp.path()).unwrap();
 
+        // 规范化路径后比较（macOS 上 /var 是 /private/var 的符号链接）
+        let canonical_temp = temp.path().canonicalize().unwrap();
         assert!(workspace.contains(temp.path()));
-        assert_eq!(workspace.root(), temp.path());
+        assert_eq!(workspace.root(), canonical_temp);
     }
 
     #[test]

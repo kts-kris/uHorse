@@ -27,22 +27,23 @@
 //! ## 使用示例
 //!
 //! ```rust,no_run
-//! use uhorse_node::{Node, NodeConfig, Workspace};
+//! use uhorse_node::{Node, NodeConfig, ConnectionConfig};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // 创建工作空间
-//!     let workspace = Workspace::new("/Users/xxx/projects")?;
-//!
 //!     // 创建节点配置
 //!     let config = NodeConfig {
-//!         hub_url: "wss://hub.uhorse.ai".to_string(),
-//!         workspace,
+//!         name: "my-node".to_string(),
+//!         connection: ConnectionConfig {
+//!             hub_url: "wss://hub.uhorse.ai".to_string(),
+//!             ..Default::default()
+//!         },
+//!         workspace_path: "/Users/xxx/projects".to_string(),
 //!         ..Default::default()
 //!     };
 //!
 //!     // 启动节点
-//!     let node = Node::new(config);
+//!     let mut node = Node::new(config)?;
 //!     node.start().await?;
 //!
 //!     Ok(())
