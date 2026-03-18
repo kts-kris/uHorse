@@ -265,30 +265,43 @@ model = "gpt-4"
 
 ## 📚 Documentation
 
-### 🏆 Enterprise Guides
-
-| Document | Description |
-|----------|-------------|
-| **[Enterprise Best Practices Guide](docs/ENTERPRISE_BEST_PRACTICES-en.md)** | ⭐ **Highly Recommended** - 5 typical scenarios, architecture design, deployment & operations, security compliance, cost optimization |
-
-### Basic Documentation
+### Quick Start
 
 | Document | Description |
 |----------|-------------|
 | [Installation Guide](INSTALL.md) | Detailed installation steps |
 | [Configuration Wizard](WIZARD.md) | Interactive configuration guide |
-| [API Reference](API.md) | REST API reference |
-| [Channel Integration](CHANNELS.md) | Channel configuration guides |
-| [Skill Development](SKILLS.md) | Custom skill development |
-| [Deployment Guide](deployments/DEPLOYMENT.md) | Production deployment |
+| [Quick Experience](#-quick-start) | 30-second Docker startup |
 
-### Architecture & Roadmap
+### Architecture Design
 
 | Document | Description |
 |----------|-------------|
+| **[v4.0 Architecture](docs/architecture/v4.0-architecture-en.md)** | ⭐ **Latest** - Hub-Node Distributed Architecture |
+| [v4.0 架构设计 (中文)](docs/architecture/v4.0-architecture.md) | Hub-Node 分布式架构 (中文) |
 | [v3.0 Architecture Design](docs/architecture/v3.0-architecture.md) | Enterprise architecture design |
+
+### Development Guides
+
+| Document | Description |
+|----------|-------------|
+| [API Reference](API.md) | REST API reference |
+| [Skill Development](SKILLS.md) | Custom skill development |
+| [Channel Integration](CHANNELS.md) | Channel configuration guides |
+
+### Deployment & Operations
+
+| Document | Description |
+|----------|-------------|
+| [Deployment Guide](deployments/DEPLOYMENT.md) | Production deployment |
+| **[Enterprise Best Practices](docs/ENTERPRISE_BEST_PRACTICES-en.md)** | ⭐ **Recommended** - 5 scenarios, security compliance, cost optimization |
+
+### Version History
+
+| Document | Description |
+|----------|-------------|
+| [CHANGELOG](CHANGELOG-en.md) | Version changelog |
 | [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | Complete development roadmap |
-| [Release Notes](RELEASE_NOTES.md) | Version changelog |
 
 ---
 

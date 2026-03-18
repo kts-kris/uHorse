@@ -320,32 +320,43 @@ weather,api,utility
 
 ## 📚 文档
 
-### 🏆 企业级指南
-
-| 文档 | 说明 |
-|------|------|
-| **[企业最佳实践指南](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **推荐阅读** - 5 大典型场景、架构设计、部署运维、安全合规、成本优化 |
-
-### 基础文档
+### 快速入门
 
 | 文档 | 说明 |
 |------|------|
 | [安装指南](INSTALL.md) | 详细安装步骤 |
 | [配置向导](WIZARD.md) | 交互式配置说明 |
-| [API 文档](API.md) | REST API 参考 |
-| [通道集成](CHANNELS.md) | 各通道配置指南 |
-| [技能开发](SKILLS.md) | 自定义技能开发 |
-| [部署指南](deployments/DEPLOYMENT.md) | 生产环境部署 |
+| [快速体验](#-快速开始) | 30 秒 Docker 启动 |
 
-### 架构与路线图
+### 架构设计
 
 | 文档 | 说明 |
 |------|------|
-| [v4.0 架构设计](docs/architecture/v4.0-architecture.md) | Hub-Node 分布式架构 |
-| [v4.0 架构设计 (EN)](docs/architecture/v4.0-architecture-en.md) | Hub-Node Architecture (English) |
+| **[v4.0 架构设计](docs/architecture/v4.0-architecture.md)** | ⭐ **最新** - Hub-Node 分布式架构 |
+| [v4.0 Architecture (EN)](docs/architecture/v4.0-architecture-en.md) | Hub-Node Architecture (English) |
 | [v3.0 架构设计](docs/architecture/v3.0-architecture.md) | 企业级架构设计 |
+
+### 开发指南
+
+| 文档 | 说明 |
+|------|------|
+| [API 文档](API.md) | REST API 参考 |
+| [技能开发](SKILLS.md) | 自定义技能开发 |
+| [通道集成](CHANNELS.md) | 各通道配置指南 |
+
+### 运维部署
+
+| 文档 | 说明 |
+|------|------|
+| [部署指南](deployments/DEPLOYMENT.md) | 生产环境部署 |
+| **[企业最佳实践](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **推荐** - 5 大场景、安全合规、成本优化 |
+
+### 版本记录
+
+| 文档 | 说明 |
+|------|------|
+| [CHANGELOG](CHANGELOG.md) | 版本更新日志 |
 | [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | 完整开发路线图 |
-| [发布说明](RELEASE_NOTES.md) | 版本更新日志 |
 
 ---
 
