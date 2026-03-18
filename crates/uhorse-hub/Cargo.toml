@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "uhorse-hub"
+path = "src/main.rs"
+
 [dependencies]
 # 4.0 新增协议
 uhorse-protocol = { path = "../uhorse-protocol" }
@@ -51,6 +55,15 @@ reqwest = { workspace = true }
 # Web server
 axum = { workspace = true }
 tower-http = { workspace = true }
+
+# CLI
+clap = { workspace = true, features = ["derive"] }
+
+# Logging
+tracing-subscriber = { workspace = true }
+
+# Config
+toml = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
