@@ -351,185 +351,34 @@ weather,api,utility
 | [部署指南](deployments/DEPLOYMENT.md) | 生产环境部署 |
 | **[企业最佳实践](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **推荐** - 5 大场景、安全合规、成本优化 |
 
-### 版本记录
-
-| 文档 | 说明 |
-|------|------|
-| [CHANGELOG](CHANGELOG.md) | 版本更新日志 |
-| [v3.0 路线图](docs/roadmap/v3.0-roadmap.md) | 完整开发路线图 |
-
 ---
 
 ## 🛣️ 路线图
 
-| Phase | 名称 | 周期 | 状态 | 完成日期 |
-|-------|------|------|------|----------|
-| **Phase 1** | 高可用性基础设施 | 4 周 | ✅ 完成 | 2025-03-01 |
-| **Phase 2** | 可扩展性架构 | 5 周 | ✅ 完成 | 2025-03-08 |
-| **Phase 3** | 安全合规体系 | 4 周 | ✅ 完成 | 2025-03-12 |
-| **Phase 4** | 数据治理体系 | 3 周 | ✅ 完成 | 2025-03-15 |
-| **Phase 5** | API 标准体系 | 3 周 | ✅ 完成 | 2025-03-18 |
-| **Phase 6** | 企业集成体系 | 4 周 | ✅ 完成 | 2025-03-13 |### v1.0 ✅ 生产就绪
-- [x] 核心基础设施
-- [x] 7+ 通道集成
-- [x] 工具与插件系统
-- [x] 调度与安全增强
-- [x] 可观测性完善
+### v4.0 ✅ 当前版本 - 分布式 AI 工作编排平台
 
-### v2.0 ✅ 已发布
-- [x] **API 完善**: 完整的 REST API (Agents/Skills/Sessions/Files/Channels)
-- [x] **通道实现**: Telegram/钉钉/飞书/企业微信/Slack/Discord/WhatsApp
-- [x] **实时通信**: WebSocket 连接管理 + SSE 流式响应
-- [x] **前端完善**: React 管理界面 (Agent/Skill/Session/Channel 管理)
-- [x] **企业级特性**: RBAC 权限系统 + 审计日志 + 多租户架构
-- [x] **多模态支持**: STT/TTS 语音处理 + Vision 图像理解 + 文件解析
+> **架构升级**: 云端中枢 (Hub) + 本地节点 (Node) 分布式架构
 
-### v3.0 ✅ 已完成 - 企业级 AI 基础设施平台
+| Phase | 名称 | 状态 | 说明 |
+|-------|------|------|------|
+| **Phase 1** | 核心架构 | ✅ | uhorse-protocol/hub/node、WebSocket 通信、节点管理、任务调度 |
+| **Phase 2** | 智能编排 | ✅ | Orchestrator 编排器、SkillRegistry、子任务依赖管理 |
+| **Phase 3** | 安全加固 | ✅ | JWT 认证、敏感操作审批、字段加密、TLS 配置 |
+| **Phase 4** | 工具集成 | ✅ | 本地工具、技能执行器、通道集成、Web 管理界面 |
+| **Phase 5** | 测试优化 | ✅ | 50 个测试 (E2E/集成/安全)、8 个性能基准 |
 
-> 从"企业级多渠道 AI 网关"升级为"企业级 AI 基础设施平台"
+📄 **架构文档**: [中文](docs/architecture/v4.0-architecture.md) \| [English](docs/architecture/v4.0-architecture-en.md)
 
-**核心目标达成**:
+---
 
-| 维度 | 2.0 现状 | 3.0 目标 | 提升 | 状态 |
-|------|----------|----------|------|------|
-| **高可用性** | 40% | 95% | +55% | ✅ |
-| **可扩展性** | 40% | 95% | +55% | ✅ |
-| **安全合规** | 50% | 100% | +50% | ✅ |
-| **数据治理** | 40% | 100% | +60% | ✅ |
-| **API 标准** | 60% | 100% | +40% | ✅ |
-| **企业集成** | 30% | 100% | +70% | ✅ |
+### 历史版本
 
-**实施阶段** (23 周) - 全部完成:
-
-| Phase | 名称 | 周期 | 状态 | 文档 |
-|-------|------|------|------|------|
-| **Phase 1** | 高可用性基础设施 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase1-high-availability.md) |
-| **Phase 2** | 可扩展性架构 | 5 周 | ✅ 完成 | [详细设计](docs/roadmap/phase2-scalability.md) |
-| **Phase 3** | 安全合规体系 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase3-security.md) |
-| **Phase 4** | 数据治理体系 | 3 周 | ✅ 完成 | [详细设计](docs/roadmap/phase4-data-governance.md) |
-| **Phase 5** | API 标准体系 | 3 周 | ✅ 完成 | [详细设计](docs/roadmap/phase5-api-standards.md) |
-| **Phase 6** | 企业集成体系 | 4 周 | ✅ 完成 | [详细设计](docs/roadmap/phase6-enterprise-integration.md) |
-
-**Phase 1 已完成** ✅:
-- [x] etcd 服务发现
-- [x] Consul 备选后端
-- [x] 4 种负载均衡策略 (轮询/加权/健康感知/最少连接)
-- [x] 分布式配置中心
-- [x] 配置热加载
-- [x] 配置版本管理
-
-**Phase 2 已完成** ✅:
-- [x] 数据库分片 (按 tenant_id 分片)
-- [x] 读写分离 (主从复制)
-- [x] Redis 分布式缓存 (会话缓存/令牌黑名单)
-- [x] NATS 消息队列 (任务队列/死信队列)
-- [x] 缓存策略 (LRU/LFU/TTL)
-
-**Phase 3 已完成** ✅:
-- [x] TLS 1.3 传输加密
-- [x] Let's Encrypt 证书管理
-- [x] 数据库加密 (SQLCipher)
-- [x] 字段级加密
-- [x] GDPR 合规 (数据导出/删除/同意管理)
-- [x] 审计日志持久化 + 防篡改签名
-
-**Phase 4 已完成** ✅:
-- [x] 数据分类框架 (4 级敏感度: Public/Internal/Confidential/Restricted)
-- [x] 数据保留策略管理
-- [x] 数据归档机制 (冷数据归档)
-- [x] 自动备份调度 (完整/增量备份)
-- [x] AES-256-GCM 备份加密
-- [x] 点时间恢复 (PITR)
-- [x] 跨区域复制 (灾备支持)
-- [x] 自动故障转移 (自动/手动/优先级策略)
-
-**Phase 5 已完成** ✅:
-- [x] OpenAPI 3.0 规范生成 (utoipa 集成)
-- [x] Swagger UI + ReDoc 文档界面
-- [x] 客户端代码生成器 (TypeScript/Go/Python/Rust)
-- [x] API 版本管理 (URL 版本 + 废弃通知)
-- [x] 兼容性检查器 (破坏性变更检测)
-- [x] Rate Limiting (全局/用户/端点/分布式)
-
-**Phase 6 已完成** ✅:
-- [x] OAuth2 授权服务器 (授权码/客户端凭证/刷新令牌)
-- [x] OIDC 客户端 (身份发现/用户信息获取/令牌验证)
-- [x] SAML 2.0 客户端 (企业 SSO 集成)
-- [x] 多 IdP 集成 (Okta/Auth0/Azure AD/Google Workspace)
-- [x] SIEM 集成 (Splunk HEC/Datadog Logs API)
-- [x] 审计日志导出 (JSON/CEF/Syslog/CSV)
-- [x] 安全告警管理 (规则引擎/阈值检测)
-- [x] Webhook 增强 (重试/签名/模板/历史)
-- [x] 第三方集成 (Jira/GitHub/Slack)
-
-### v3.5 ✅ 已完成 - 用户体验提升
-
-> 专注于开发者体验和运维效率的提升
-
-**Phase 1 已完成** ✅:
-- [x] CLI TUI 交互式增强 (colored/indicatif/dialoguer/console)
-- [x] 错误提示优化 (错误码 + 原因分析 + 解决方案 + 文档链接)
-- [x] Playground Docker 镜像 (30 秒快速体验)
-- [x] 预置场景模板 (客服/HR/IT 支持/销售/通用 5 个模板)
-
-**Phase 2 已完成** ✅:
-- [x] Web 技能编辑器 (在线编辑 + JSON Schema 验证 + 技能模板库)
-- [x] 调试面板 (对话流程 + 工具调用 + 性能指标 + WebSocket 实时更新)
-- [x] doctor 命令增强 (自动修复 + 依赖检查 + 配置验证)
-- [x] SDK 开发 (Python SDK + TypeScript SDK)
-
-### v4.0 ✅ 已完成 - 分布式 AI 工作编排平台
-
-> 从"企业级 AI 基础设施平台"升级为"分布式 AI 工作编排平台"
-
-**架构升级**: 云端中枢 (Hub) + 本地节点 (Node) 分布式架构
-
-| 维度 | 3.x 现状 | 4.0 目标 |
-|------|----------|----------|
-| **架构模式** | 单体/集群 | 中枢-节点分布式 |
-| **执行位置** | 服务端执行 | 中枢规划 + 节点执行 |
-| **文件访问** | 服务端文件系统 | 用户本地文件系统 |
-| **权限模型** | 服务端权限 | 用户授权 + 节点权限 |
-| **任务分发** | 无 | 支持多节点并行 |
-
-**Phase 1 已完成** ✅ (核心架构):
-- [x] uhorse-protocol crate (Hub-Node 通信协议)
-- [x] uhorse-hub crate (云端中枢骨架)
-- [x] uhorse-node crate (本地节点骨架)
-- [x] WebSocket 双向通信
-- [x] 命令类型定义 (File/Shell/Code/Database/Api/Browser/Skill)
-- [x] 节点管理器 (注册/心跳/负载监控)
-- [x] 任务调度器 (优先级队列/超时控制/重试机制)
-- [x] 消息路由器 (命令分发/结果汇总)
-
-**Phase 2 已完成** ✅ (智能编排):
-- [x] Orchestrator 编排器 (意图理解 + 任务规划 + 结果汇总)
-- [x] 复用 uhorse-agent SkillRegistry (技能注册表)
-- [x] 子任务依赖管理 (拓扑排序执行)
-- [x] 结果汇总与状态跟踪
-
-**Phase 3 已完成** ✅ (安全加固):
-- [x] NodeAuthenticator (JWT 节点认证)
-- [x] SensitiveOperationApprover (敏感操作审批)
-- [x] HubFieldEncryptor (字段级加密)
-- [x] HubTlsConfig (TLS 配置)
-- [x] SecurityManager (安全组件整合)
-- [x] 幂等性控制 (IdempotencyCache)
-
-**Phase 4 已完成** ✅ (工具与集成):
-- [x] 本地工具完善 (文件/代码/数据库/API/浏览器)
-- [x] 技能执行器 (SKILL.md 解析, JSON Schema 验证)
-- [x] 通道集成测试
-- [x] Web 管理界面 (Axum, Dashboard, REST API)
-
-**Phase 5 已完成** ✅ (测试与优化):
-- [x] 端到端测试 (12 个测试覆盖 Hub-Node 通信)
-- [x] 集成测试 (7 个测试覆盖 Hub 基础功能)
-- [x] 安全测试 (26 个测试覆盖 JWT、加密、审批)
-- [x] 性能基准测试 (8 个 criterion 基准)
-- [x] 文档更新 (CHANGELOG 中英文版)
-
-📄 **完整文档**: [v4.0 架构设计](docs/architecture/v4.0-architecture.md) | [English](docs/architecture/v4.0-architecture-en.md)
+| 版本 | 定位 | 核心特性 |
+|------|------|----------|
+| **v3.5** | 用户体验提升 | CLI TUI 增强、错误提示优化、Playground Docker、Web 技能编辑器、Python/TS SDK |
+| **v3.0** | 企业级 AI 基础设施 | 服务发现、负载均衡、分布式缓存、消息队列、GDPR 合规、SSO/SIEM 集成 |
+| **v2.0** | 企业级多渠道网关 | 7+ 通道、REST API、WebSocket/SSE、RBAC、多租户、多模态支持 |
+| **v1.0** | 核心基础设施 | Agent 框架、LLM 抽象、MCP 协议、SQLite/JSONL 存储、JWT 认证 |
 
 ---
 

@@ -307,144 +307,30 @@ model = "gpt-4"
 
 ## 🛣️ Roadmap
 
-| Phase | Name | Duration | Status | Completion Date |
-|-------|------|----------|--------|-----------------|
-| **Phase 1** | High Availability Infrastructure | 4 weeks | ✅ Complete | 2025-03-01 |
-| **Phase 2** | Scalability Architecture | 5 weeks | ✅ Complete | 2025-03-08 |
-| **Phase 3** | Security & Compliance | 4 weeks | ✅ Complete | 2025-03-12 |
-| **Phase 4** | Data Governance | 3 weeks | ✅ Complete | 2025-03-15 |
-| **Phase 5** | API Standards | 3 weeks | ✅ Complete | 2025-03-18 |
-| **Phase 6** | Enterprise Integration | 4 weeks | ✅ Complete | 2025-03-13 |
+### v4.0 ✅ Current Version - Distributed AI Work Orchestration Platform
 
-### v3.0 ✅ Released - Enterprise AI Infrastructure Platform
+> **Architecture Upgrade**: Cloud Hub + Local Node distributed architecture
 
-> Upgraded from "Enterprise Multi-Channel AI Gateway" to "Enterprise AI Infrastructure Platform"
+| Phase | Name | Status | Description |
+|-------|------|--------|-------------|
+| **Phase 1** | Core Architecture | ✅ | uhorse-protocol/hub/node, WebSocket communication, node management, task scheduling |
+| **Phase 2** | Intelligent Orchestration | ✅ | Orchestrator, SkillRegistry, subtask dependency management |
+| **Phase 3** | Security Hardening | ✅ | JWT authentication, sensitive operation approval, field encryption, TLS |
+| **Phase 4** | Tool Integration | ✅ | Local tools, skill executor, channel integration, Web dashboard |
+| **Phase 5** | Testing & Optimization | ✅ | 50 tests (E2E/integration/security), 8 performance benchmarks |
 
-**Core Goals Achieved**:
+📄 **Architecture Docs**: [English](docs/architecture/v4.0-architecture-en.md) \| [中文](docs/architecture/v4.0-architecture.md)
 
-| Dimension | 2.0 Baseline | 3.0 Target | Achieved |
-|-----------|--------------|------------|----------|
-| **High Availability** | 40% | 95% | ✅ 95% |
-| **Scalability** | 40% | 95% | ✅ 95% |
-| **Security Compliance** | 50% | 100% | ✅ 100% |
-| **Data Governance** | 40% | 100% | ✅ 100% |
-| **API Standards** | 60% | 100% | ✅ 100% |
-| **Enterprise Integration** | 30% | 100% | ✅ 100% |
+---
 
-**Phase 1 Completed** ✅:
-- [x] etcd service discovery
-- [x] Consul backup backend
-- [x] 4 load balancing strategies (round-robin/weighted/health-aware/least-connection)
-- [x] Distributed configuration center
-- [x] Hot configuration reload
-- [x] Configuration version management
+### Version History
 
-**Phase 2 Completed** ✅:
-- [x] Database sharding (by tenant_id)
-- [x] Read-write separation (master-slave replication)
-- [x] Redis distributed cache (session cache/token blacklist)
-- [x] NATS message queue (task queue/dead letter queue)
-- [x] Cache policies (LRU/LFU/TTL)
-
-**Phase 3 Completed** ✅:
-- [x] TLS 1.3 transport encryption
-- [x] Let's Encrypt certificate management
-- [x] Database encryption (SQLCipher)
-- [x] Field-level encryption
-- [x] GDPR compliance (data export/deletion/consent management)
-- [x] Audit log persistence + tamper-proof signing
-
-**Phase 4 Completed** ✅:
-- [x] Data classification framework (4 sensitivity levels: Public/Internal/Confidential/Restricted)
-- [x] Data retention policy management
-- [x] Data archiving mechanism (cold data archive)
-- [x] Automatic backup scheduling (full/incremental)
-- [x] AES-256-GCM backup encryption
-- [x] Point-in-time recovery (PITR)
-- [x] Cross-region replication (disaster recovery)
-- [x] Automatic failover (auto/manual/priority strategies)
-
-**Phase 5 Completed** ✅:
-- [x] OpenAPI 3.0 specification generation (utoipa integration)
-- [x] Swagger UI + ReDoc documentation UI
-- [x] Client code generators (TypeScript/Go/Python/Rust)
-- [x] API version management (URL version + deprecation notice)
-- [x] Compatibility checker (breaking change detection)
-- [x] Rate Limiting (global/user/endpoint/distributed)
-
-**Phase 6 Completed** ✅:
-- [x] OAuth2 authorization server (authorization code/client credentials/refresh token)
-- [x] OIDC client (identity discovery/user info/token validation)
-- [x] SAML 2.0 client (enterprise SSO integration)
-- [x] Multi-IdP integration (Okta/Auth0/Azure AD/Google Workspace)
-- [x] SIEM integration (Splunk HEC/Datadog Logs API)
-- [x] Audit log export (JSON/CEF/Syslog/CSV)
-- [x] Security alert management (rule engine/threshold detection)
-- [x] Webhook enhancement (retry/signature/template/history)
-- [x] Third-party integration (Jira/GitHub/Slack)
-
-📄 **Full Documentation**: [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | [Architecture Design](docs/architecture/v3.0-architecture.md)
-
-### v3.5 ✅ Completed - Developer Experience Enhancement
-
-> Focus on developer experience and operational efficiency improvements
-
-**Phase 1 Completed** ✅:
-- [x] CLI TUI interactive enhancement (colored/indicatif/dialoguer/console)
-- [x] Error message optimization (error codes + cause analysis + solutions + doc links)
-- [x] Playground Docker image (30-second quick experience)
-- [x] Preset scenario templates (customer-service/HR/IT-support/sales/general - 5 templates)
-
-**Phase 2 Completed** ✅:
-- [x] Web skill editor (online editing + JSON Schema validation + skill template library)
-- [x] Debug panel (conversation flow + tool calls + performance metrics + WebSocket real-time updates)
-- [x] Enhanced doctor command (auto-fix + dependency check + config validation)
-- [x] SDK development (Python SDK + TypeScript SDK)
-
-### v4.0 🚧 In Progress - Distributed AI Work Orchestration Platform
-
-> Upgraded from "Enterprise AI Infrastructure Platform" to "Distributed AI Work Orchestration Platform"
-
-**Architecture Upgrade**: Cloud Hub + Local Node distributed architecture
-
-| Dimension | 3.x Baseline | 4.0 Target |
-|-----------|--------------|------------|
-| **Architecture** | Monolithic/Cluster | Hub-Node Distributed |
-| **Execution** | Server-side | Hub planning + Node execution |
-| **File Access** | Server filesystem | User local filesystem |
-| **Permission** | Server permissions | User authorization + Node permissions |
-| **Task Dispatch** | None | Multi-node parallel support |
-
-**Phase 1 Completed** ✅ (Core Architecture):
-- [x] uhorse-protocol crate (Hub-Node communication protocol)
-- [x] uhorse-hub crate (Cloud Hub skeleton)
-- [x] uhorse-node crate (Local Node skeleton)
-- [x] WebSocket bidirectional communication
-- [x] Command types (File/Shell/Code/Database/Api/Browser/Skill)
-- [x] Node manager (registration/heartbeat/load monitoring)
-- [x] Task scheduler (priority queue/timeout control/retry mechanism)
-- [x] Message router (command dispatch/result aggregation)
-
-**Phase 2 Completed** ✅ (Intelligent Orchestration):
-- [x] Orchestrator (intent understanding + task planning + result summarization)
-- [x] Reuse uhorse-agent SkillRegistry (skill registry)
-- [x] Subtask dependency management (topological sort execution)
-- [x] Result aggregation and status tracking
-
-**Phase 3 Completed** ✅ (Security Hardening):
-- [x] NodeAuthenticator (JWT node authentication)
-- [x] SensitiveOperationApprover (sensitive operation approval)
-- [x] HubFieldEncryptor (field-level encryption)
-- [x] HubTlsConfig (TLS configuration)
-- [x] SecurityManager (security component integration)
-- [x] Idempotency control (IdempotencyCache)
-
-**Phase 4 Planned** (Tools & Integration):
-- [ ] Local tools enhancement (file/code/database/API)
-- [ ] Channel integration testing
-- [ ] Web management interface
-
-📄 **Full Documentation**: [v4.0 Architecture Design](docs/V4_ARCHITECTURE_DESIGN.md)
+| Version | Positioning | Core Features |
+|---------|-------------|---------------|
+| **v3.5** | Developer Experience | CLI TUI enhancement, error optimization, Playground Docker, Web skill editor, Python/TS SDK |
+| **v3.0** | Enterprise AI Infrastructure | Service discovery, load balancing, distributed cache, message queue, GDPR, SSO/SIEM |
+| **v2.0** | Enterprise Multi-Channel Gateway | 7+ channels, REST API, WebSocket/SSE, RBAC, multi-tenancy, multimodal support |
+| **v1.0** | Core Infrastructure | Agent framework, LLM abstraction, MCP protocol, SQLite/JSONL storage, JWT auth |
 
 ---
 
