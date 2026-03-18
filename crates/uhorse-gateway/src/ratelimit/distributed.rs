@@ -249,10 +249,10 @@ impl RateLimitBackend for RedisBackend {
     async fn increment(&self, key: &str, window_secs: u64) -> Result<u64, BackendError> {
         use redis::AsyncCommands;
 
-        let mut conn = self.connection.clone();
+        let mut conn = (*self.connection).clone();
         let count: u64 = redis::cmd("INCR")
             .arg(key)
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
 
@@ -261,7 +261,7 @@ impl RateLimitBackend for RedisBackend {
             let _: () = redis::cmd("EXPIRE")
                 .arg(key)
                 .arg(window_secs)
-                .query_async(&mut *conn)
+                .query_async(&mut conn)
                 .await
                 .map_err(|e| BackendError::RedisError(e.to_string()))?;
         }
@@ -272,7 +272,7 @@ impl RateLimitBackend for RedisBackend {
     async fn get(&self, key: &str) -> Result<u64, BackendError> {
         use redis::AsyncCommands;
 
-        let mut conn = self.connection.clone();
+        let mut conn = (*self.connection).clone();
         let count: u64 = conn.get(key)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
@@ -283,7 +283,7 @@ impl RateLimitBackend for RedisBackend {
     async fn reset(&self, key: &str) -> Result<(), BackendError> {
         use redis::AsyncCommands;
 
-        let mut conn = self.connection.clone();
+        let mut conn = (*self.connection).clone();
         let _: () = conn.del(key)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
@@ -294,7 +294,7 @@ impl RateLimitBackend for RedisBackend {
     async fn ttl(&self, key: &str) -> Result<u64, BackendError> {
         use redis::AsyncCommands;
 
-        let mut conn = self.connection.clone();
+        let mut conn = (*self.connection).clone();
         let ttl: i64 = conn.ttl(key)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
@@ -305,9 +305,9 @@ impl RateLimitBackend for RedisBackend {
     async fn health_check(&self) -> Result<bool, BackendError> {
         use redis::AsyncCommands;
 
-        let mut conn = self.connection.clone();
+        let mut conn = (*self.connection).clone();
         let pong: String = redis::cmd("PING")
-            .query_async(&mut *conn)
+            .query_async(&mut conn)
             .await
             .map_err(|e| BackendError::RedisError(e.to_string()))?;
 
