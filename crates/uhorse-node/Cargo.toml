@@ -66,9 +66,9 @@ toml = { workspace = true }
 
 [features]
 default = []
-database-sqlite = ["sqlx"]
-database-postgres = ["sqlx"]
-database-mysql = ["sqlx"]
+database-sqlite = ["sqlx", "sqlx?/sqlite"]
+database-postgres = ["sqlx", "sqlx?/postgres"]
+database-mysql = ["sqlx", "sqlx?/mysql"]
 database-redis = ["redis"]
 database-mongodb = ["mongodb"]
 database-full = ["database-sqlite", "database-postgres", "database-mysql", "database-redis", "database-mongodb"]

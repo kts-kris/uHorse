@@ -318,7 +318,7 @@ impl DatabaseExecutor {
         cmd: &DatabaseCommand,
     ) -> NodeResult<CommandOutput> {
         use mongodb::{bson::doc, Client, Collection};
-        use mongodb::options::ClientOptions;
+        use mongodb::options::{ClientOptions, FindOptions};
 
         debug!("Executing MongoDB query");
 
@@ -354,9 +354,12 @@ impl DatabaseExecutor {
             };
 
             let limit = cmd.limit.unwrap_or(100) as i64;
-            let mut cursor = collection
-                .find(filter)
+            let find_options = FindOptions::builder()
                 .limit(limit)
+                .build();
+
+            let mut cursor = collection
+                .find(filter, find_options)
                 .await
                 .map_err(|e| NodeError::Execution(format!("Find failed: {}", e)))?;
 

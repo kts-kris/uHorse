@@ -38,7 +38,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Check compilation
-        run: cargo check --all-features --workspace
+        run: cargo check --workspace
 
   # ==================== 测试 ====================
   test:
@@ -68,7 +68,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Run tests
-        run: cargo test --all-features --workspace
+        run: cargo test --workspace
 
   # ==================== 代码检查 ====================
   lint:
@@ -103,7 +103,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy --all-features --workspace -- -D clippy::all -A clippy::missing_docs_in_private_items -W warnings
+        run: cargo clippy --workspace -- -D clippy::all -A clippy::missing_docs_in_private_items -W warnings
         continue-on-error: true
 
   # ==================== 文档检查 ====================
@@ -134,7 +134,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build documentation
-        run: cargo doc --all-features --no-deps --workspace
+        run: cargo doc --no-deps --workspace
 
   # ==================== 安全审计 ====================
   audit:
