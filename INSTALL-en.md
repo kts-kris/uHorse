@@ -1,243 +1,233 @@
 # uHorse Installation Guide
 
+This document only describes the **current v4.0 Hub-Node mainline** installation path that matches the repository as it exists today.
+
+The recommended path is:
+
+- build `uhorse-hub`
+- build `uhorse-node`
+- generate `hub.toml` and `node.toml`
+- start Hub and Node separately
+
+> Note: the repository still contains the legacy `uhorse` monolithic binary and helper scripts such as `install.sh` and `quick-setup.sh`, but those are not the primary path documented here.
+
 ## Table of Contents
 
 - [System Requirements](#system-requirements)
-- [Installation Methods](#installation-methods)
-- [Verify Installation](#verify-installation)
+- [Install from Source](#install-from-source)
+- [Optional: build the legacy monolithic binary](#optional-build-the-legacy-monolithic-binary)
+- [Installation Verification](#installation-verification)
+- [About the helper scripts](#about-the-helper-scripts)
 - [Troubleshooting](#troubleshooting)
+- [Next Steps](#next-steps)
 
 ---
 
 ## System Requirements
 
-### Minimum Requirements
+### Minimum
 
-- **Operating System**: Linux, macOS, or Windows (WSL2)
-- **Rust**: 1.70 or higher
-- **Memory**: 512 MB available
-- **Disk**: 100 MB available space
+- **OS**: Linux, macOS, or Windows via WSL2
+- **Rust**: `1.78+`
+- **Memory**: at least `512 MB`
+- **Disk**: at least `200 MB`
+
+### Common dependencies
+
+- `cargo`
+- `openssl`
+- `pkg-config`
 
 ### Recommended
 
-- **Memory**: 2 GB or more
-- **Disk**: 1 GB or more (including logs and data)
-- **CPU**: 2 cores or more
+- current Rust stable toolchain
+- `2 GB+` memory
+- network access between Node and Hub
 
 ---
 
-## Installation Methods
+## Install from Source
 
-### Method 1: Download Binary (Recommended)
+This is the recommended path for the current repository.
 
-Download pre-built binaries from [GitHub Releases](https://github.com/kts-kris/uHorse/releases):
-
-**Linux (x86_64)**
-```bash
-curl -LO https://github.com/kts-kris/uHorse/releases/latest/download/uhorse-x86_64-unknown-linux-gnu.tar.gz
-tar xzf uhorse-x86_64-unknown-linux-gnu.tar.gz
-sudo mv uhorse /usr/local/bin/
-```
-
-**macOS (Apple Silicon)**
-```bash
-curl -LO https://github.com/kts-kris/uHorse/releases/latest/download/uhorse-aarch64-apple-darwin.tar.gz
-tar xzf uhorse-aarch64-apple-darwin.tar.gz
-sudo mv uhorse /usr/local/bin/
-```
-
-**macOS (Intel)**
-```bash
-curl -LO https://github.com/kts-kris/uHorse/releases/latest/download/uhorse-x86_64-apple-darwin.tar.gz
-tar xzf uhorse-x86_64-apple-darwin.tar.gz
-sudo mv uhorse /usr/local/bin/
-```
-
-**Windows**
-```powershell
-# Download from browser or use curl
-curl -LO https://github.com/kts-kris/uHorse/releases/latest/download/uhorse-x86_64-pc-windows-msvc.zip
-Expand-Archive uhorse-x86_64-pc-windows-msvc.zip
-```
-
-### Method 2: Build from Source
+### 1. Clone the repository
 
 ```bash
-# Clone repository
-git clone https://github.com/kts-kris/uHorse
-cd uHorse
-
-# Build release binary
-cargo build --release
-
-# Binary location: ./target/release/uhorse
-sudo cp ./target/release/uhorse /usr/local/bin/
+git clone https://github.com/uhorse/uhorse-rs
+cd uhorse-rs
 ```
 
-### Method 3: One-Click Install
+### 2. Build Hub and Node
 
 ```bash
-# Clone repository
-git clone https://github.com/kts-kris/uHorse
-cd uHorse
-
-# Run install script (checks dependencies, compiles, configures)
-./install.sh
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-### Method 4: Docker
+Main build outputs:
+
+- `target/release/uhorse-hub`
+- `target/release/uhorse-node`
+
+### 3. Generate default configs
 
 ```bash
-# Using docker-compose (recommended)
-docker-compose up -d
+./target/release/uhorse-hub init --output hub.toml
+./target/release/uhorse-node init --output node.toml
+```
 
-# Or using docker directly
-docker build -t uhorse .
-docker run -d -p 8080:8080 -v ./data:/app/data uhorse
+### 4. Adjust the configs
+
+For a minimal local roundtrip you usually only need:
+
+- `hub.toml` for Hub host / port / scheduler fields
+- `node.toml` for node name / workspace / Hub WebSocket URL
+
+See [CONFIG-en.md](CONFIG-en.md) for the actual config structure.
+
+### 5. Start Hub and Node
+
+Terminal 1:
+
+```bash
+./target/release/uhorse-hub --config hub.toml --log-level info
+```
+
+Terminal 2:
+
+```bash
+./target/release/uhorse-node --config node.toml --log-level info
 ```
 
 ---
 
-## Configuration
+## Optional: build the legacy monolithic binary
 
-### Interactive Wizard
-
-After installation, run the configuration wizard:
+The workspace still contains the `uhorse` binary target. If you need it for legacy scripts or historical compatibility checks, build it separately:
 
 ```bash
-uhorse wizard
+cargo build --release -p uhorse
 ```
 
-The wizard will guide you through:
-- 📡 Server address and port
-- 💾 Database (SQLite or PostgreSQL)
-- 📱 Channel credentials (select channels you need)
-- 🤖 LLM configuration (OpenAI, Anthropic, Gemini...)
-- 🔒 Security settings (JWT secret, token expiration)
+Output:
 
-### Manual Configuration
+- `target/release/uhorse`
 
-Create `config.toml`:
-
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
-
-[database]
-type = "sqlite"
-path = "./data/uhorse.db"
-
-[channels]
-enabled = ["telegram"]
-
-[channels.telegram]
-bot_token = "your_bot_token"
-
-[llm]
-provider = "openai"
-api_key = "sk-..."
-model = "gpt-4"
-
-[security]
-jwt_secret = "your-secret-key"
-token_expiry = "24h"
-```
+> The current README, config docs, and deployment docs are centered on `uhorse-hub` + `uhorse-node`.
 
 ---
 
-## Verify Installation
+## Installation Verification
 
-### Health Check
-
-```bash
-# Liveness check
-curl http://localhost:8080/health/live
-
-# Readiness check
-curl http://localhost:8080/health/ready
-```
-
-### View Metrics
+### 1. Check the binaries
 
 ```bash
-curl http://localhost:8080/metrics
+./target/release/uhorse-hub --help
+./target/release/uhorse-node --help
 ```
 
-### Check Version
+### 2. Verify Node workspace access
 
 ```bash
-uhorse --version
+./target/release/uhorse-node check --workspace .
 ```
+
+### 3. Check Hub after startup
+
+```bash
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
+```
+
+### 4. Run the verified local roundtrip test
+
+```bash
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
+```
+
+This test starts a real:
+
+- Hub
+- WebSocket server
+- Node
+- file existence roundtrip task
+
+---
+
+## About the helper scripts
+
+These scripts still exist in the repository root:
+
+- `install.sh`
+- `quick-setup.sh`
+- `start.sh`
+- `stop.sh`
+
+They mainly wrap the older `uhorse` monolithic flow and are not the primary entrypoint for the current v4.0 Hub-Node setup.
+
+If you want to:
+
+- verify the local Hub-Node roundtrip
+- configure DingTalk Stream
+- configure LLMs or a custom model provider
+- deploy Hub on a server and Node on a workstation
+
+prefer the `uhorse-hub` and `uhorse-node` commands from this document.
 
 ---
 
 ## Troubleshooting
 
-### Build Errors
+### Rust version is too old
 
-**Problem**: OpenSSL not found
 ```bash
-# Ubuntu/Debian
-sudo apt-get install libssl-dev pkg-config
+rustc --version
+rustup update
+```
 
-# Fedora/RHEL
-sudo dnf install openssl-devel pkg-config
+### Missing OpenSSL / pkg-config
 
-# macOS (Homebrew)
+**macOS**
+
+```bash
 brew install openssl pkg-config
 ```
 
-**Problem**: Rust version too old
+**Ubuntu / Debian**
+
 ```bash
-# Update Rust
-rustup update stable
+sudo apt-get update
+sudo apt-get install -y libssl-dev pkg-config
 ```
 
-### Runtime Errors
+### Only one binary was built
 
-**Problem**: Port already in use
+Make sure the build command includes both packages:
+
 ```bash
-# Check port usage
-lsof -i :8080
-
-# Use different port
-uhorse --port 8081
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-**Problem**: Database permission denied
-```bash
-# Fix permissions
-chmod 755 ./data
-chmod 644 ./data/uhorse.db
-```
+### Node cannot connect to Hub
 
-### Docker Issues
+Check:
 
-**Problem**: Container won't start
-```bash
-# Check logs
-docker-compose logs uhorse
+- the Hub port in `hub.toml`
+- `connection.hub_url` in `node.toml`
+- the `/ws` path
 
-# Rebuild container
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+Example:
+
+```toml
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
 ```
 
 ---
 
 ## Next Steps
 
-- [Configuration Guide](CONFIG.md) - Detailed configuration options
-- [Channel Setup](CHANNELS.md) - Configure messaging channels
-- [API Reference](API.md) - REST API documentation
-- [Deployment Guide](deployments/DEPLOYMENT.md) - Production deployment
-
----
-
-## Need Help?
-
-- 📖 [Documentation](https://github.com/kts-kris/uHorse#documentation)
-- 💬 [Discussions](https://github.com/kts-kris/uHorse/discussions)
-- 🐛 [Report Bug](https://github.com/kts-kris/uHorse/issues)
+- [README-en.md](README-en.md): project overview
+- [CONFIG-en.md](CONFIG-en.md): actual config structure and examples
+- [LOCAL_SETUP.md](LOCAL_SETUP.md): local Hub-Node startup guide
+- [TESTING.md](TESTING.md): build, test, and roundtrip verification
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md): v4.0 Hub-Node deployment guide

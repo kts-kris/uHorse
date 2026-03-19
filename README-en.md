@@ -9,367 +9,206 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>🦄 Enterprise AI Infrastructure Platform</strong>
+  <strong>v4.0 Hub-Node Distributed AI Execution Platform</strong>
 </p>
 
 <p align="center">
-  <em>企业级 AI 基础设施平台</em>
+  <em>Hub schedules work, Node executes locally, and DingTalk Stream provides the enterprise message entrypoint.</em>
 </p>
 
 <p align="center">
-  <a href="#-what-is-uhorse">Overview</a> •
-  <a href="#-key-highlights">Features</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-architecture">Architecture</a> •
-  <a href="#-documentation">Docs</a> •
-  <a href="docs/ENTERPRISE_BEST_PRACTICES.md">🏆 Best Practices</a>
+  <a href="#overview">Overview</a> •
+  <a href="#current-status">Current Status</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#documentation-index">Docs</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
+  <img src="https://img.shields.io/badge/version-4.0.0--alpha.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
-  <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/status-alpha-yellow" alt="Status">
 </p>
 
 ---
 
-## 🌟 What is uHorse?
+## Overview
 
-uHorse is an enterprise-grade multi-channel AI gateway and agent framework written in **Rust**. It connects the power of Large Language Models (LLMs) to 7+ major communication platforms, enabling AI assistants to seamlessly serve users on Telegram, DingTalk, Feishu, WeCom, Slack, Discord, WhatsApp, and more.
+The current mainline of this repository is the **v4.0 Hub-Node architecture**:
 
-```bash
-# One-liner summary
-uHorse = Multi-Channel Gateway + Agent Orchestration + Skill System + Memory Management
-```
+- `uhorse-hub`: cloud-side control plane for node access, task scheduling, Web API, DingTalk intake, and result replies.
+- `uhorse-node`: local execution node that runs commands inside a controlled workspace and reports results back.
+- `uhorse-protocol`: message protocol between Hub and Node.
+- `uhorse-channel`: the current Hub runtime is wired for **DingTalk Stream mode**.
+- `uhorse-config`: shared configuration model used by Hub for DingTalk / LLM / base service settings.
 
-### ✨ Key Highlights
+These docs are now aligned to what is actually implemented in the repository. They no longer describe the old monolithic `uhorse` runtime, old health endpoints, or old `OPENCLAW_*` variables as the primary path.
 
-| Feature | Description |
-|---------|-------------|
-| 🚀 **High Performance** | Rust + Tokio async runtime, 100K+ concurrent connections on single machine |
-| 🔌 **7+ Channels** | Telegram, DingTalk⭐, Feishu, WeCom, Slack, Discord, WhatsApp |
-| 🤖 **Multi-Agent** | Independent Agent workspaces, multi-agent collaboration support |
-| 🛡️ **Enterprise-Grade** | JWT authentication, device pairing, approval workflows, complete audit logs |
-| 📦 **Modular** | 18+ independent crates, combine as needed, flexible extension |
-| 🔧 **MCP Protocol** | Full Model Context Protocol support, compatible with mainstream LLM tool ecosystem |
+## Current Status
 
----
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Local Hub startup | ✅ | `uhorse-hub` serves `/api/health`, `/api/nodes`, and `/ws` |
+| Local Node startup | ✅ | `uhorse-node` loads `node.toml` and connects to Hub |
+| Hub → Node dispatch | ✅ | task submission triggers scheduling |
+| Node → Hub result return | ✅ | Node sends full `NodeToHub::TaskResult` |
+| Local roundtrip verification | ✅ | covered by `test_local_hub_node_roundtrip_file_exists` |
+| DingTalk Stream integration | ✅ | Stream mode is the intended path; no public webhook is required for message intake |
+| Real DingTalk tenant verification | ⏳ | final validation still depends on real enterprise credentials |
 
-## 🆚 Comparison with OpenClaw
+## Quick Start
 
-OpenClaw is an excellent personal AI assistant framework, while uHorse focuses on **enterprise multi-channel scenarios**:
-
-| Dimension | OpenClaw | uHorse | Recommendation |
-|-----------|----------|--------|----------------|
-| **Positioning** | Personal AI Assistant | Enterprise AI Gateway | Personal use → OpenClaw, Enterprise → uHorse |
-| **Tech Stack** | TypeScript (220K+ lines) | Rust (15K+ lines) | Performance → Rust |
-| **Architecture** | 3-Layer (Gateway-Skills-Memory) | 4-Layer (Gateway-Agent-Skills-Memory) | Multi-Agent → uHorse |
-| **Channels** | Community plugin driven | Built-in 7+ enterprise channels | Multi-channel → uHorse |
-| **Workspace** | Single shared | Independent Agent isolation | Multi-tenant → uHorse |
-| **Enterprise Features** | Basic | Auth/AuthZ/Audit/Monitoring/Compliance | Production → uHorse |
-| **Performance** | ~10K concurrent | ~100K+ concurrent | High concurrency → uHorse |
-| **Memory Footprint** | 50-200MB | 5-20MB | Edge devices → uHorse |
-| **High Availability** | Manual setup | Built-in cluster + failover | Enterprise → uHorse |
-| **Data Governance** | None | Classification/Retention/Backup | Compliance → uHorse |
-| **SSO Integration** | Community plugins | OAuth2/OIDC/SAML built-in | Enterprise SSO → uHorse |
-
-### Decision Tree
-
-```
-What are your needs?
-├─ Personal AI Assistant ────────────────────→ OpenClaw ✅
-├─ Quick Prototyping (TypeScript) ────────────→ OpenClaw ✅
-├─ Leverage Community Plugin Ecosystem ──────→ OpenClaw ✅
-│
-├─ Enterprise Production Deployment ─────────→ uHorse ✅
-├─ Multi-Channel Unified Access ─────────────→ uHorse ✅
-├─ Multi-Agent Collaboration ─────────────────→ uHorse ✅
-├─ High Concurrency / Low Latency ───────────→ uHorse ✅
-├─ Edge Computing / Resource Constrained ────→ uHorse ✅
-├─ Complete Audit / Security Required ───────→ uHorse ✅
-├─ GDPR/SOC2 Compliance ─────────────────────→ uHorse ✅
-└─ SSO/SIEM Integration ─────────────────────→ uHorse ✅
-```
-
----
-
-## 🏗️ Architecture
-
-uHorse adopts a **four-layer architecture**, adding an independent agent layer compared to traditional three-layer architecture:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🌐 Gateway (Control Plane)                    │
-│  • Session Management  • Message Routing  • Bindings Rule Engine    │
-│  • Event-Driven Architecture                                          │
-│  • Channels: Telegram ⭐ | DingTalk ⭐ | Feishu | WeCom | Slack      │
-└─────────────────────────────────────────────────────────────────────┘
-                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🤖 Agent (Intelligence Layer)                 │
-│  • LLM Orchestration  • Tool Usage Decision  • Intent Recognition   │
-│  • Multi-Agent Collaboration                                         │
-│  • Independent Workspace: ~/.uhorse/workspace-{agent_name}/         │
-└─────────────────────────────────────────────────────────────────────┘
-                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🔧 Skills (Skill System)                      │
-│  • SKILL.md Driven  • Rust/WASM Execution  • JSON Schema Validation │
-│  • Permission Control  • MCP Tools Integration                       │
-│  • Built-in: calculator, time, text_search                          │
-└─────────────────────────────────────────────────────────────────────┘
-                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🧠 Memory (Memory System)                     │
-│  • SOUL.md (Constitution)  • MEMORY.md (Long-term)  • USER.md       │
-│  • File System + SQLite Persistence  • SessionState Management      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Module Structure
-
-```
-uhorse/
-├── uhorse-core/         # Core types, traits, protocol definitions
-├── uhorse-gateway/      # HTTP/WebSocket gateway layer
-├── uhorse-channel/      # Channel adapters (7+ channels)
-├── uhorse-agent/        # Agent management, session management
-├── uhorse-llm/          # LLM abstraction layer (OpenAI, Anthropic, ...)
-├── uhorse-tool/         # Tool execution, MCP protocol
-├── uhorse-storage/      # Storage layer (SQLite, JSONL)
-├── uhorse-security/     # Security layer (JWT, device pairing, approval)
-├── uhorse-scheduler/    # Cron scheduler
-├── uhorse-observability/# Observability (tracing, metrics, audit)
-├── uhorse-config/       # Configuration management, interactive wizard
-├── uhorse-discovery/    # Service discovery (etcd/consul) + failover
-├── uhorse-cache/        # Distributed cache (Redis)
-├── uhorse-queue/        # Message queue (NATS)
-├── uhorse-gdpr/         # GDPR compliance
-├── uhorse-governance/   # Data governance (classification/retention)
-├── uhorse-backup/       # Backup & recovery
-├── uhorse-sso/          # SSO/OAuth2/OIDC/SAML
-├── uhorse-siem/         # SIEM integration (Splunk/Datadog)
-├── uhorse-webhook/      # Webhook enhancement
-├── uhorse-integration/  # Third-party integration (Jira/GitHub/Slack)
-└── uhorse-bin/          # Binary entry point
-```
-
----
-
-## 🚀 Quick Start
-
-### Option 1: One-Click Install ⭐ Recommended
+### 1. Build the binaries
 
 ```bash
-# Clone repository
 git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
 
-# One-click install (auto-check dependencies, compile, configure)
-./install.sh
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-### Option 2: Interactive Configuration Wizard
+Build outputs:
+
+- `target/release/uhorse-hub`
+- `target/release/uhorse-node`
+
+### 2. Generate default config files
 
 ```bash
-# Build
-cargo build --release
-
-# Start configuration wizard
-./target/release/uhorse wizard
+./target/release/uhorse-hub init --output hub.toml
+./target/release/uhorse-node init --output node.toml
 ```
 
-The wizard will guide you through:
-- 📡 Server address and port
-- 💾 Database (SQLite or PostgreSQL)
-- 📱 Channel credentials (select channels you need)
-- 🤖 LLM configuration (OpenAI, Anthropic, Gemini...)
-- 🔒 Security settings (JWT secret, token expiration)
+If you only want the smallest local roundtrip setup, use the minimal configs below.
 
-### Option 3: Docker
+### 3. Minimal local roundtrip config
 
-```bash
-docker-compose up -d
-```
-
-### Verify Installation
-
-```bash
-# Health check
-curl http://localhost:8080/health/live
-curl http://localhost:8080/health/ready
-
-# View metrics
-curl http://localhost:8080/metrics
-```
-
----
-
-## 📱 Supported Channels
-
-| Channel | Status | Tag | Description |
-|---------|--------|-----|-------------|
-| **Telegram** | ✅ Stable | ⭐ Default | Most mature channel, full Bot API support |
-| **DingTalk** | ✅ Stable | ⭐ Default | Enterprise-grade, rich text and card messages |
-| **Feishu** | ✅ Stable | New | Rich text and interactive card support |
-| **WeCom** | ✅ Stable | New | Enterprise internal communication |
-| **Slack** | ✅ Stable | - | Full Slash Commands support |
-| **Discord** | ✅ Stable | - | Gaming community, embed messages |
-| **WhatsApp** | ✅ Stable | - | WhatsApp Business API |
-
-### Configuration Example
+`hub.toml`:
 
 ```toml
-# config.toml
-
-[server]
-host = "127.0.0.1"
-port = 8080
-
-[channels]
-enabled = ["telegram", "dingtalk"]  # Enabled channels
-
-[channels.telegram]
-bot_token = "your_bot_token"
-webhook_secret = "optional_secret"
-
-[channels.dingtalk]
-app_key = "your_app_key"
-app_secret = "your_app_secret"
-agent_id = 123456789
-
-[database]
-path = "./data/uhorse.db"
-
-[llm]
-enabled = true
-provider = "openai"
-api_key = "sk-..."
-model = "gpt-4"
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
 ```
 
----
+`node.toml`:
 
-## 📊 Performance
+```toml
+name = "local-node"
+workspace_path = "."
 
-| Metric | Value | Description |
-|--------|-------|-------------|
-| **Concurrent Connections** | 100K+ | Tokio async runtime |
-| **Request Latency** | <1ms | P99 latency |
-| **Startup Time** | ~30ms | No JIT warmup |
-| **Memory Footprint** | 5-20MB | No GC overhead |
-| **Binary Size** | ~15MB | Release build |
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
+```
 
----
+### 4. Start Hub and Node
 
-## 📚 Documentation
-
-### Quick Start
-
-| Document | Description |
-|----------|-------------|
-| [Installation Guide](INSTALL.md) | Detailed installation steps |
-| [Configuration Wizard](WIZARD.md) | Interactive configuration guide |
-| [Quick Experience](#-quick-start) | 30-second Docker startup |
-
-### Architecture Design
-
-| Document | Description |
-|----------|-------------|
-| **[v4.0 Architecture](docs/architecture/v4.0-architecture-en.md)** | ⭐ **Latest** - Hub-Node Distributed Architecture |
-| [v4.0 架构设计 (中文)](docs/architecture/v4.0-architecture.md) | Hub-Node 分布式架构 (中文) |
-| [v3.0 Architecture Design](docs/architecture/v3.0-architecture.md) | Enterprise architecture design |
-
-### Development Guides
-
-| Document | Description |
-|----------|-------------|
-| [API Reference](API.md) | REST API reference |
-| [Skill Development](SKILLS.md) | Custom skill development |
-| [Channel Integration](CHANNELS.md) | Channel configuration guides |
-
-### Deployment & Operations
-
-| Document | Description |
-|----------|-------------|
-| [Deployment Guide](deployments/DEPLOYMENT.md) | Production deployment |
-| **[Enterprise Best Practices](docs/ENTERPRISE_BEST_PRACTICES-en.md)** | ⭐ **Recommended** - 5 scenarios, security compliance, cost optimization |
-
-### Version History
-
-| Document | Description |
-|----------|-------------|
-| [CHANGELOG](CHANGELOG-en.md) | Version changelog |
-| [v3.0 Roadmap](docs/roadmap/v3.0-roadmap.md) | Complete development roadmap |
-
----
-
-## 🛣️ Roadmap
-
-### v4.0 ✅ Current Version - Distributed AI Work Orchestration Platform
-
-> **Architecture Upgrade**: Cloud Hub + Local Node distributed architecture
-
-| Phase | Name | Status | Description |
-|-------|------|--------|-------------|
-| **Phase 1** | Core Architecture | ✅ | uhorse-protocol/hub/node, WebSocket communication, node management, task scheduling |
-| **Phase 2** | Intelligent Orchestration | ✅ | Orchestrator, SkillRegistry, subtask dependency management |
-| **Phase 3** | Security Hardening | ✅ | JWT authentication, sensitive operation approval, field encryption, TLS |
-| **Phase 4** | Tool Integration | ✅ | Local tools, skill executor, channel integration, Web dashboard |
-| **Phase 5** | Testing & Optimization | ✅ | 50 tests (E2E/integration/security), 8 performance benchmarks |
-
-📄 **Architecture Docs**: [English](docs/architecture/v4.0-architecture-en.md) \| [中文](docs/architecture/v4.0-architecture.md)
-
----
-
-### Version History
-
-| Version | Positioning | Core Features |
-|---------|-------------|---------------|
-| **v3.5** | Developer Experience | CLI TUI enhancement, error optimization, Playground Docker, Web skill editor, Python/TS SDK |
-| **v3.0** | Enterprise AI Infrastructure | Service discovery, load balancing, distributed cache, message queue, GDPR, SSO/SIEM |
-| **v2.0** | Enterprise Multi-Channel Gateway | 7+ channels, REST API, WebSocket/SSE, RBAC, multi-tenancy, multimodal support |
-| **v1.0** | Core Infrastructure | Agent framework, LLM abstraction, MCP protocol, SQLite/JSONL storage, JWT auth |
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please check [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Development Environment
+Terminal 1:
 
 ```bash
-# Clone repository
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
-
-# Install development dependencies
-cargo install cargo-watch cargo-nextest
-
-# Run tests
-cargo nextest run
-
-# Hot reload development
-cargo watch -x run
+./target/release/uhorse-hub --config hub.toml --log-level info
 ```
 
----
+Terminal 2:
 
-## 📄 License
+```bash
+./target/release/uhorse-node --config node.toml --log-level info
+```
 
-Dual licensed: [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE)
+### 5. Verify connectivity
 
----
+```bash
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
+```
 
-## 🙏 Acknowledgments
+If `/api/nodes` returns an online node list, Hub and Node are connected.
 
-- Thanks to the [OpenClaw](https://github.com/openclaw/openclaw) team for their exploration in the AI assistant field, providing valuable reference for the community
-- Thanks to all contributors
+### 6. Run the real local roundtrip integration test
 
----
+```bash
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
+```
 
-<p align="center">
-  <strong>uHorse - Making AI Ubiquitous</strong>
-</p>
+This test starts a real Hub, a real WebSocket server, and a real Node, then verifies a file command is dispatched to the Node and returned back to the Hub.
+
+## DingTalk Stream Mode
+
+The current `uhorse-hub` runtime already wires DingTalk into the main execution flow:
+
+- Recommended mode: **Stream mode**
+- Benefit: no public IP or public webhook is required for inbound message delivery
+- Current command allowlist: `list` / `ls`, `search`, `read` / `cat`, `info`, `exists`
+- Hub can route Node execution results back to the original DingTalk conversation
+
+To enable DingTalk, use a unified config file. See [CONFIG-en.md](CONFIG-en.md) and [CHANNELS-en.md](CHANNELS-en.md).
+
+## Architecture
+
+```text
+┌──────────────────────────────────────────────┐
+│                  uhorse-hub                  │
+│  • Web API: /api/health /api/nodes /api/*   │
+│  • WebSocket: /ws                            │
+│  • Task Scheduler                            │
+│  • DingTalk Stream / result reply            │
+└──────────────────────────────────────────────┘
+                      │
+                      │ WebSocket
+                      ▼
+┌──────────────────────────────────────────────┐
+│                 uhorse-node                  │
+│  • Workspace                                 │
+│  • Permission Manager                        │
+│  • Command Executor                          │
+│  • TaskResult return                         │
+└──────────────────────────────────────────────┘
+```
+
+### Primary source entrypoints
+
+- Hub startup and unified config loading: `crates/uhorse-hub/src/main.rs`
+- Hub Web API and DingTalk routing: `crates/uhorse-hub/src/web/mod.rs`
+- Hub scheduling core: `crates/uhorse-hub/src/hub.rs`
+- Node startup entrypoint: `crates/uhorse-node/src/main.rs`
+- Node execution and result return: `crates/uhorse-node/src/node.rs`
+- Local roundtrip test: `crates/uhorse-hub/tests/integration_test.rs`
+
+## Documentation Index
+
+| Document | Description |
+|----------|-------------|
+| [INSTALL-en.md](INSTALL-en.md) | installation and binary build |
+| [LOCAL_SETUP.md](LOCAL_SETUP.md) | local Hub-Node development and startup |
+| [CONFIG-en.md](CONFIG-en.md) | actual config structure and examples |
+| [CHANNELS-en.md](CHANNELS-en.md) | current channel status, focused on DingTalk Stream |
+| [TESTING.md](TESTING.md) | build, test, and local roundtrip verification |
+| [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4.0 Hub-Node deployment guide |
+| [deployments/DEPLOYMENT.md](deployments/DEPLOYMENT.md) | deployment overview and migration notes |
+
+## Workspace Layout
+
+```text
+crates/
+├── uhorse-hub/        # cloud hub
+├── uhorse-node/       # local node
+├── uhorse-protocol/   # Hub-Node protocol
+├── uhorse-channel/    # channel implementations (current Hub runtime focuses on DingTalk)
+├── uhorse-config/     # unified configuration
+├── uhorse-llm/        # LLM client
+└── ...                # other 3.x / 4.0 related modules
+```
+
+## License
+
+Dual licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE)

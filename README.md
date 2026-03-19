@@ -9,416 +9,206 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>🦄 企业级 AI 基础设施平台</strong>
+  <strong>v4.0 Hub-Node 分布式 AI 执行平台</strong>
 </p>
 
 <p align="center">
-  <em>Enterprise AI Infrastructure Platform</em>
+  <em>Hub 负责调度，Node 负责本地执行，DingTalk Stream 负责企业消息入口。</em>
 </p>
 
 <p align="center">
-  <a href="#-uhorse-是什么">概述</a> •
-  <a href="#-核心亮点">特性</a> •
-  <a href="#-快速开始">快速开始</a> •
-  <a href="#-架构">架构</a> •
-  <a href="#-文档">文档</a> •
-  <a href="docs/ENTERPRISE_BEST_PRACTICES.md">🏆 企业最佳实践</a>
+  <a href="#概述">概述</a> •
+  <a href="#当前状态">当前状态</a> •
+  <a href="#快速开始">快速开始</a> •
+  <a href="#架构">架构</a> •
+  <a href="#文档索引">文档索引</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/rust-1.75%2B-orange" alt="Rust Version">
+  <img src="https://img.shields.io/badge/version-4.0.0--alpha.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
-  <img src="https://img.shields.io/badge/status-ready-brightgreen" alt="Status">
+  <img src="https://img.shields.io/badge/status-alpha-yellow" alt="Status">
 </p>
 
 ---
 
-## 🌟 uHorse 是什么？ / What is uHorse?
+## 概述
 
-uHorse 是一个用 **Rust** 编写的企业级多渠道 AI 网关和智能体框架。它将大语言模型（LLM）的力量连接到 7+ 主流通信平台，让 AI 助手能够无缝地在 Telegram、钉钉、飞书、企业微信、Slack、Discord、WhatsApp 等平台上为用户服务。
+uHorse 当前仓库的主线是 **v4.0 Hub-Node 架构**：
 
-```bash
-# 一句话概括
-uHorse = 多渠道网关 + 智能体编排 + 技能系统 + 记忆管理
-```
+- `uhorse-hub`：云端中枢，负责节点接入、任务调度、Web API、DingTalk 消息入口与结果回传。
+- `uhorse-node`：本地执行节点，负责在受控工作空间内执行命令并回传结果。
+- `uhorse-protocol`：Hub 和 Node 之间的消息协议。
+- `uhorse-channel`：当前 Hub 运行时已接入 **DingTalk Stream 模式**。
+- `uhorse-config`：统一配置结构，供 Hub 读取 DingTalk / LLM / 基础服务配置。
 
-### ✨ 核心亮点
+当前文档以 **仓库里已经实现并验证过的行为** 为准，不再沿用旧版单体 `uhorse` 的启动方式、旧健康检查路径或 `OPENCLAW_*` 环境变量说明。
 
-| 特性 | 说明 |
-|------|------|
-| 🚀 **高性能** | Rust + Tokio 异步运行时，单机支持 100K+ 并发连接 |
-| 🔌 **7+ 通道** | Telegram、钉钉⭐、飞书、企业微信、Slack、Discord、WhatsApp |
-| 🤖 **多智能体** | 独立 Agent 工作空间，支持多 Agent 协作 |
-| 🛡️ **企业级** | JWT 认证、设备配对、审批流程、完整审计日志 |
-| 📦 **模块化** | 10+ 独立 crate，按需组合，灵活扩展 |
-| 🔧 **MCP 协议** | 完整支持 Model Context Protocol，兼容主流 LLM 工具生态 |
+## 当前状态
 
----
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| Hub 本机启动 | ✅ | `uhorse-hub` 可正常启动并提供 `/api/health`、`/api/nodes`、`/ws` |
+| Node 本机启动 | ✅ | `uhorse-node` 可加载 `node.toml` 并连接 Hub |
+| Hub → Node 任务下发 | ✅ | 任务提交后会触发调度 |
+| Node → Hub 结果回传 | ✅ | Node 会发送完整 `NodeToHub::TaskResult` |
+| 本地闭环验证 | ✅ | 已有真实集成测试 `test_local_hub_node_roundtrip_file_exists` |
+| DingTalk Stream 接入 | ✅ | 当前方向为 Stream 模式，无需公网 IP 才能建立消息流 |
+| DingTalk 真实企业凭据联调 | ⏳ | 代码链路已接通，最终联调仍依赖真实企业配置 |
 
-## 🆚 与 OpenClaw 对比
+## 快速开始
 
-OpenClaw 是优秀的个人 AI 助手框架，uHorse 则专注于**企业级多渠道场景**：
-
-| 维度 | OpenClaw | uHorse | 选择建议 |
-|------|----------|--------|----------|
-| **定位** | 个人 AI 助手 | 企业 AI 网关 | 个人用 OpenClaw，企业用 uHorse |
-| **技术栈** | TypeScript (220K+ 行) | Rust (10K+ 行) | 追求性能用 Rust |
-| **架构** | 3层 (Gateway-Skills-Memory) | 4层 (Gateway-Agent-Skills-Memory) | 多 Agent 场景用 uHorse |
-| **通道** | 社区插件驱动 | 内置 7+ 企业通道 | 需要多渠道用 uHorse |
-| **工作空间** | 单一共享 | 独立 Agent 隔离 | 多租户场景用 uHorse |
-| **企业功能** | 基础 | 认证/授权/审计/监控 | 生产环境用 uHorse |
-| **性能** | ~10K 并发 | ~100K+ 并发 | 高并发场景用 uHorse |
-| **内存占用** | 50-200MB | 5-20MB | 边缘设备用 uHorse |
-
-### 决策树
-
-```
-你的需求是什么？
-├─ 个人 AI 助手 ────────────────────→ OpenClaw ✅
-├─ 快速原型开发 (TypeScript) ───────→ OpenClaw ✅
-├─ 利用社区插件生态 ────────────────→ OpenClaw ✅
-│
-├─ 企业生产部署 ────────────────────→ uHorse ✅
-├─ 多渠道统一接入 ──────────────────→ uHorse ✅
-├─ 多智能体协作 ────────────────────→ uHorse ✅
-├─ 高并发/低延迟 ───────────────────→ uHorse ✅
-├─ 边缘计算/资源受限 ───────────────→ uHorse ✅
-└─ 需要完整审计/安全 ───────────────→ uHorse ✅
-```
-
----
-
-## 🏗️ 架构
-
-uHorse 采用**四层架构**，相比传统的三层架构增加了独立的智能体层：
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🌐 Gateway (控制平面)                         │
-│  • 会话管理  • 消息路由  • Bindings 规则引擎  • 事件驱动架构          │
-│  • 通道: Telegram ⭐ | 钉钉 ⭐ | 飞书 | 企业微信 | Slack | Discord    │
-└─────────────────────────────────────────────────────────────────────┘
-                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🤖 Agent (智能体层)                           │
-│  • LLM 调用编排  • 工具使用决策  • 意图识别  • 多 Agent 协作         │
-│  • 独立工作空间: ~/.uhorse/workspace-{agent_name}/                  │
-└─────────────────────────────────────────────────────────────────────┘
-                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🔧 Skills (技能系统)                          │
-│  • SKILL.md 驱动  • Rust/WASM 执行  • JSON Schema 验证  • 权限控制  │
-│  • MCP Tools 集成  • 内置: calculator, time, text_search           │
-└─────────────────────────────────────────────────────────────────────┘
-                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        🧠 Memory (记忆系统)                          │
-│  • SOUL.md (宪法/行为准则)  • MEMORY.md (长期记忆)  • USER.md       │
-│  • 文件系统 + SQLite 持久化  • SessionState 结构化管理              │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### 模块结构
-
-```
-uhorse/
-├── uhorse-core/         # 核心类型、Trait、协议定义
-├── uhorse-gateway/      # HTTP/WebSocket 网关层
-├── uhorse-channel/      # 通道适配器 (7+ 通道)
-├── uhorse-agent/        # 智能体管理、会话管理
-├── uhorse-llm/          # LLM 抽象层 (OpenAI, Anthropic, ...)
-├── uhorse-tool/         # 工具执行、MCP 协议
-├── uhorse-storage/      # 存储层 (SQLite, JSONL)
-├── uhorse-security/     # 安全层 (JWT, 设备配对, 审批)
-├── uhorse-scheduler/    # Cron 调度器
-├── uhorse-observability/# 可观测性 (tracing, metrics, audit)
-├── uhorse-config/       # 配置管理、交互式向导
-├── uhorse-discovery/    # 服务发现 (etcd/consul) + 故障转移
-├── uhorse-governance/   # 数据治理 (分类/保留/归档)
-├── uhorse-backup/       # 备份恢复 (调度/加密/复制)
-└── uhorse-bin/          # 二进制程序入口
-```
-
----
-
-## 🚀 快速开始
-
-### 方式一：一键安装 ⭐ 推荐
+### 1. 编译二进制
 
 ```bash
-# 克隆仓库
 git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
 
-# 一键安装（自动检查依赖、编译、配置）
-./install.sh
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-### 方式二：交互式配置向导
+编译结果：
+
+- `target/release/uhorse-hub`
+- `target/release/uhorse-node`
+
+### 2. 生成默认配置
 
 ```bash
-# 编译
-cargo build --release
-
-# 启动配置向导
-./target/release/uhorse wizard
+./target/release/uhorse-hub init --output hub.toml
+./target/release/uhorse-node init --output node.toml
 ```
 
-向导将引导你配置：
-- 📡 服务器地址和端口
-- 💾 数据库（SQLite 或 PostgreSQL）
-- 📱 通道凭证（选择你需要的通道）
-- 🤖 LLM 配置（OpenAI、Anthropic、Gemini...）
-- 🔒 安全设置（JWT 密钥、Token 过期时间）
+如果你只想先做最小本地闭环，可以直接使用下面这组最小配置。
 
-### 方式三：Docker
+### 3. 最小本地闭环配置
 
-```bash
-docker-compose up -d
-```
-
-### 验证安装
-
-```bash
-# 健康检查
-curl http://localhost:8080/health/live
-curl http://localhost:8080/health/ready
-
-# 查看指标
-curl http://localhost:8080/metrics
-```
-
----
-
-## 📱 支持的通道
-
-| 通道 | 状态 | 标签 | 说明 |
-|------|------|------|------|
-| **Telegram** | ✅ 稳定 | ⭐ 默认预装 | 最成熟的通道，完整 Bot API 支持 |
-| **钉钉** | ✅ 稳定 | ⭐ 默认预装 | 企业级，支持富文本、卡片消息 |
-| **飞书** | ✅ 稳定 | 新增 | 支持富文本、交互式卡片 |
-| **企业微信** | ✅ 稳定 | 新增 | 企业内部沟通首选 |
-| **Slack** | ✅ 稳定 | - | 完整 Slash Commands 支持 |
-| **Discord** | ✅ 稳定 | - | 游戏社区、Embed 消息 |
-| **WhatsApp** | ✅ 稳定 | - | WhatsApp Business API |
-
-### 配置示例
+`hub.toml`：
 
 ```toml
-# config.toml
-
-[server]
-host = "127.0.0.1"
-port = 8080
-
-[channels]
-enabled = ["telegram", "dingtalk"]  # 启用的通道
-
-[channels.telegram]
-bot_token = "your_bot_token"
-webhook_secret = "optional_secret"
-
-[channels.dingtalk]
-app_key = "your_app_key"
-app_secret = "your_app_secret"
-agent_id = 123456789
-
-[database]
-path = "./data/uhorse.db"
-
-[llm]
-enabled = true
-provider = "openai"
-api_key = "sk-..."
-model = "gpt-4"
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
 ```
 
----
+`node.toml`：
 
-## 🔧 核心功能
+```toml
+name = "local-node"
+workspace_path = "."
 
-### 1. 多渠道统一网关
-
-```rust
-// 统一的通道接口
-pub trait Channel: Send + Sync {
-    fn channel_type(&self) -> ChannelType;
-    async fn send_message(&self, user_id: &str, message: &MessageContent) -> Result<(), ChannelError>;
-    async fn verify_webhook(&self, payload: &[u8], signature: Option<&str>) -> Result<bool, ChannelError>;
-    async fn start(&mut self) -> Result<()>;
-    async fn stop(&mut self) -> Result<()>;
-    fn is_running(&self) -> bool;
-}
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
 ```
 
-### 2. SKILL.md 驱动的技能系统
+### 4. 启动 Hub 和 Node
 
-```markdown
-# 天气查询技能
-
-## Description
-查询全球任意城市的实时天气信息
-
-## Version
-1.0.0
-
-## Tags
-weather,api,utility
-
-## Tools
-{
-  "name": "get_weather",
-  "description": "获取指定城市的天气",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "city": {"type": "string", "description": "城市名称"},
-      "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
-    },
-    "required": ["city"]
-  }
-}
-```
-
-### 3. 结构化记忆系统
-
-```
-~/.uhorse/
-├── workspace-main/       # 主 Agent 工作空间
-│   ├── SOUL.md          # 宪法 - 定义行为准则
-│   ├── MEMORY.md        # 长期记忆索引
-│   ├── USER.md          # 用户偏好
-│   └── sessions/        # 会话状态
-├── workspace-coder/     # Coder Agent（独立个性）
-│   └── SOUL.md          # 专注于代码的"灵魂"
-└── workspace-writer/    # Writer Agent（独立个性）
-    └── SOUL.md          # 专注于写作的"灵魂"
-```
-
-### 4. 企业级安全
-
-- **JWT 认证**: 安全的 Token 验证
-- **设备配对**: 新设备需要审批
-- **审批流程**: 敏感操作需人工确认
-- **审计日志**: 完整操作记录
-- **幂等控制**: 防止重复操作
-
----
-
-## 📊 性能
-
-| 指标 | 数值 | 说明 |
-|------|------|------|
-| **并发连接** | 100K+ | Tokio 异步运行时 |
-| **请求延迟** | <1ms | P99 延迟 |
-| **启动时间** | ~30ms | 无 JIT 预热 |
-| **内存占用** | 5-20MB | 无 GC 开销 |
-| **二进制大小** | ~15MB | Release 编译 |
-
----
-
-## 📚 文档
-
-### 快速入门
-
-| 文档 | 说明 |
-|------|------|
-| [安装指南](INSTALL.md) | 详细安装步骤 |
-| [配置向导](WIZARD.md) | 交互式配置说明 |
-| [快速体验](#-快速开始) | 30 秒 Docker 启动 |
-
-### 架构设计
-
-| 文档 | 说明 |
-|------|------|
-| **[v4.0 架构设计](docs/architecture/v4.0-architecture.md)** | ⭐ **最新** - Hub-Node 分布式架构 |
-| [v4.0 Architecture (EN)](docs/architecture/v4.0-architecture-en.md) | Hub-Node Architecture (English) |
-| [v3.0 架构设计](docs/architecture/v3.0-architecture.md) | 企业级架构设计 |
-
-### 开发指南
-
-| 文档 | 说明 |
-|------|------|
-| [API 文档](API.md) | REST API 参考 |
-| [技能开发](SKILLS.md) | 自定义技能开发 |
-| [通道集成](CHANNELS.md) | 各通道配置指南 |
-
-### 运维部署
-
-| 文档 | 说明 |
-|------|------|
-| **[v4.0 Hub-Node 部署指南](deployments/DEPLOYMENT_V4.md)** | ⭐ **最新** - Hub 云端 + Node 本地分离部署 |
-| [部署指南 (v3.x)](deployments/DEPLOYMENT.md) | 单体部署 (兼容旧版本) |
-| **[企业最佳实践](docs/ENTERPRISE_BEST_PRACTICES.md)** | ⭐ **推荐** - 5 大场景、安全合规、成本优化 |
-
----
-
-## 🛣️ 路线图
-
-### v4.0 ✅ 当前版本 - 分布式 AI 工作编排平台
-
-> **架构升级**: 云端中枢 (Hub) + 本地节点 (Node) 分布式架构
-
-| Phase | 名称 | 状态 | 说明 |
-|-------|------|------|------|
-| **Phase 1** | 核心架构 | ✅ | uhorse-protocol/hub/node、WebSocket 通信、节点管理、任务调度 |
-| **Phase 2** | 智能编排 | ✅ | Orchestrator 编排器、SkillRegistry、子任务依赖管理 |
-| **Phase 3** | 安全加固 | ✅ | JWT 认证、敏感操作审批、字段加密、TLS 配置 |
-| **Phase 4** | 工具集成 | ✅ | 本地工具、技能执行器、通道集成、Web 管理界面 |
-| **Phase 5** | 测试优化 | ✅ | 50 个测试 (E2E/集成/安全)、8 个性能基准 |
-
-📄 **架构文档**: [中文](docs/architecture/v4.0-architecture.md) \| [English](docs/architecture/v4.0-architecture-en.md)
-
----
-
-### 历史版本
-
-| 版本 | 定位 | 核心特性 |
-|------|------|----------|
-| **v3.5** | 用户体验提升 | CLI TUI 增强、错误提示优化、Playground Docker、Web 技能编辑器、Python/TS SDK |
-| **v3.0** | 企业级 AI 基础设施 | 服务发现、负载均衡、分布式缓存、消息队列、GDPR 合规、SSO/SIEM 集成 |
-| **v2.0** | 企业级多渠道网关 | 7+ 通道、REST API、WebSocket/SSE、RBAC、多租户、多模态支持 |
-| **v1.0** | 核心基础设施 | Agent 框架、LLM 抽象、MCP 协议、SQLite/JSONL 存储、JWT 认证 |
-
----
-
-## 🤝 贡献
-
-欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-### 开发环境
+终端 1：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
-
-# 安装开发依赖
-cargo install cargo-watch cargo-nextest
-
-# 运行测试
-cargo nextest run
-
-# 热重载开发
-cargo watch -x run
+./target/release/uhorse-hub --config hub.toml --log-level info
 ```
 
----
+终端 2：
 
-## 📄 许可证
+```bash
+./target/release/uhorse-node --config node.toml --log-level info
+```
 
-双许可：[MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE)
+### 5. 验证连接
 
----
+```bash
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
+```
 
-## 🙏 致谢
+如果 `api/nodes` 返回在线节点列表，说明 Hub 和 Node 已完成连接。
 
-- 感谢 [OpenClaw](https://github.com/openclaw/openclaw) 团队在 AI 助手领域的探索，为社区提供了宝贵的参考
-- 感谢所有贡献者
+### 6. 跑真实本地 roundtrip 集成测试
 
----
+```bash
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
+```
 
-<p align="center">
-  <strong>uHorse - 让 AI 无处不在</strong>
-</p>
+这条测试会真实启动 Hub、WebSocket 服务和 Node，验证文件命令从 Hub 下发到 Node，再由 Node 把结果回传给 Hub。
+
+## DingTalk Stream 模式
+
+当前 `uhorse-hub` 主运行时已接入 DingTalk：
+
+- 推荐模式：**Stream 模式**
+- 优点：无需公网 IP、无需额外 webhook 暴露即可接收入站消息
+- 当前支持的管理命令白名单：`list` / `ls`、`search`、`read` / `cat`、`info`、`exists`
+- Hub 会把 Node 执行结果按会话路由回发到 DingTalk
+
+要启用 DingTalk，请使用统一配置文件，见 [CONFIG.md](CONFIG.md) 和 [CHANNELS.md](CHANNELS.md)。
+
+## 架构
+
+```text
+┌──────────────────────────────────────────────┐
+│                  uhorse-hub                  │
+│  • Web API: /api/health /api/nodes /api/*   │
+│  • WebSocket: /ws                            │
+│  • Task Scheduler                            │
+│  • DingTalk Stream / result reply            │
+└──────────────────────────────────────────────┘
+                      │
+                      │ WebSocket
+                      ▼
+┌──────────────────────────────────────────────┐
+│                 uhorse-node                  │
+│  • Workspace                                 │
+│  • Permission Manager                        │
+│  • Command Executor                          │
+│  • TaskResult 回传                           │
+└──────────────────────────────────────────────┘
+```
+
+### 当前关键源码入口
+
+- Hub 启动与统一配置：`crates/uhorse-hub/src/main.rs`
+- Hub Web API 与 DingTalk 路由：`crates/uhorse-hub/src/web/mod.rs`
+- Hub 核心调度：`crates/uhorse-hub/src/hub.rs`
+- Node 启动入口：`crates/uhorse-node/src/main.rs`
+- Node 执行与结果回传：`crates/uhorse-node/src/node.rs`
+- 本地闭环测试：`crates/uhorse-hub/tests/integration_test.rs`
+
+## 文档索引
+
+| 文档 | 说明 |
+|------|------|
+| [INSTALL.md](INSTALL.md) | 安装与二进制构建 |
+| [LOCAL_SETUP.md](LOCAL_SETUP.md) | 本地 Hub-Node 开发与启动 |
+| [CONFIG.md](CONFIG.md) | 真实配置结构与示例 |
+| [CHANNELS.md](CHANNELS.md) | 当前通道现状，重点是 DingTalk Stream |
+| [TESTING.md](TESTING.md) | 编译、测试与本地闭环验证 |
+| [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4.0 Hub-Node 部署指南 |
+| [deployments/DEPLOYMENT.md](deployments/DEPLOYMENT.md) | 部署总览与迁移说明 |
+
+## 工作区结构
+
+```text
+crates/
+├── uhorse-hub/        # 云端中枢
+├── uhorse-node/       # 本地节点
+├── uhorse-protocol/   # Hub-Node 通信协议
+├── uhorse-channel/    # 通道实现（当前 Hub 运行时重点为 DingTalk）
+├── uhorse-config/     # 统一配置
+├── uhorse-llm/        # LLM 客户端
+└── ...                # 其他 3.x / 4.0 相关模块
+```
+
+## 许可证
+
+双许可：[MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)

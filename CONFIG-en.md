@@ -1,360 +1,385 @@
 # uHorse Configuration Guide
 
+This document only describes the configuration structures that are **actually consumed by the current codebase**, with emphasis on:
+
+- the two runtime config modes of `uhorse-hub`
+- `node.toml` for `uhorse-node`
+- real DingTalk Stream and LLM fields
+
 ## Table of Contents
 
-- [Quick Start](#quick-start)
-- [Configuration Files](#configuration-files)
-- [Environment Variables](#environment-variables)
-- [Module Configuration](#module-configuration)
-- [Channel Configuration](#channel-configuration)
+- [Configuration Modes Overview](#configuration-modes-overview)
+- [Hub Configuration](#hub-configuration)
+- [Node Configuration](#node-configuration)
+- [DingTalk Stream Configuration](#dingtalk-stream-configuration)
 - [LLM Configuration](#llm-configuration)
-- [API Configuration](#api-configuration)
-- [Production Configuration](#production-configuration)
+- [Validation Commands](#validation-commands)
 
 ---
 
-## Quick Start
+## Configuration Modes Overview
 
-### 1. Minimal Configuration
+`uhorse-hub` currently supports **two config modes**.
 
-Create `config.toml`:
+### Mode 1: Unified config
+
+Use this when you need:
+
+- DingTalk
+- LLM
+- the shared `uhorse-config` structure
+
+Entrypoint:
+
+```bash
+./target/release/uhorse-hub --config hub.toml
+```
+
+Detection rule:
+
+If the file contains any of the following sections, Hub treats it as a unified config:
+
+- `[server]`
+- `[database]`
+- `[channels]`
+- `[security]`
+- `[logging]`
+- `[observability]`
+- `[scheduler]`
+- `[tools]`
+- `[llm]`
+
+In the current code, unified config directly controls:
+
+- Hub bind host and port (from `[server]`)
+- DingTalk initialization (from `[channels.dingtalk]`)
+- LLM initialization (from `[llm]`)
+
+But **Hub-specific scheduler fields such as `max_nodes`, `heartbeat_timeout_secs`, `task_timeout_secs`, and `max_retries` are not read from unified config yet**. They still fall back to `HubConfig::default()`.
+
+### Mode 2: legacy HubConfig
+
+Use this when you need:
+
+- a minimal Hub startup
+- explicit control over Hub scheduler/runtime fields
+- no DingTalk / LLM initialization
+
+Example:
+
+```toml
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
+```
+
+Important: legacy mode does **not** contain `[channels]` or `[llm]`, so it cannot initialize DingTalk or LLM.
+
+---
+
+## Hub Configuration
+
+### Option A: unified config example
+
+This is the best option for a real Hub runtime, especially when DingTalk Stream or LLM is needed.
 
 ```toml
 [server]
-host = "127.0.0.1"
-port = 8080
+host = "0.0.0.0"
+port = 8765
+max_connections = 1000
+request_timeout = 30
+read_timeout = 10
+write_timeout = 10
 
-[channels]
-enabled = []
+[server.health]
+enabled = true
+path = "/health"
+verbose = false
 
 [database]
 path = "./data/uhorse.db"
+pool_size = 10
+conn_timeout = 30
+wal_enabled = true
+fk_enabled = true
+
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
+
+[security]
+jwt_secret = "replace-with-random-secret"
+token_expiry = 86400
+refresh_token_expiry = 2592000
+pairing_expiry = 300
+approval_enabled = true
+pairing_enabled = true
+
+[logging]
+level = "info"
+format = "pretty"
+output = "stdout"
+ansi = true
+file = true
+line = true
+target = true
+
+[observability]
+service_name = "uhorse-hub"
+tracing_enabled = true
+metrics_enabled = true
+otlp_endpoint = ""
+metrics_port = 9090
+
+[scheduler]
+enabled = true
+threads = 2
+max_concurrent_jobs = 100
+
+[tools]
+sandbox_enabled = true
+sandbox_timeout = 30
+sandbox_max_memory = 512
+
+[llm]
+enabled = false
+provider = "openai"
+api_key = ""
+base_url = "https://api.openai.com/v1"
+model = "gpt-3.5-turbo"
+temperature = 0.7
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse, a multi-channel AI gateway."
 ```
 
-### 2. Run with Configuration
+### Option B: legacy HubConfig example
+
+This is the smallest possible Hub config:
+
+```toml
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
+```
+
+### Hub CLI arguments
 
 ```bash
-uhorse run --config config.toml
+./target/release/uhorse-hub --help
+```
+
+Current important flags:
+
+- `--config`: config file path, default `hub.toml`
+- `--log-level`: log level, default `info`
+- `--host`: command-line mode only, default `0.0.0.0`
+- `--port`: command-line mode only, default `8765`
+- `--hub-id`: Hub ID, default `default-hub`
+
+### Generate a default Hub config
+
+```bash
+./target/release/uhorse-hub init --output hub.toml
+```
+
+`init` generates a **unified config file**, not the legacy `HubConfig` shape.
+
+---
+
+## Node Configuration
+
+`uhorse-node` only reads `NodeConfig`; it does not have unified vs legacy modes.
+
+### Minimal Node config
+
+```toml
+name = "local-node"
+workspace_path = "."
+
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
+```
+
+### More complete Node example
+
+```toml
+node_id = ""
+name = "developer-macbook"
+workspace_path = "/Users/you/projects"
+heartbeat_interval_secs = 30
+status_interval_secs = 60
+max_concurrent_tasks = 5
+tags = ["default", "macos"]
+
+[connection]
+hub_url = "wss://hub.example.com/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
+```
+
+### Node CLI arguments
+
+```bash
+./target/release/uhorse-node --help
+```
+
+Current important flags:
+
+- `--config`: config path, default `node.toml`
+- `--log-level`: log level, default `info`
+- `--hub-url`: default `ws://localhost:8765/ws`
+- `--workspace`: default `.`
+- `--name`: default `uHorse-Node`
+
+### Node subcommands
+
+```bash
+./target/release/uhorse-node init --output node.toml
+./target/release/uhorse-node check --workspace /path/to/workspace
 ```
 
 ---
 
-## Configuration Files
+## DingTalk Stream Configuration
 
-### File Locations
+The recommended and documented path for the current `uhorse-hub` runtime is **Stream mode**.
 
-uHorse looks for configuration files in the following order:
-
-1. `--config <path>` command line argument
-2. `UHORSE_CONFIG` environment variable
-3. `./config.toml` current directory
-4. `~/.uhorse/config.toml` user directory
-5. `/etc/uhorse/config.toml` system directory
-
-### Configuration Format
-
-Supports TOML, JSON, and YAML formats:
-
-```
-config.toml    # TOML (recommended)
-config.json    # JSON
-config.yaml    # YAML
-```
-
----
-
-## Environment Variables
-
-### Server
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `UHORSE_HOST` | Server host | `127.0.0.1` |
-| `UHORSE_PORT` | Server port | `8080` |
-| `UHORSE_CONFIG` | Config file path | - |
-
-### Database
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | Database URL | - |
-| `UHORSE_DB_PATH` | SQLite path | `./data/uhorse.db` |
-
-### LLM
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `ANTHROPIC_API_KEY` | Anthropic API key | - |
-| `LLM_PROVIDER` | LLM provider | `openai` |
-| `LLM_MODEL` | Model name | `gpt-4` |
-
----
-
-## Module Configuration
-
-### Server Configuration
+### Minimal DingTalk config
 
 ```toml
-[server]
-host = "0.0.0.0"           # Listen address
-port = 8080                 # Listen port
-workers = 4                 # Worker threads
-graceful_shutdown = true    # Graceful shutdown
+[channels]
+enabled = ["dingtalk"]
 
-[server.tls]
-enabled = false
-cert_path = "./certs/cert.pem"
-key_path = "./certs/key.pem"
-```
-
-### Database Configuration
-
-```toml
-[database]
-type = "sqlite"             # sqlite or postgres
-path = "./data/uhorse.db"   # SQLite path
-
-# For PostgreSQL
-# [database]
-# type = "postgres"
-# url = "postgresql://user:pass@localhost/uhorse"
-# pool_size = 10
-```
-
-### Logging Configuration
-
-```toml
-[logging]
-level = "info"              # trace, debug, info, warn, error
-format = "json"             # json or text
-output = "stdout"           # stdout or file path
-
-[logging.file]
-enabled = false
-path = "./logs/uhorse.log"
-max_size = "100MB"
-max_files = 10
-```
-
----
-
-## Channel Configuration
-
-### Telegram
-
-```toml
-[channels.telegram]
-enabled = true
-bot_token = "your_bot_token"
-webhook_url = "https://your-domain.com/webhook/telegram"
-webhook_secret = "optional_secret"
-
-[channels.telegram.rate_limit]
-messages_per_second = 30
-messages_per_minute = 500
-```
-
-### Slack
-
-```toml
-[channels.slack]
-enabled = true
-bot_token = "xoxb-your-bot-token"
-app_token = "xapp-your-app-token"
-signing_secret = "your_signing_secret"
-```
-
-### Discord
-
-```toml
-[channels.discord]
-enabled = true
-bot_token = "your_discord_bot_token"
-application_id = "123456789"
-
-[channels.discord.intents]
-guilds = true
-guild_messages = true
-direct_messages = true
-```
-
-### DingTalk
-
-```toml
 [channels.dingtalk]
-enabled = true
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
 ```
 
-### Feishu
+### Notes
 
-```toml
-[channels.feishu]
-enabled = true
-app_id = "your_app_id"
-app_secret = "your_app_secret"
-```
+- The main runtime path is **Stream mode** and does not depend on a public webhook to receive inbound messages.
+- Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
+- The current DingTalk-triggered management command allowlist is:
+  - `list` / `ls`
+  - `search`
+  - `read` / `cat`
+  - `info`
+  - `exists`
+
+### What happens when enabled
+
+When `channels.enabled` contains `dingtalk`, Hub startup will:
+
+1. initialize `DingTalkChannel`
+2. subscribe to inbound DingTalk messages
+3. convert inbound text into Hub tasks
+4. reply task results back to the original conversation
 
 ---
 
 ## LLM Configuration
 
-### OpenAI
+The current Hub initializes `OpenAIClient` from the unified `[llm]` section.
+
+### Example
 
 ```toml
 [llm]
+enabled = true
 provider = "openai"
-
-[llm.openai]
 api_key = "sk-..."
-model = "gpt-4"
-base_url = "https://api.openai.com/v1"  # Optional
+base_url = "https://api.openai.com/v1"
+model = "gpt-4.1"
 temperature = 0.7
-max_tokens = 4096
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse."
 ```
 
-### Anthropic
+### Field reference
 
-```toml
-[llm]
-provider = "anthropic"
+| Field | Meaning |
+|-------|---------|
+| `enabled` | enable or disable LLM initialization |
+| `provider` | provider identifier |
+| `api_key` | API key |
+| `base_url` | API base URL |
+| `model` | model name |
+| `temperature` | sampling temperature |
+| `max_tokens` | max output tokens |
+| `system_prompt` | system prompt |
 
-[llm.anthropic]
-api_key = "sk-ant-..."
-model = "claude-3-opus-20240229"
-max_tokens = 4096
+If `enabled = false`, Hub skips LLM initialization during startup.
+
+---
+
+## Validation Commands
+
+### Generate default configs
+
+```bash
+./target/release/uhorse-hub init --output hub.toml
+./target/release/uhorse-node init --output node.toml
 ```
 
-### Multiple Providers
+### Check Node workspace access
 
-```toml
-[llm]
-default_provider = "openai"
+```bash
+./target/release/uhorse-node check --workspace .
+```
 
-[llm.providers.openai]
-api_key = "sk-..."
-model = "gpt-4"
+### Start Hub and Node
 
-[llm.providers.anthropic]
-api_key = "sk-ant-..."
-model = "claude-3-opus"
+```bash
+./target/release/uhorse-hub --config hub.toml --log-level info
+./target/release/uhorse-node --config node.toml --log-level info
+```
 
-[llm.providers.gemini]
-api_key = "..."
-model = "gemini-pro"
+### Health and connectivity checks
+
+```bash
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
+```
+
+Note: even though unified config contains `server.health.path`, the actual health route exposed by `uhorse-hub` today is:
+
+```text
+/api/health
 ```
 
 ---
 
-## API Configuration
+## Recommendations
 
-```toml
-[api]
-prefix = "/api/v1"          # API path prefix
-rate_limit = 100            # Requests per minute
-timeout = 30                # Request timeout (seconds)
+- Use **unified config** when you need DingTalk or LLM.
+- Use **legacy HubConfig + NodeConfig** when you want the smallest local Hub-Node roundtrip.
+- Do not assume unified config already covers every Hub-specific scheduler knob; the current code still has a boundary between unified runtime config and legacy Hub tuning fields.
 
-[api.cors]
-enabled = true
-origins = ["*"]
-methods = ["GET", "POST", "PUT", "DELETE"]
-headers = ["Authorization", "Content-Type"]
+See also:
 
-[api.auth]
-enabled = true
-jwt_secret = "your-secret-key"
-token_expiry = "24h"
-refresh_token_expiry = "7d"
-```
-
----
-
-## Production Configuration
-
-### Security Settings
-
-```toml
-[security]
-device_pairing = true       # Require device approval
-approval_workflow = true    # Sensitive operation approval
-audit_log = true            # Enable audit logging
-
-[security.rate_limit]
-enabled = true
-requests_per_minute = 60
-burst = 10
-```
-
-### Performance Tuning
-
-```toml
-[performance]
-max_connections = 10000
-connection_timeout = 60
-keep_alive = true
-
-[performance.cache]
-enabled = true
-ttl = 300                   # Cache TTL (seconds)
-max_size = "100MB"
-```
-
-### Observability
-
-```toml
-[observability.tracing]
-enabled = true
-endpoint = "http://localhost:4317"
-sample_rate = 0.1           # 10% sampling
-
-[observability.metrics]
-enabled = true
-endpoint = "/metrics"
-port = 9090
-
-[observability.audit]
-enabled = true
-storage = "database"        # database or file
-retention = "90d"
-```
-
----
-
-## Full Example
-
-```toml
-# config.toml - Complete Configuration Example
-
-[server]
-host = "0.0.0.0"
-port = 8080
-
-[database]
-type = "sqlite"
-path = "./data/uhorse.db"
-
-[channels]
-enabled = ["telegram", "slack"]
-
-[channels.telegram]
-bot_token = "${TELEGRAM_BOT_TOKEN}"  # Environment variable
-
-[channels.slack]
-bot_token = "${SLACK_BOT_TOKEN}"
-
-[llm]
-provider = "openai"
-
-[llm.openai]
-api_key = "${OPENAI_API_KEY}"
-model = "gpt-4"
-
-[api.auth]
-jwt_secret = "${JWT_SECRET}"
-
-[security]
-audit_log = true
-```
+- [README-en.md](README-en.md)
+- [LOCAL_SETUP.md](LOCAL_SETUP.md)
+- [CHANNELS-en.md](CHANNELS-en.md)
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)

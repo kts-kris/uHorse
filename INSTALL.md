@@ -1,11 +1,25 @@
 # uHorse 安装指南
 
+本文档只描述 **当前仓库主线 v4.0 Hub-Node 架构** 的真实安装路径。
+
+当前最推荐、也最贴近已验证代码路径的安装方式是：
+
+- 编译 `uhorse-hub`
+- 编译 `uhorse-node`
+- 生成 `hub.toml` 和 `node.toml`
+- 按本地或部署场景分别启动 Hub 与 Node
+
+> 注意：仓库里仍保留 `uhorse` 单体二进制以及 `install.sh`、`quick-setup.sh` 等脚本，但它们主要围绕旧单体路径，不是本文档的主推荐安装方式。
+
 ## 目录
 
 - [系统要求](#系统要求)
-- [安装方式](#安装方式)
+- [从源码安装](#从源码安装)
+- [可选：编译 legacy 单体二进制](#可选编译-legacy-单体二进制)
 - [安装验证](#安装验证)
+- [脚本说明](#脚本说明)
 - [常见问题](#常见问题)
+- [下一步](#下一步)
 
 ---
 
@@ -13,430 +27,207 @@
 
 ### 最低要求
 
-- **操作系统**: Linux、macOS 或 Windows (WSL2)
-- **Rust**: 1.70 或更高版本
-- **内存**: 512 MB 可用内存
-- **磁盘**: 100 MB 可用空间
+- **操作系统**：Linux、macOS、Windows（建议使用 WSL2）
+- **Rust**：`1.78+`
+- **内存**：至少 `512 MB`
+- **磁盘**：至少 `200 MB`
 
-### 推荐配置
+### 常用依赖
 
-- **CPU**: 2 核心或更多
-- **内存**: 2 GB 或更多
-- **磁盘**: SSD 存储
+- `cargo`：用于编译 Rust workspace
+- `openssl`：部分环境下用于 TLS / 依赖编译 / 生成随机密钥
+- `pkg-config`：Linux 下常见编译依赖
 
-### 依赖项
+### 推荐环境
 
-uHorse 需要以下依赖：
-
-- **Rust 工具链**: 用于编译项目
-- **OpenSSL**: 可选，用于生成安全密钥
-
----
-
-## 安装方式
-
-### 方式一：一键安装脚本（推荐）⭐
-
-**适用场景：**
-- 首次安装
-- 生产环境部署
-- 需要完整配置
-
-**步骤：**
-
-```bash
-# 1. 克隆仓库
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
-
-# 2. 运行一键安装脚本
-./install.sh
-```
-
-**脚本执行流程：**
-
-1. ✅ 检查依赖（Rust、Cargo、OpenSSL）
-2. 🔨 编译项目（Release 模式）
-3. 📁 创建必要目录（data/、logs/）
-4. 🧙 启动配置向导
-5. 💾 生成配置文件（config.toml、.env）
-6. 🚀 可选：立即启动服务
-
-**优势：**
-- 全自动化，无需手动操作
-- 包含完整的配置向导
-- 支持所有功能配置
-- 自动备份现有配置
+- `Rust stable`
+- `2 GB+` 内存
+- 可访问 Hub 的网络环境
 
 ---
 
-### 方式二：快速设置脚本
+## 从源码安装
 
-**适用场景：**
-- 快速本地测试
-- 开发环境
-- 体验 uHorse 功能
+这是当前最推荐的安装方式。
 
-**步骤：**
-
-```bash
-# 1. 克隆仓库
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
-
-# 2. 运行快速设置脚本
-./quick-setup.sh
-```
-
-**脚本执行流程：**
-
-1. 🔨 编译项目（如需要）
-2. 📝 创建默认配置文件
-3. 📁 创建必要目录
-4. 🚀 可选：立即启动服务
-
-**默认配置：**
-- 服务地址：`http://127.0.0.1:8080`
-- 数据库：SQLite（`./data/uhorse.db`）
-- 通道：未启用
-- 日志级别：info
-
-**优势：**
-- 快速启动，无需交互
-- 适合本地开发
-- 可后续通过配置向导修改
-
----
-
-### 方式三：手动安装
-
-**适用场景：**
-- 需要自定义编译选项
-- 了解项目结构
-- 集成到现有系统
-
-**步骤：**
-
-#### 1. 安装 Rust
-
-```bash
-# 使用 rustup 安装 Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# 重新加载环境
-source $HOME/.cargo/env
-```
-
-#### 2. 克隆仓库
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
 ```
 
-#### 3. 编译项目
+### 2. 编译 Hub 和 Node
 
 ```bash
-# Debug 模式（编译快）
-cargo build
-
-# Release 模式（性能优化）
-cargo build --release
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-#### 4. 创建配置文件
+编译完成后，主要产物是：
 
-**使用配置向导（推荐）：**
+- `target/release/uhorse-hub`
+- `target/release/uhorse-node`
+
+### 3. 生成默认配置
 
 ```bash
-./target/release/uhorse wizard
+./target/release/uhorse-hub init --output hub.toml
+./target/release/uhorse-node init --output node.toml
 ```
 
-**或手动创建：**
+### 4. 按需调整配置
 
-创建 `config.toml`：
+最小本地闭环通常只需要：
 
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
+- `hub.toml`：Hub 地址、端口、调度参数
+- `node.toml`：Node 名称、工作目录、Hub WebSocket 地址
 
-[channels]
-enabled = []
+完整字段见 [CONFIG.md](CONFIG.md)。
 
-[database]
-path = "./data/uhorse.db"
+### 5. 启动程序
 
-[security]
-token_expiry = 86400
-```
-
-创建 `.env`：
+终端 1：
 
 ```bash
-RUST_LOG=info
+./target/release/uhorse-hub --config hub.toml --log-level info
 ```
 
-#### 5. 创建必要目录
+终端 2：
 
 ```bash
-mkdir -p data logs
-```
-
-#### 6. 启动服务
-
-```bash
-# 使用启动脚本
-./start.sh
-
-# 或直接运行
-./target/release/uhorse run
+./target/release/uhorse-node --config node.toml --log-level info
 ```
 
 ---
 
-### 方式四：Docker 安装
+## 可选：编译 legacy 单体二进制
 
-**适用场景：**
-- 容器化部署
-- 隔离运行环境
-- CI/CD 流程
-
-**步骤：**
-
-#### 1. 使用 Docker Compose
+仓库里仍包含 `uhorse` 单体二进制目标。如果你只是要查看旧脚本、旧向导或做历史兼容验证，可以单独编译：
 
 ```bash
-# 启动所有服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f uhorse
-
-# 停止服务
-docker-compose down
+cargo build --release -p uhorse
 ```
 
-#### 2. 单独构建和运行
+产物路径：
 
-```bash
-# 构建镜像
-docker build -t uhorse:latest .
+- `target/release/uhorse`
 
-# 运行容器
-docker run -d \
-  --name uhorse \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/config.toml:/app/config.toml \
-  uhorse:latest
-```
+> 但当前主线文档、README 和部署说明，默认都以 `uhorse-hub` + `uhorse-node` 为准。
 
 ---
 
 ## 安装验证
 
-### 1. 检查二进制文件
+### 1. 检查二进制存在
 
 ```bash
-./target/release/uhorse --version
+./target/release/uhorse-hub --help
+./target/release/uhorse-node --help
 ```
 
-**预期输出：**
-```
-uhorse 0.1.0
-```
-
-### 2. 检查配置文件
+### 2. 检查 Node 工作空间可访问性
 
 ```bash
-# 检查配置文件是否存在
-ls -la config.toml .env
-
-# 查看配置内容
-cat config.toml
+./target/release/uhorse-node check --workspace .
 ```
 
-### 3. 启动服务
+### 3. 启动后检查 Hub
 
 ```bash
-./start.sh
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
 ```
 
-### 4. 健康检查
+### 4. 运行已验证的本地闭环测试
 
 ```bash
-# 存活性检查
-curl http://localhost:8080/health/live
-
-# 预期输出
-# {"status":"healthy","version":"0.1.0"}
-
-# 就绪性检查
-curl http://localhost:8080/health/ready
-
-# 预期输出
-# {"status":"ready","version":"0.1.0"}
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 ```
 
-### 5. 查看日志
+这条测试会真实启动：
 
-```bash
-tail -f logs/uhorse.log
-```
+- Hub
+- WebSocket 服务
+- Node
+- 一个文件存在性命令 roundtrip
 
 ---
 
-## 配置
+## 脚本说明
 
-### 使用配置向导
+仓库根目录的以下脚本仍然存在：
 
-```bash
-./target/release/uhorse wizard
-```
+- `install.sh`
+- `quick-setup.sh`
+- `start.sh`
+- `stop.sh`
 
-### 手动编辑配置
+它们主要围绕旧的 `uhorse` 单体运行路径，不是当前 v4.0 Hub-Node 安装文档的主推荐入口。
 
-编辑 `config.toml`：
+如果你的目标是：
 
-```bash
-vi config.toml
-```
+- 本地验证 Hub-Node 闭环
+- 配置 DingTalk Stream
+- 配置 LLM / 自定义模型服务商
+- 部署 Hub 到服务器、Node 到本机
 
-编辑 `.env`：
-
-```bash
-vi .env
-```
-
-### 配置文件优先级
-
-1. 命令行参数（最高优先级）
-2. 环境变量（.env 文件）
-3. 配置文件（config.toml）
-4. 默认值（最低优先级）
-
----
-
-## 卸载
-
-### 停止服务
-
-```bash
-./stop.sh
-```
-
-### 删除文件
-
-```bash
-# 删除二进制文件
-rm -rf target/
-
-# 删除配置文件
-rm config.toml .env
-
-# 删除数据文件
-rm -rf data/ logs/
-
-# 删除备份文件（可选）
-rm -rf backup_*/
-```
+请优先使用本文档中的 `uhorse-hub` / `uhorse-node` 命令。
 
 ---
 
 ## 常见问题
 
-### Q: 编译失败怎么办？
-
-**A: 检查 Rust 版本：**
+### Rust 版本过低
 
 ```bash
 rustc --version
-```
-
-确保使用 Rust 1.70 或更高版本。如果版本过低，请更新：
-
-```bash
 rustup update
 ```
 
-### Q: 找不到 OpenSSL 错误
+### OpenSSL / pkg-config 缺失
 
-**A: 安装 OpenSSL：**
+**macOS**
 
-**macOS:**
 ```bash
-brew install openssl
+brew install openssl pkg-config
 ```
 
-**Ubuntu/Debian:**
+**Ubuntu / Debian**
+
 ```bash
-sudo apt-get install libssl-dev pkg-config
+sudo apt-get update
+sudo apt-get install -y libssl-dev pkg-config
 ```
 
-**CentOS/RHEL:**
+### 只编译了一个二进制
+
+请确认命令包含两个 package：
+
 ```bash
-sudo yum install openssl-devel
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-### Q: 端口被占用
+### Node 无法连接 Hub
 
-**A: 修改配置文件中的端口号：**
+先检查：
 
-编辑 `config.toml`：
+- `hub.toml` 的监听端口
+- `node.toml` 的 `connection.hub_url`
+- 是否使用了 `/ws` 路径
+
+例如：
 
 ```toml
-[server]
-port = 8081  # 改为其他端口
-```
-
-### Q: 如何升级到最新版本？
-
-**A: 拉取最新代码并重新编译：**
-
-```bash
-git pull origin main
-cargo build --release
-./stop.sh
-./start.sh
-```
-
-### Q: 如何备份配置？
-
-**A: 在运行配置向导前手动备份：**
-
-```bash
-mkdir backup
-cp config.toml backup/
-cp .env backup/
-```
-
-或使用一键安装脚本，它会自动备份。
-
-### Q: 如何查看详细日志？
-
-**A: 设置日志级别为 debug：**
-
-编辑 `.env`：
-
-```bash
-RUST_LOG=debug
-```
-
-或使用命令行参数：
-
-```bash
-./target/release/uhorse -l debug run
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
 ```
 
 ---
 
 ## 下一步
 
-安装完成后，请参考以下文档：
-
-- [配置向导指南](WIZARD.md) - 交互式配置说明
-- [配置指南](CONFIG.md) - 完整配置参考
-- [API 使用指南](API.md) - API 文档
-- [通道集成指南](CHANNELS.md) - 多通道配置
-- [部署指南](deployments/DEPLOYMENT.md) - 生产环境部署
+- [README.md](README.md)：项目总览
+- [CONFIG.md](CONFIG.md)：配置结构与示例
+- [LOCAL_SETUP.md](LOCAL_SETUP.md)：本地 Hub-Node 启动指南
+- [TESTING.md](TESTING.md)：编译、测试与闭环验证
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4.0 Hub-Node 部署说明

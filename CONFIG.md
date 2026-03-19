@@ -1,628 +1,309 @@
 # uHorse 配置指南
 
+本文档只描述**当前仓库代码实际读取到的配置结构**，重点覆盖：
+
+- `uhorse-hub` 的两种配置模式
+- `uhorse-node` 的 `node.toml`
+- DingTalk Stream 和 LLM 的真实字段
+
 ## 目录
 
-- [快速开始](#快速开始)
-- [配置文件说明](#配置文件说明)
-- [环境变量配置](#环境变量配置)
-- [各模块配置](#各模块配置)
-- [通道配置](#通道配置)
+- [配置模式总览](#配置模式总览)
+- [Hub 配置](#hub-配置)
+- [Node 配置](#node-配置)
+- [DingTalk Stream 配置](#dingtalk-stream-配置)
 - [LLM 配置](#llm-配置)
-- [API 配置](#api-配置)
-- [生产环境配置](#生产环境配置)
+- [验证命令](#验证命令)
 
 ---
 
-## 快速开始
+## 配置模式总览
 
-### 1. 最小配置
+`uhorse-hub` 当前有 **两种配置模式**。
 
-创建 `config.toml`:
+### 模式 1：统一配置
 
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
+适用场景：
 
-[channels]
-enabled = []
+- 需要启用 DingTalk
+- 需要启用 LLM
+- 需要使用 `uhorse-config` 的统一结构
 
-[database]
-path = "./data/uhorse.db"
-```
-
-### 2. 启动
+入口命令：
 
 ```bash
-./start.sh
+./target/release/uhorse-hub --config hub.toml
 ```
 
-### 3. 访问
+识别方式：
 
-- API: http://localhost:8080
-- 健康检查: http://localhost:8080/health/live
-- 指标: http://localhost:8080/metrics
+只要配置文件中出现以下任一段落，Hub 就会按统一配置解析：
+
+- `[server]`
+- `[database]`
+- `[channels]`
+- `[security]`
+- `[logging]`
+- `[observability]`
+- `[scheduler]`
+- `[tools]`
+- `[llm]`
+
+注意：当前代码里，统一配置会直接驱动：
+
+- Hub 监听地址与端口（来自 `[server]`）
+- DingTalk 初始化（来自 `[channels.dingtalk]`）
+- LLM 初始化（来自 `[llm]`）
+
+但 **`max_nodes`、`heartbeat_timeout_secs`、`task_timeout_secs`、`max_retries` 这类 Hub 专属调度参数不会从统一配置读取**，仍使用 `HubConfig::default()` 的默认值。
+
+### 模式 2：legacy HubConfig
+
+适用场景：
+
+- 只想启动最小 Hub
+- 需要显式控制 Hub 调度参数
+- 暂时不需要 DingTalk / LLM
+
+示例：
+
+```toml
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
+```
+
+注意：legacy 模式**不包含** `[channels]` 或 `[llm]` 段，因此不能用于初始化 DingTalk 或 LLM。
 
 ---
 
-## 配置文件说明
+## Hub 配置
 
-### config.toml 主配置文件
+### 方案 A：统一配置示例
 
-```toml
-# ==================== 服务器配置 ====================
-[server]
-# 监听地址
-host = "0.0.0.0"              # 0.0.0.0 表示监听所有网卡
-port = 8080                   # 服务端口
-max_connections = 1000        # 最大连接数
-
-# ==================== 通道配置 ====================
-[channels]
-# 启用的通道列表
-enabled = [
-    "telegram",   # Telegram Bot
-    "slack",      # Slack Events API
-    "discord",    # Discord Bot
-    "whatsapp"    # WhatsApp Business API
-]
-
-# 各通道详细配置
-[channels.telegram]
-# Telegram Bot Token
-bot_token = "YOUR_TELEGRAM_BOT_TOKEN"
-# Webhook 密钥（可选）
-webhook_secret = "your_webhook_secret"
-# API 超时（秒）
-timeout = 30
-
-[channels.slack]
-# Slack Bot Token
-bot_token = "xoxb-YOUR-SLACK-BOT-TOKEN"
-# 签名密钥
-signing_secret = "YOUR_SIGNING_SECRET"
-
-[channels.discord]
-# Discord Bot Token
-bot_token = "MTIzNDU2Nzg5MA.Gh4b2.example"
-# Application ID
-application_id = "YOUR_APPLICATION_ID"
-
-[channels.whatsapp]
-# WhatsApp Access Token
-access_token = "YOUR_WHATSAPP_ACCESS_TOKEN"
-# Phone Number ID
-phone_number_id = "YOUR_PHONE_NUMBER_ID"
-# Business Account ID
-business_account_id = "YOUR_BUSINESS_ACCOUNT_ID"
-# Webhook 验证 Token
-webhook_verify_token = "YOUR_VERIFY_TOKEN"
-
-# ==================== 数据库配置 ====================
-[database]
-# SQLite 数据库文件路径
-path = "./data/uhorse.db"
-# 连接池大小
-pool_size = 10
-# 连接超时（秒）
-timeout = 30
-
-# PostgreSQL 配置（可选）
-[database.postgres]
-# 连接 URL
-url = "postgresql://uhorse:password@localhost:5432/uhorse"
-# 最小连接数
-min_connections = 5
-# 最大连接数
-max_connections = 20
-# 连接超时（秒）
-connect_timeout = 10
-# 空闲超时（秒）
-idle_timeout = 600
-
-# ==================== Redis 配置 ====================
-[redis]
-# Redis 连接 URL
-url = "redis://localhost:6379"
-# 数据库编号
-db = 0
-# 连接池大小
-pool_size = 10
-# 连接超时（秒）
-timeout = 5
-
-# ==================== 安全配置 ====================
-[security]
-# JWT 密钥（必须 32 字符以上）
-jwt_secret = "CHANGE_ME_TO_RANDOM_32_CHAR_STRING"
-# 访问令牌过期时间（秒）
-token_expiry = 86400          # 24 小时
-# 刷新令牌过期时间（秒）
-refresh_token_expiry = 604800 # 7 天
-# 设备配对码过期时间（秒）
-pairing_code_expiry = 300     # 5 分钟
-
-# 审批配置
-[security.approval]
-# 是否启用审批
-enabled = true
-# 默认审批策略
-default_policy = "sequential"  # single, sequential, parallel
-# 自动批准规则
-auto_approve = [
-    { tool = "calculator", max_risk = "low" },
-    { tool = "datetime", max_risk = "medium" }
-]
-
-# ==================== 日志配置 ====================
-[logging]
-# 日志级别：trace, debug, info, warn, error
-level = "info"
-# 日志格式：json, pretty, compact
-format = "pretty"
-# 日志输出：stdout, file, both
-output = "both"
-# 日志文件路径
-file = "./logs/uhorse.log"
-# 日志轮转（MB）
-max_size = 100
-# 保留日志文件数
-max_files = 10
-
-# ==================== 可观测性配置 ====================
-[observability]
-# Tracing 配置
-[observability.tracing]
-# 是否启用
-enabled = true
-# 采样率（0.0 - 1.0）
-sample_rate = 0.1
-# OTLP 端点（可选）
-otlp_endpoint = "http://jaeger:14268/api/traces"
-
-# Metrics 配置
-[observability.metrics]
-# 是否启用
-enabled = true
-# 指标端口
-port = 9090
-# 指标路径
-path = "/metrics"
-
-# 审计日志
-[observability.audit]
-# 是否启用
-enabled = true
-# 审计日志文件
-file = "./logs/audit.log"
-# 审计事件过滤器
-events = ["auth", "tool_execution", "approval"]
-
-# ==================== 调度器配置 ====================
-[scheduler]
-# 工作线程数
-worker_threads = 4
-# 最大并发任务数
-max_concurrent_jobs = 100
-# 任务队列大小
-queue_size = 1000
-
-# ==================== 工具配置 ====================
-[tools]
-# 工具执行超时（秒）
-execution_timeout = 60
-# 沙箱配置
-[tools.sandbox]
-# 是否启用沙箱
-enabled = true
-# 最大内存（MB）
-max_memory = 512
-# CPU 限制（0.1 = 10%）
-max_cpu = 0.5
-# 网络访问控制
-allow_network = true
-# 允许的主机
-allowed_hosts = ["api.example.com"]
-
-# 内置工具
-[tools.builtin]
-# 启用的内置工具
-enabled = [
-    "calculator",
-    "http",
-    "search",
-    "datetime",
-    "text"
-]
-
-# ==================== 会话配置 ====================
-[session]
-# 会话隔离级别：strict, moderate, loose
-default_isolation = "moderate"
-# 会话超时（秒）
-timeout = 3600               # 1 小时
-# 最大会话数
-max_sessions = 10000
-# 消息历史限制
-max_history_messages = 100
-
-# ==================== WebSocket 配置 ====================
-[websocket]
-# 心跳间隔（秒）
-heartbeat_interval = 30
-# 心跳超时（秒）
-heartbeat_timeout = 90
-# 最大消息大小（字节）
-max_message_size = 1048576   # 1MB
-# 消息队列大小
-message_queue_size = 1000
-```
-
----
-
-## 环境变量配置
-
-### .env 文件配置
-
-```bash
-# ==================== 服务器配置 ====================
-UHORSE_SERVER_HOST=0.0.0.0
-UHORSE_SERVER_PORT=8080
-
-# ==================== 数据库配置 ====================
-# SQLite（默认）
-UHORSE_DATABASE_URL=sqlite://./data/uhorse.db
-
-# PostgreSQL
-UHORSE_DATABASE_URL=postgresql://uhorse:password@localhost:5432/uhorse
-
-# ==================== Redis 配置 ====================
-UHORSE_REDIS_URL=redis://localhost:6379
-
-# ==================== 日志配置 ====================
-RUST_LOG=info                    # trace, debug, info, warn, error
-UHORSE_LOG_LEVEL=info
-
-# ==================== 安全配置 ====================
-UHORSE_JWT_SECRET=your-secret-key-min-32-char
-UHORSE_TOKEN_EXPIRY=86400
-
-# ==================== 通道配置 ====================
-UHORSE_TELEGRAM_BOT_TOKEN=
-UHORSE_SLACK_BOT_TOKEN=
-UHORSE_SLACK_SIGNING_SECRET=
-UHORSE_DISCORD_BOT_TOKEN=
-UHORSE_WHATSAPP_ACCESS_TOKEN=
-
-# ==================== 数据目录 ====================
-UHORSE_DATA_DIR=./data
-UHORSE_LOG_DIR=./logs
-```
-
----
-
-## 各模块配置
-
-### 1. Telegram Bot 配置
-
-```toml
-[channels.telegram]
-bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-webhook_secret = "your_webhook_secret"
-
-# 或使用环境变量
-# export UHORSE_TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-```
-
-**获取 Bot Token：**
-1. 与 [@BotFather](https://t.me/botfather) 对话
-2. 发送 `/newbot`
-3. 按提示设置名称
-4. 获得 Token
-
-### 2. Slack 配置
-
-```toml
-[channels.slack]
-bot_token = "xoxb-YOUR-TOKEN-HERE"
-signing_secret = "YOUR_SIGNING_SECRET"
-
-# 或使用环境变量
-# export UHORSE_SLACK_BOT_TOKEN="xoxb-YOUR-TOKEN"
-# export UHORSE_SLACK_SIGNING_SECRET="YOUR_SECRET"
-```
-
-**配置 Slack：**
-1. 创建 Slack App: https://api.slack.com/apps
-2. 添加 Bot Token Scopes
-3. 启用 Events
-4. 设置 OAuth Scope
-5. 安装到工作区
-
-### 3. Discord 配置
-
-```toml
-[channels.discord]
-bot_token = "MTIzNDU2Nzg5MA.Gh4b2.example"
-application_id = "123456789012345678"
-
-# 或使用环境变量
-# export UHORSE_DISCORD_BOT_TOKEN="MTIzNDU2Nzg5MA..."
-```
-
-**配置 Discord：**
-1. 创建 Discord Application: https://discord.com/developers/applications
-2. 创建 Bot
-3. 获取 Token
-4. 启用 Gateway Intents
-5. 生成 Invite URL
-
-### 4. WhatsApp 配置
-
-```toml
-[channels.whatsapp]
-access_token = "YOUR_ACCESS_TOKEN"
-phone_number_id = "YOUR_PHONE_ID"
-business_account_id = "YOUR_BA_ID"
-webhook_verify_token = "YOUR_VERIFY_TOKEN"
-
-# 或使用环境变量
-# export UHORSE_WHATSAPP_ACCESS_TOKEN="..."
-```
-
-**配置 WhatsApp：**
-1. 创建 Meta App: https://developers.facebook.com/apps
-2. 添加 WhatsApp 产品
-3. 获取 Access Token
-4. 配置 Webhook
-
----
-
-## API 配置
-
-### API 密钥管理
-
-```bash
-# 生成 API 密钥
-openssl rand -hex 32
-
-# 设置到环境变量
-export UHORSE_API_KEY="your_api_key_here"
-```
-
-### CORS 配置
-
-```toml
-[server.cors]
-# 允许的来源
-allowed_origins = [
-    "http://localhost:3000",
-    "https://example.com"
-]
-# 允许的方法
-allowed_methods = ["GET", "POST", "PUT", "DELETE"]
-# 允许的头部
-allowed_headers = ["Content-Type", "Authorization"]
-# 是否允许凭证
-allow_credentials = true
-```
-
-### Rate Limiting 配置
-
-```toml
-[server.rate_limit]
-# 每秒请求数
-requests_per_second = 100
-# 突口大小
-burst = 200
-# 白名单 IP
-whitelist = ["127.0.0.1"]
-```
-
----
-
-## 生产环境配置
-
-### 生产环境 config.toml 示例
+这是当前最适合 Hub 生产运行的配置方式，尤其是需要 DingTalk Stream 或 LLM 时。
 
 ```toml
 [server]
 host = "0.0.0.0"
-port = 8080
-max_connections = 10000
+port = 8765
+max_connections = 1000
+request_timeout = 30
+read_timeout = 10
+write_timeout = 10
+
+[server.health]
+enabled = true
+path = "/health"
+verbose = false
+
+[database]
+path = "./data/uhorse.db"
+pool_size = 10
+conn_timeout = 30
+wal_enabled = true
+fk_enabled = true
 
 [channels]
-enabled = ["telegram", "slack", "discord", "whatsapp"]
+enabled = ["dingtalk"]
 
-[database.postgres]
-url = "postgresql://uhorse:${DATABASE_PASSWORD}@postgres:5432/uhorse"
-min_connections = 10
-max_connections = 100
-connect_timeout = 5
-idle_timeout = 300
-
-[redis]
-url = "redis://redis:6379"
-pool_size = 50
-timeout = 3
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
 
 [security]
-jwt_secret = "${JWT_SECRET}"  # 从环境变量读取
-token_expiry = 3600
+jwt_secret = "replace-with-random-secret"
+token_expiry = 86400
 refresh_token_expiry = 2592000
+pairing_expiry = 300
+approval_enabled = true
+pairing_enabled = true
 
 [logging]
 level = "info"
-format = "json"
+format = "pretty"
 output = "stdout"
+ansi = true
+file = true
+line = true
+target = true
 
-[observability.tracing]
-enabled = true
-sample_rate = 0.01
-otlp_endpoint = "http://jaeger:14268/api/traces"
-
-[observability.metrics]
-enabled = true
-port = 9090
-
-[observability.audit]
-enabled = true
-file = "/dev/stdout"
+[observability]
+service_name = "uhorse-hub"
+tracing_enabled = true
+metrics_enabled = true
+otlp_endpoint = ""
+metrics_port = 9090
 
 [scheduler]
-worker_threads = 8
-max_concurrent_jobs = 500
-queue_size = 5000
-
-[tools.sandbox]
 enabled = true
-max_memory = 256
-max_cpu = 0.5
-allow_network = true
-allowed_hosts = ["api.openai.com"]
-```
+threads = 2
+max_concurrent_jobs = 100
 
-### 环境变量（生产）
+[tools]
+sandbox_enabled = true
+sandbox_timeout = 30
+sandbox_max_memory = 512
 
-```bash
-# 数据库密码
-export DATABASE_PASSWORD="your_secure_password"
-
-# JWT 密钥
-export JWT_SECRET="$(openssl rand -hex 32)"
-
-# Telegram Bot
-export UHORSE_TELEGRAM_BOT_TOKEN="your_bot_token"
-
-# Redis
-export UHORSE_REDIS_URL="redis://redis:6379"
-
-# 日志级别
-export RUST_LOG="info"
-```
-
----
-
-## 配置验证
-
-### 检查配置是否有效
-
-```bash
-# 验证配置文件
-./target/release/uhorse --config config.toml --help
-
-# 查看当前配置
-./target/release/uhorse --config config.toml --log-level debug
-```
-
-### 常见配置错误
-
-**错误：无法连接数据库**
-```toml
-# 检查数据库 URL
-[database.postgres]
-url = "postgresql://user:pass@host:port/db"
-```
-
-**错误：通道认证失败**
-```bash
-# 验证 Bot Token
-curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe
-```
-
----
-
-## 配置最佳实践
-
-### 1. 安全性
-
-- ✅ 使用环境变量存储敏感信息
-- ✅ JWT 密钥至少 32 字符
-- ✅ 定期轮换密钥
-- ✅ 限制 API 访问来源
-
-### 2. 性能
-
-- ✅ 启用 Redis 缓存
-- ✅ 配置连接池
-- ✅ 调整工作线程数
-- ✅ 启用 Metrics 监控
-
-### 3. 可靠性
-
-- ✅ 配置健康检查
-- ✅ 启用审计日志
-- ✅ 设置合理的超时
-- ✅ 配置重试策略
-
----
-
-## 下一步
-
-- [API 使用指南](API.md)
-- [通道集成指南](CHANNELS.md)
-- [部署指南](deployments/DEPLOYMENT.md)
-
-## LLM 配置
-
-### 启用 LLM 功能
-
-uHorse 支持集成大语言模型（LLM）来处理用户消息。支持 OpenAI、Azure OpenAI、Anthropic Claude、Google Gemini 等多种服务商。
-
-### 配置方式
-
-#### 方式一：配置文件
-
-在 `config.toml` 中添加：
-
-```toml
 [llm]
-enabled = true
-provider = "openai"  # openai, azure_openai, anthropic, gemini, custom
-api_key = "your-api-key"
+enabled = false
+provider = "openai"
+api_key = ""
 base_url = "https://api.openai.com/v1"
 model = "gpt-3.5-turbo"
 temperature = 0.7
 max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse, a multi-channel AI gateway."
 ```
 
-#### 方式二：环境变量
+### 方案 B：legacy HubConfig 示例
 
-在 `.env` 文件中：
+这是最小 Hub 启动配置：
+
+```toml
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
+```
+
+### Hub CLI 参数
 
 ```bash
-UHORSE_LLM_ENABLED=true
-UHORSE_LLM_PROVIDER=openai
-UHORSE_LLM_API_KEY=your-api-key
-UHORSE_LLM_BASE_URL=https://api.openai.com/v1
-UHORSE_LLM_MODEL=gpt-3.5-turbo
+./target/release/uhorse-hub --help
 ```
 
-### 支持的服务商
+当前关键参数：
 
-| 服务商 | provider 值 | base_url |
-|--------|------------|----------|
-| OpenAI | `openai` | `https://api.openai.com/v1` |
-| Azure OpenAI | `azure_openai` | `https://your-resource.openai.azure.com/openai/deployments/your-deployment` |
-| Anthropic Claude | `anthropic` | `https://api.anthropic.com/v1` |
-| Google Gemini | `gemini` | `https://generativelanguage.googleapis.com/v1beta` |
-| 自定义端点 | `custom` | 自定义 URL |
+- `--config`：配置文件路径，默认 `hub.toml`
+- `--log-level`：日志级别，默认 `info`
+- `--host`：仅命令行配置模式生效，默认 `0.0.0.0`
+- `--port`：仅命令行配置模式生效，默认 `8765`
+- `--hub-id`：Hub ID，默认 `default-hub`
 
-### 配置向导
-
-运行交互式配置向导：
+### 生成默认 Hub 配置
 
 ```bash
-./target/release/uhorse wizard
+./target/release/uhorse-hub init --output hub.toml
 ```
 
-### 使用效果
+`init` 生成的是**统一配置文件**，不是 legacy `HubConfig`。
 
-启用 LLM 后，用户发送给 Bot 的消息会被转发给 LLM 进行处理，Bot 会将 LLM 的回复返回给用户。
+---
 
-### 示例配置
+## Node 配置
 
-#### OpenAI GPT-4
+`uhorse-node` 只读取 `NodeConfig`，不区分统一/legacy 模式。
+
+### 最小 Node 配置
+
+```toml
+name = "local-node"
+workspace_path = "."
+
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
+```
+
+### 完整 Node 配置示例
+
+```toml
+node_id = ""
+name = "developer-macbook"
+workspace_path = "/Users/you/projects"
+heartbeat_interval_secs = 30
+status_interval_secs = 60
+max_concurrent_tasks = 5
+tags = ["default", "macos"]
+
+[connection]
+hub_url = "wss://hub.example.com/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
+```
+
+### Node CLI 参数
+
+```bash
+./target/release/uhorse-node --help
+```
+
+当前关键参数：
+
+- `--config`：配置文件路径，默认 `node.toml`
+- `--log-level`：日志级别，默认 `info`
+- `--hub-url`：默认 `ws://localhost:8765/ws`
+- `--workspace`：默认 `.`
+- `--name`：默认 `uHorse-Node`
+
+### Node 子命令
+
+```bash
+./target/release/uhorse-node init --output node.toml
+./target/release/uhorse-node check --workspace /path/to/workspace
+```
+
+---
+
+## DingTalk Stream 配置
+
+当前 `uhorse-hub` 启用 DingTalk 时，推荐且默认文档路径是 **Stream 模式**。
+
+### 最小 DingTalk 配置
+
+```toml
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
+```
+
+### 说明
+
+- 当前主路径是 **Stream 模式**，不依赖公网 webhook 才能接收消息。
+- Hub 仍保留 `GET/POST /api/v1/channels/dingtalk/webhook` 路由，用于兼容或辅助测试。
+- 当前允许从 DingTalk 触发的管理命令是白名单：
+  - `list` / `ls`
+  - `search`
+  - `read` / `cat`
+  - `info`
+  - `exists`
+
+### 启用后会发生什么
+
+当 `channels.enabled` 包含 `dingtalk` 时，Hub 启动阶段会：
+
+1. 初始化 `DingTalkChannel`
+2. 订阅 DingTalk 入站消息流
+3. 把入站文本解析为 Hub 任务
+4. 在任务完成后按原会话回发结果
+
+---
+
+## LLM 配置
+
+当前 Hub 使用统一配置中的 `[llm]` 段初始化 `OpenAIClient`。
+
+### 示例
 
 ```toml
 [llm]
@@ -630,47 +311,75 @@ enabled = true
 provider = "openai"
 api_key = "sk-..."
 base_url = "https://api.openai.com/v1"
-model = "gpt-4"
+model = "gpt-4.1"
 temperature = 0.7
 max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse."
 ```
 
-#### Azure OpenAI
+### 字段说明
 
-```toml
-[llm]
-enabled = true
-provider = "azure_openai"
-api_key = "your-azure-api-key"
-base_url = "https://your-resource.openai.azure.com/openai/deployments/gpt-35-turbo"
-model = "gpt-35-turbo"
-temperature = 0.7
-max_tokens = 2000
+| 字段 | 说明 |
+|------|------|
+| `enabled` | 是否启用 LLM |
+| `provider` | 当前客户端的服务商标识 |
+| `api_key` | API 密钥 |
+| `base_url` | API 基础地址 |
+| `model` | 模型名 |
+| `temperature` | 采样温度 |
+| `max_tokens` | 最大输出 token |
+| `system_prompt` | 系统提示词 |
+
+如果 `enabled = false`，Hub 启动时会跳过 LLM 初始化。
+
+---
+
+## 验证命令
+
+### 生成默认配置
+
+```bash
+./target/release/uhorse-hub init --output hub.toml
+./target/release/uhorse-node init --output node.toml
 ```
 
-#### Anthropic Claude
+### 检查 Node 工作空间
 
-```toml
-[llm]
-enabled = true
-provider = "anthropic"
-api_key = "sk-ant-..."
-base_url = "https://api.anthropic.com/v1"
-model = "claude-3-sonnet-20240229"
-temperature = 0.7
-max_tokens = 2000
+```bash
+./target/release/uhorse-node check --workspace .
 ```
 
-#### 国内兼容服务
+### 启动 Hub 和 Node
 
-```toml
-[llm]
-enabled = true
-provider = "custom"
-api_key = "your-api-key"
-base_url = "https://api.example.com/v1"
-model = "model-name"
-temperature = 0.7
-max_tokens = 2000
+```bash
+./target/release/uhorse-hub --config hub.toml --log-level info
+./target/release/uhorse-node --config node.toml --log-level info
 ```
 
+### 健康检查
+
+```bash
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
+```
+
+注意：虽然统一配置里存在 `server.health.path` 字段，但当前 `uhorse-hub` Web 路由实际暴露的健康检查路径是：
+
+```text
+/api/health
+```
+
+---
+
+## 建议
+
+- 要跑 DingTalk 或 LLM：优先使用**统一配置**。
+- 要跑最小本地闭环：优先使用 **legacy HubConfig + NodeConfig**。
+- 如果你想同时做 Hub 调度参数微调和 DingTalk / LLM 初始化，当前需要了解这两种模式的边界，不要假设统一配置已经覆盖所有 Hub 专属字段。
+
+更多示例见：
+
+- [README.md](README.md)
+- [LOCAL_SETUP.md](LOCAL_SETUP.md)
+- [CHANNELS.md](CHANNELS.md)
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)

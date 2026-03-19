@@ -1,534 +1,313 @@
-# uHorse 本地开发启动指南
+# uHorse 本地开发与启动指南
 
-本指南介绍如何在本地开发环境中运行 uHorse，不使用 Docker 容器化应用。
+本文档只描述 **当前仓库已对齐代码实现的本地 Hub-Node 路径**。
+
+如果你的目标是：
+
+- 在本机启动 Hub
+- 在本机启动 Node
+- 让 Node 连上 Hub
+- 验证 Hub → Node → Hub 的本地 roundtrip
+- 为后续 DingTalk Stream / LLM 配置做准备
+
+请按本文档操作。
 
 ## 目录
 
 - [前置要求](#前置要求)
-- [方法一：使用 Docker 运行依赖](#方法一使用-docker-运行依赖)
-- [方法二：本地安装依赖服务](#方法二本地安装依赖服务)
-- [启动应用](#启动应用)
-- [开发工作流](#开发工作流)
+- [编译二进制](#编译二进制)
+- [方式一：最小本地闭环](#方式一本地最小闭环)
+- [方式二：统一配置运行 Hub](#方式二统一配置运行-hub)
+- [启动 Hub 和 Node](#启动-hub-和-node)
+- [验证连接](#验证连接)
+- [运行真实 roundtrip 集成测试](#运行真实-roundtrip-集成测试)
+- [常见问题](#常见问题)
+- [下一步](#下一步)
 
 ---
 
 ## 前置要求
 
-### 必需
+- Rust `1.78+`
+- 可用的本地工作目录
+- 本地空闲端口（默认 `8765`）
+
+如需启用 DingTalk 或 LLM：
+
+- DingTalk 企业应用配置
+- LLM API Key
+- 若使用自定义模型服务商，需要一个 **OpenAI 兼容** 的 `/chat/completions` 端点
+
+---
+
+## 编译二进制
 
 ```bash
-# Rust 工具链
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# 验证安装
-rustc --version
-cargo --version
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-### 可选（热重载开发）
+产物：
+
+- `target/release/uhorse-hub`
+- `target/release/uhorse-node`
+
+---
+
+## 方式一：最小本地闭环
+
+这是当前最小、最容易验证的本地路径。
+
+### `hub.toml`
+
+```toml
+hub_id = "local-hub"
+bind_address = "127.0.0.1"
+port = 8765
+max_nodes = 10
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
+```
+
+### `node.toml`
+
+```toml
+name = "local-node"
+workspace_path = "."
+
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
+```
+
+这个组合适合先验证：
+
+- Hub 启动
+- Node 启动
+- Node 连接 Hub
+- 文件命令 roundtrip
+
+---
+
+## 方式二：统一配置运行 Hub
+
+如果你要启用：
+
+- DingTalk Stream
+- LLM
+- 自定义模型服务商
+
+请让 Hub 使用统一配置文件。
+
+### 示例 `hub.toml`
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 8765
+max_connections = 1000
+request_timeout = 30
+read_timeout = 10
+write_timeout = 10
+
+[server.health]
+enabled = true
+path = "/health"
+verbose = false
+
+[database]
+path = "./data/uhorse.db"
+pool_size = 10
+conn_timeout = 30
+wal_enabled = true
+fk_enabled = true
+
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
+
+[security]
+jwt_secret = "replace-with-random-secret"
+token_expiry = 86400
+refresh_token_expiry = 2592000
+pairing_expiry = 300
+approval_enabled = true
+pairing_enabled = true
+
+[logging]
+level = "info"
+format = "pretty"
+output = "stdout"
+ansi = true
+file = true
+line = true
+target = true
+
+[observability]
+service_name = "uhorse-hub"
+tracing_enabled = true
+metrics_enabled = true
+otlp_endpoint = ""
+metrics_port = 9090
+
+[scheduler]
+enabled = true
+threads = 2
+max_concurrent_jobs = 100
+
+[tools]
+sandbox_enabled = true
+sandbox_timeout = 30
+sandbox_max_memory = 512
+
+[llm]
+enabled = true
+provider = "custom-provider"
+api_key = "your_api_key"
+base_url = "https://api.example.com/v1"
+model = "your-model-name"
+temperature = 0.7
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse."
+```
+
+### 关于自定义模型服务商
+
+当前代码允许把 `provider` 配成任意未内置识别的字符串，例如：
+
+- `provider = "custom-provider"`
+- `provider = "my-company-llm"`
+- `provider = "openai-compatible"`
+
+这类值会被当作 **Custom provider** 处理。当前客户端会：
+
+- 使用 `Bearer <api_key>` 鉴权
+- 请求 `{base_url}/chat/completions`
+- 发送 OpenAI 兼容的 `messages` / `temperature` / `max_tokens` 结构
+
+所以你的自定义服务商需要兼容这一路径和请求格式。
+
+> 注意：统一配置当前会驱动 Hub 的监听地址、DingTalk 初始化和 LLM 初始化；但 `max_nodes`、`heartbeat_timeout_secs`、`task_timeout_secs`、`max_retries` 这类 Hub 专属字段仍不从统一配置读取。
+
+---
+
+## 启动 Hub 和 Node
+
+### 启动 Hub
 
 ```bash
-# 安装 cargo-watch
-cargo install cargo-watch
+./target/release/uhorse-hub --config hub.toml --log-level info
+```
 
-# 安装 cargo-nextest（更快的测试运行器）
-cargo install cargo-nextest
+### 启动 Node
+
+```bash
+./target/release/uhorse-node --config node.toml --log-level info
+```
+
+### 检查 Node 工作空间
+
+```bash
+./target/release/uhorse-node check --workspace .
 ```
 
 ---
 
-## 方法一：使用 Docker 运行依赖
+## 验证连接
 
-**推荐方式**：应用本地运行，仅用 Docker 运行 PostgreSQL 和 Redis。
-
-### 1. 启动依赖服务
+### 1. 检查 Hub 健康状态
 
 ```bash
-# 仅启动数据库和缓存
-docker-compose up -d postgres redis
-
-# 验证服务状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs postgres
-docker-compose logs redis
+curl http://127.0.0.1:8765/api/health
 ```
 
-### 2. 配置环境变量
-
-创建 `.env` 文件：
+### 2. 检查在线节点
 
 ```bash
-# 数据库
-OPENCLAW_DATABASE_URL=postgresql://uhorse:password@localhost:5432/uhorse
-
-# Redis
-OPENCLAW_REDIS_URL=redis://localhost:6379
-
-# 服务器
-OPENCLAW_SERVER_HOST=127.0.0.1
-OPENCLAW_SERVER_PORT=8080
-
-# 日志
-RUST_LOG=info
-
-# 安全 (开发环境使用测试值)
-OPENCLAW_JWT_SECRET=test-secret-for-development-only-do-not-use-in-production
+curl http://127.0.0.1:8765/api/nodes
 ```
 
-### 3. 初始化数据库
+如果 `/api/nodes` 返回在线节点列表，说明 Node 已连上 Hub。
 
-```bash
-# 运行数据库迁移
-cargo run --release -- migrate
+### 3. 查看日志重点
 
-# 或使用开发模式
-cargo run -- migrate
-```
+Hub 启动时可关注：
 
-### 4. 启动应用
+- 配置是否成功加载
+- DingTalk 是否初始化
+- LLM 是否初始化
+- `/ws` 是否有 Node 连接
 
-```bash
-# 开发模式运行
-cargo run
+Node 启动时可关注：
 
-# 或使用 release 模式（更快）
-cargo run --release
-
-# 后台运行
-cargo run --release > uhorse.log 2>&1 &
-```
-
-### 5. 验证
-
-```bash
-# 健康检查
-curl http://localhost:8080/health/live
-
-# 查看指标
-curl http://localhost:8080/metrics
-
-# WebSocket 测试
-wscat -c ws://localhost:8080/ws
-```
+- 工作空间是否校验通过
+- 是否成功连接 `hub_url`
+- 是否持续发送心跳
 
 ---
 
-## 方法二：本地安装依赖服务
+## 运行真实 roundtrip 集成测试
 
-**完全脱离 Docker**：所有服务都在本地运行。
-
-### 1. 安装 PostgreSQL
-
-#### macOS
+当前仓库已经有一条真实本地闭环测试：
 
 ```bash
-# 使用 Homebrew
-brew install postgresql@14
-brew services start postgresql@14
-
-# 创建数据库
-createdb uhorse
-
-# 创建用户
-psql -d postgres -c "CREATE USER uhorse WITH PASSWORD 'password';"
-psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE uhorse TO uhorse;"
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 ```
 
-#### Linux (Ubuntu/Debian)
+这条测试会真实启动：
 
-```bash
-# 安装 PostgreSQL
-sudo apt update
-sudo apt install postgresql-14 postgresql-contrib-14
+1. 一个 Hub
+2. 一个 WebSocket 服务
+3. 一个 Node
+4. 一个文件存在性命令
+5. Node 执行结果回传到 Hub
 
-# 启动服务
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-
-# 创建数据库和用户
-sudo -u postgres createdb uhorse
-sudo -u postgres psql -c "CREATE USER uhorse WITH PASSWORD 'password';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE uhorse TO uhorse;"
-```
-
-#### 验证
-
-```bash
-# 连接测试
-psql -U uhorse -d uhorse -h localhost
-
-# 退出
-\q
-```
-
-### 2. 安装 Redis
-
-#### macOS
-
-```bash
-# 使用 Homebrew
-brew install redis
-brew services start redis
-
-# 验证
-redis-cli ping
-# 应该返回: PONG
-```
-
-#### Linux (Ubuntu/Debian)
-
-```bash
-# 安装 Redis
-sudo apt update
-sudo apt install redis-server
-
-# 启动服务
-sudo systemctl start redis
-sudo systemctl enable redis
-
-# 验证
-redis-cli ping
-```
-
-### 3. 配置环境变量
-
-创建 `.env` 文件或设置环境变量：
-
-```bash
-# 在 shell 中设置
-export OPENCLAW_DATABASE_URL="postgresql://uhorse:password@localhost:5432/uhorse"
-export OPENCLAW_REDIS_URL="redis://localhost:6379"
-export RUST_LOG="info"
-export OPENCLAW_JWT_SECRET="test-secret-for-development-only"
-
-# 或创建 .env 文件
-cat > .env << EOF
-OPENCLAW_DATABASE_URL=postgresql://uhorse:password@localhost:5432/uhorse
-OPENCLAW_REDIS_URL=redis://localhost:6379
-RUST_LOG=info
-OPENCLAW_JWT_SECRET=test-secret-for-development-only
-EOF
-```
-
-### 4. 加载环境变量
-
-```bash
-# 使用 direnv (推荐)
-brew install direnv  # macOS
-# 或
-sudo apt install direnv  # Linux
-
-# 在项目目录创建 .envrc
-echo 'dotenv' > .envrc
-direnv allow
-
-# 或手动加载
-source .env
-# 或
-export $(cat .env | xargs)
-```
+这是当前最直接的本地闭环验证方式。
 
 ---
 
-## 启动应用
+## 常见问题
 
-### 开发模式（热重载）
+### `hub_url` 写错
 
-```bash
-# 使用 cargo-watch 自动重新编译
-cargo watch -x run
+Node 连接 Hub 需要 `ws://` 或 `wss://`，并带 `/ws`：
 
-# 指定端口
-cargo watch -x 'run -- --port 8080'
+```toml
+hub_url = "ws://127.0.0.1:8765/ws"
 ```
 
-### Release 模式
+### 健康检查路径不对
 
-```bash
-# 编译并运行
-cargo run --release
+当前实际健康检查路由是：
 
-# 指定配置文件
-cargo run --release -- --config config.toml
-
-# 指定端口
-cargo run --release -- --port 8080
+```text
+/api/health
 ```
 
-### 后台运行
+不是旧文档里的 `/health/live` 或 `/health/ready`。
 
-```bash
-# 后台运行并记录日志
-cargo run --release > uhorse.log 2>&1 &
+### 自定义模型服务商调用失败
 
-# 保存 PID
-echo $! > uhorse.pid
+优先检查：
 
-# 查看日志
-tail -f uhorse.log
-
-# 停止服务
-kill $(cat uhorse.pid)
-```
-
----
-
-## 开发工作流
-
-### 1. 首次设置
-
-```bash
-# 1. 启动依赖
-docker-compose up -d postgres redis
-# 或本地启动 PostgreSQL 和 Redis
-
-# 2. 加载环境变量
-source .env
-# 或
-direnv allow
-
-# 3. 运行数据库迁移
-cargo run -- migrate
-
-# 4. 启动应用
-cargo run
-```
-
-### 2. 日常开发
-
-```bash
-# 启动依赖（如果未运行）
-docker-compose up -d postgres redis
-
-# 热重载开发
-cargo watch -x run
-
-# 或在另一个终端运行测试
-cargo test
-```
-
-### 3. 调试
-
-```bash
-# 启用 debug 日志
-RUST_LOG=debug cargo run
-
-# 启用特定模块的详细日志
-RUST_LOG=uhorse_gateway=debug,uhorse_tool=trace cargo run
-
-# 使用 lldb 进行调试
-rust-lldb -- target/debug/uhorse
-
-# 使用 gdb 进行调试 (Linux)
-rust-gdb -- target/debug/uhorse
-```
-
-### 4. 运行测试
-
-```bash
-# 所有测试
-cargo test
-
-# 特定模块
-cargo test --package uhorse-gateway
-
-# 带输出
-cargo test -- --nocapture
-
-# 并行测试
-cargo test -- --test-threads=4
-```
-
----
-
-## CLI 参数
-
-### 查看帮助
-
-```bash
-cargo run -- --help
-```
-
-### 常用命令
-
-```bash
-# 运行服务器
-cargo run -- serve
-
-# 指定端口
-cargo run -- serve --port 8080
-
-# 指定配置文件
-cargo run -- serve --config config.toml
-
-# 数据库迁移
-cargo run -- migrate
-
-# 回滚迁移
-cargo run -- migrate rollback
-
-# 数据库重置（危险！）
-cargo run -- db:reset
-```
-
----
-
-## 故障排查
-
-### 1. 数据库连接失败
-
-```bash
-# 检查 PostgreSQL 是否运行
-ps aux | grep postgres
-
-# 或
-brew services list | grep postgresql  # macOS
-sudo systemctl status postgresql     # Linux
-
-# 检查连接
-psql -U uhorse -d uhorse -h localhost
-```
-
-### 2. Redis 连接失败
-
-```bash
-# 检查 Redis 是否运行
-redis-cli ping
-
-# 或
-brew services list | grep redis       # macOS
-sudo systemctl status redis          # Linux
-
-# 测试连接
-redis-cli
-> ping
-> quit
-```
-
-### 3. 端口被占用
-
-```bash
-# 查看端口占用
-lsof -i :8080
-
-# 更改端口
-export OPENCLAW_SERVER_PORT=8081
-cargo run
-```
-
-### 4. 编译错误
-
-```bash
-# 清理构建缓存
-cargo clean
-
-# 重新构建
-cargo build
-
-# 更新依赖
-cargo update
-```
-
-### 5. 日志查看
-
-```bash
-# 启用调试日志
-RUST_LOG=debug cargo run
-
-# 保存日志到文件
-cargo run 2>&1 | tee uhorse.log
-
-# 实时查看日志
-tail -f uhorse.log
-```
-
----
-
-## 性能优化
-
-### 1. 编译优化
-
-```bash
-# 使用 release 模式
-cargo run --release
-
-# 并行编译
-export CARGO_BUILD_JOBS=8
-cargo build --release
-```
-
-### 2. 开发优化
-
-```bash
-# 仅编译变化的包
-cargo check
-
-# 跳过未使用的依赖
-cargo check --all-targets
-```
-
----
-
-## IDE 配置
-
-### VS Code
-
-安装扩展：
-- rust-analyzer
-- CodeLLDB
-- Better TOML
-
-配置 `.vscode/settings.json`:
-
-```json
-{
-  "rust-analyzer.checkOnSave.command": "clippy",
-  "rust-analyzer.cargo.features": "all",
-  "files.watcherExclude": {
-    "**/target/**": true
-  }
-}
-```
-
-### IntelliJ IDEA
-
-安装插件：
-- Rust
-- TOML
-
----
-
-## 快速命令参考
-
-```bash
-# === 基础命令 ===
-cargo run              # 开发模式运行
-cargo run --release    # Release 模式运行
-cargo test             # 运行测试
-cargo build            # 编译项目
-
-# === 开发工具 ===
-cargo watch -x run     # 热重载开发
-cargo check            # 快速检查
-cargo clippy           # Lint 检查
-
-# === 数据库 ===
-cargo run -- migrate              # 运行迁移
-cargo run -- migrate rollback     # 回滚迁移
-
-# === 环境管理 ===
-source .env           # 加载环境变量
-docker-compose up -d postgres redis  # 启动依赖
-docker-compose down   # 停止依赖
-```
+- `provider` 是否只是自定义标识，不影响核心逻辑
+- `base_url` 是否是 API 根路径
+- 服务商是否兼容 `POST {base_url}/chat/completions`
+- 是否接受 Bearer Token
 
 ---
 
 ## 下一步
 
-- [API 文档](API.md)
-- [配置说明](CONFIG.md)
-- [测试指南](TESTING.md)
+- [CONFIG.md](CONFIG.md)：完整配置手册
+- [CHANNELS.md](CHANNELS.md)：DingTalk Stream 说明
+- [TESTING.md](TESTING.md)：测试与验证命令
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4.0 部署路径

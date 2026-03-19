@@ -1,606 +1,421 @@
 # uHorse v4.0 Hub-Node 部署指南
 
-## 概述
+本文档描述 **当前仓库主线** 的部署方式：
 
-uHorse v4.0 采用 **Hub-Node 分布式架构**：
-- **Hub (云端中枢)**: 部署在云服务器，负责 API 网关、任务调度、节点管理
-- **Node (本地节点)**: 部署在员工电脑，负责本地命令执行、工作空间管理
+- `uhorse-hub`：云端中枢
+- `uhorse-node`：本地执行节点
+- DingTalk：推荐使用 **Stream 模式**
+- LLM：从统一配置 `[llm]` 初始化，支持自定义模型服务商
 
-```
-┌─────────────────┐                      ┌─────────────────┐
-│     Hub         │◄──── WebSocket ────►│     Node        │
-│  (云端中枢)     │                      │   (本地节点)    │
-│                 │                      │                 │
-│  • API 网关     │                      │  • 文件操作     │
-│  • 任务调度     │                      │  • Shell 执行   │
-│  • 节点管理     │                      │  • 数据库访问   │
-│  • 会话管理     │                      │  • 浏览器控制   │
-└─────────────────┘                      └─────────────────┘
-        │                                        │
-        ▼                                        ▼
-┌─────────────────┐                      ┌─────────────────┐
-│   PostgreSQL    │                      │   Workspace     │
-│   Redis         │                      │   工作目录      │
-└─────────────────┘                      └─────────────────┘
-```
+## 架构概览
 
----
-
-## 下载二进制
-
-从 GitHub Release 下载对应平台的二进制：
-
-```bash
-# macOS Apple Silicon (M1/M2/M3)
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-hub-4.0.0-alpha.2-aarch64-apple-darwin.tar.gz
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-node-4.0.0-alpha.2-aarch64-apple-darwin.tar.gz
-
-# macOS Intel
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-hub-4.0.0-alpha.2-x86_64-apple-darwin.tar.gz
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-node-4.0.0-alpha.2-x86_64-apple-darwin.tar.gz
-
-# Linux x86_64
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-hub-4.0.0-alpha.2-x86_64-unknown-linux-gnu.tar.gz
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-node-4.0.0-alpha.2-x86_64-unknown-linux-gnu.tar.gz
-
-# Windows x86_64
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-hub-4.0.0-alpha.2-x86_64-pc-windows-msvc.zip
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0-alpha.2/uhorse-node-4.0.0-alpha.2-x86_64-pc-windows-msvc.zip
+```text
+┌──────────────────────────────────────────────┐
+│                  uhorse-hub                  │
+│  • HTTP API: /api/health /api/nodes /api/*  │
+│  • WebSocket: /ws                            │
+│  • Task scheduling                           │
+│  • DingTalk Stream intake                    │
+│  • DingTalk result reply                     │
+└──────────────────────────────────────────────┘
+                      │
+                      │ WebSocket
+                      ▼
+┌──────────────────────────────────────────────┐
+│                 uhorse-node                  │
+│  • Controlled workspace                      │
+│  • File / shell task execution               │
+│  • TaskResult return                         │
+└──────────────────────────────────────────────┘
 ```
 
 ---
 
-## Hub 部署 (云端)
+## 目录
 
-### 1. 解压并配置
+- [部署模式](#部署模式)
+- [1. 编译二进制](#1-编译二进制)
+- [2. 部署 Hub](#2-部署-hub)
+- [3. 部署 Node](#3-部署-node)
+- [4. 启动与验证](#4-启动与验证)
+- [5. DingTalk Stream 配置](#5-dingtalk-stream-配置)
+- [6. LLM 与自定义模型服务商配置](#6-llm-与自定义模型服务商配置)
+- [7. systemd 示例](#7-systemd-示例)
+- [8. 升级建议](#8-升级建议)
+- [9. 当前边界](#9-当前边界)
+
+---
+
+## 部署模式
+
+### 模式 A：最小 Hub-Node 闭环
+
+适合：
+
+- 本地或内网快速验证
+- 不需要 DingTalk
+- 不需要 LLM
+
+### 模式 B：统一配置 Hub + Node
+
+适合：
+
+- 需要 DingTalk Stream
+- 需要 LLM
+- 需要自定义模型服务商
+
+如果要启用 DingTalk 或 LLM，Hub 必须使用统一配置文件。
+
+---
+
+## 1. 编译二进制
 
 ```bash
-# 解压
-tar -xzf uhorse-hub-*.tar.gz
-cd uhorse-hub
-
-# 查看帮助
-./uhorse-hub --help
+git clone https://github.com/uhorse/uhorse-rs
+cd uhorse-rs
+cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
-### 2. 创建配置文件
+产物：
 
-创建 `hub.toml`：
+- `target/release/uhorse-hub`
+- `target/release/uhorse-node`
+
+可将它们复制到部署目标机器，例如：
+
+```bash
+sudo install -m 755 target/release/uhorse-hub /usr/local/bin/uhorse-hub
+sudo install -m 755 target/release/uhorse-node /usr/local/bin/uhorse-node
+```
+
+---
+
+## 2. 部署 Hub
+
+### 方式一：最小 legacy `HubConfig`
+
+适合只跑最小调度闭环。
+
+`hub.toml`：
 
 ```toml
-# Hub 配置
+hub_id = "prod-hub"
+bind_address = "0.0.0.0"
+port = 8765
+max_nodes = 100
+heartbeat_timeout_secs = 30
+task_timeout_secs = 60
+max_retries = 3
+```
 
+启动：
+
+```bash
+uhorse-hub --config /etc/uhorse/hub.toml --log-level info
+```
+
+### 方式二：统一配置
+
+适合 DingTalk / LLM / 自定义模型服务商。
+
+示例：
+
+```toml
 [server]
-# 监听地址 (0.0.0.0 表示所有接口)
 host = "0.0.0.0"
-# HTTP API 端口
-http_port = 8080
-# WebSocket 端口 (Node 连接)
-ws_port = 8081
+port = 8765
+max_connections = 1000
+request_timeout = 30
+read_timeout = 10
+write_timeout = 10
+
+[server.health]
+enabled = true
+path = "/health"
+verbose = false
 
 [database]
-# PostgreSQL 连接
-url = "postgresql://uhorse:password@localhost:5432/uhorse"
-# 连接池大小
+path = "/var/lib/uhorse/uhorse.db"
 pool_size = 10
+conn_timeout = 30
+wal_enabled = true
+fk_enabled = true
 
-[redis]
-# Redis 连接
-url = "redis://localhost:6379"
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
 
 [security]
-# JWT 密钥 (生成: openssl rand -hex 32)
-jwt_secret = "your-64-char-hex-secret-here"
-# Token 过期时间 (秒)
+jwt_secret = "replace-with-random-secret"
 token_expiry = 86400
+refresh_token_expiry = 2592000
+pairing_expiry = 300
+approval_enabled = true
+pairing_enabled = true
 
-[hub]
-# 节点心跳超时 (秒)
-node_timeout = 120
-# 任务重试次数
-task_retry_count = 3
+[logging]
+level = "info"
+format = "pretty"
+output = "stdout"
+ansi = false
+file = true
+line = true
+target = true
+
+[observability]
+service_name = "uhorse-hub"
+tracing_enabled = true
+metrics_enabled = true
+otlp_endpoint = ""
+metrics_port = 9090
+
+[scheduler]
+enabled = true
+threads = 2
+max_concurrent_jobs = 100
+
+[tools]
+sandbox_enabled = true
+sandbox_timeout = 30
+sandbox_max_memory = 512
+
+[llm]
+enabled = true
+provider = "custom-provider"
+api_key = "your_api_key"
+base_url = "https://api.example.com/v1"
+model = "your-model"
+temperature = 0.7
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse."
 ```
 
-### 3. 启动 Hub
+启动：
 
 ```bash
-# 前台运行
-./uhorse-hub --config hub.toml
-
-# 后台运行
-nohup ./uhorse-hub --config hub.toml > hub.log 2>&1 &
-
-# 使用 systemd (推荐)
-sudo cp uhorse-hub.service /etc/systemd/system/
-sudo systemctl enable uhorse-hub
-sudo systemctl start uhorse-hub
-```
-
-### 4. 验证 Hub
-
-```bash
-# 健康检查
-curl http://localhost:8080/health/live
-curl http://localhost:8080/health/ready
-
-# 查看指标
-curl http://localhost:8080/metrics
-
-# 检查 WebSocket
-wscat -c ws://localhost:8081/ws
+uhorse-hub --config /etc/uhorse/hub.toml --log-level info
 ```
 
 ---
 
-## Node 部署 (本地)
+## 3. 部署 Node
 
-### 1. 解压并配置
-
-```bash
-# 解压
-tar -xzf uhorse-node-*.tar.gz
-cd uhorse-node
-
-# 查看帮助
-./uhorse-node --help
-```
-
-### 2. 创建配置文件
-
-创建 `node.toml`：
+`node.toml`：
 
 ```toml
-# Node 配置
-
-[node]
-# 节点名称 (唯一标识)
-name = "employee-laptop-001"
-# 工作空间路径 (授权的目录)
-workspace_path = "/Users/username/projects"
+name = "office-node-01"
+workspace_path = "/Users/you/projects"
+heartbeat_interval_secs = 30
+status_interval_secs = 60
+max_concurrent_tasks = 5
+tags = ["default", "macos"]
 
 [connection]
-# Hub WebSocket 地址
-hub_url = "wss://hub.yourcompany.com:8081/ws"
-# 重连间隔 (秒)
-reconnect_interval = 5
-# 心跳间隔 (秒)
-heartbeat_interval = 30
-
-[security]
-# 节点认证 Token (从 Hub 管理界面获取)
-auth_token = "your-node-token-here"
-
-[permissions]
-# 允许的操作
-allow_file_read = true
-allow_file_write = true
-allow_shell_execute = false  # 生产环境建议关闭
-allow_database = true
-allow_browser = false
-
-# 禁止访问的路径模式
-denied_patterns = [
-    "**/.env",
-    "**/secrets/**",
-    "**/.ssh/**",
-    "**/credentials.*"
-]
+hub_url = "wss://hub.example.com/ws"
+reconnect_interval_secs = 5
+heartbeat_interval_secs = 30
+connect_timeout_secs = 10
+max_reconnect_attempts = 10
+auth_token = ""
 ```
 
-### 3. 启动 Node
+启动前可先检查工作目录：
 
 ```bash
-# 前台运行
-./uhorse-node --config node.toml
-
-# 后台运行
-nohup ./uhorse-node --config node.toml > node.log 2>&1 &
-
-# macOS launchd (开机自启)
-cp com.uhorse.node.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.uhorse.node.plist
+uhorse-node check --workspace /Users/you/projects
 ```
 
-### 4. 验证 Node
+启动：
 
 ```bash
-# 查看日志
-tail -f node.log
-
-# 应看到类似输出:
-# [INFO] Node started: employee-laptop-001
-# [INFO] Connected to Hub: wss://hub.yourcompany.com:8081/ws
-# [INFO] Workspace: /Users/username/projects
+uhorse-node --config /etc/uhorse/node.toml --log-level info
 ```
 
 ---
 
-## Docker 部署
+## 4. 启动与验证
 
-### Hub Docker
-
-```dockerfile
-# Dockerfile.hub
-FROM rust:1.83-slim as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release -p uhorse-hub
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/uhorse-hub /usr/local/bin/
-EXPOSE 8080 8081
-CMD ["uhorse-hub"]
-```
+### 1. 启动 Hub
 
 ```bash
-# 构建
-docker build -f Dockerfile.hub -t uhorse-hub:4.0 .
-
-# 运行
-docker run -d \
-  --name uhorse-hub \
-  -p 8080:8080 -p 8081:8081 \
-  -v $(pwd)/hub.toml:/etc/uhorse/hub.toml \
-  uhorse-hub:4.0
+uhorse-hub --config /etc/uhorse/hub.toml --log-level info
 ```
 
-### Node Docker (可选)
-
-```dockerfile
-# Dockerfile.node
-FROM rust:1.83-slim as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release -p uhorse-node
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/uhorse-node /usr/local/bin/
-CMD ["uhorse-node"]
-```
-
----
-
-## Kubernetes 部署 (Hub)
-
-### 1. Namespace 和 Secret
-
-```yaml
-# namespace.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: uhorse
-```
-
-```yaml
-# secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: uhorse-secrets
-  namespace: uhorse
-type: Opaque
-stringData:
-  jwt_secret: "your-64-char-hex-secret"
-  database_url: "postgresql://uhorse:password@postgres:5432/uhorse"
-  redis_url: "redis://redis:6379"
-```
-
-### 2. Hub Deployment
-
-```yaml
-# hub-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: uhorse-hub
-  namespace: uhorse
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: uhorse-hub
-  template:
-    metadata:
-      labels:
-        app: uhorse-hub
-    spec:
-      containers:
-      - name: hub
-        image: ghcr.io/kts-kris/uhorse/hub:4.0.0
-        ports:
-        - containerPort: 8080
-          name: http
-        - containerPort: 8081
-          name: websocket
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: uhorse-secrets
-              key: database_url
-        - name: REDIS_URL
-          valueFrom:
-            secretKeyRef:
-              name: uhorse-secrets
-              key: redis_url
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: uhorse-secrets
-              key: jwt_secret
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health/live
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health/ready
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
-```
-
-### 3. Service
-
-```yaml
-# hub-service.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: uhorse-hub
-  namespace: uhorse
-spec:
-  selector:
-    app: uhorse-hub
-  ports:
-  - name: http
-    port: 8080
-    targetPort: 8080
-  - name: websocket
-    port: 8081
-    targetPort: 8081
-  type: ClusterIP
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: uhorse-hub-lb
-  namespace: uhorse
-spec:
-  selector:
-    app: uhorse-hub
-  ports:
-  - name: http
-    port: 80
-    targetPort: 8080
-  - name: websocket
-    port: 8081
-    targetPort: 8081
-  type: LoadBalancer
-```
-
-### 4. 部署
+### 2. 启动 Node
 
 ```bash
-# 应用配置
-kubectl apply -f namespace.yaml
-kubectl apply -f secret.yaml
-kubectl apply -f hub-deployment.yaml
-kubectl apply -f hub-service.yaml
-
-# 验证
-kubectl get pods -n uhorse
-kubectl get svc -n uhorse
+uhorse-node --config /etc/uhorse/node.toml --log-level info
 ```
 
----
-
-## 安全配置
-
-### 1. TLS 证书
-
-```yaml
-# tls-cert.yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: uhorse-hub-cert
-  namespace: uhorse
-spec:
-  secretName: uhorse-hub-tls
-  issuerRef:
-    name: letsencrypt-prod
-    kind: ClusterIssuer
-  dnsNames:
-  - hub.yourcompany.com
-```
-
-### 2. Ingress
-
-```yaml
-# ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: uhorse-hub
-  namespace: uhorse
-  annotations:
-    nginx.ingress.kubernetes.io/websocket-services: uhorse-hub
-spec:
-  ingressClassName: nginx
-  tls:
-  - hosts:
-    - hub.yourcompany.com
-    secretName: uhorse-hub-tls
-  rules:
-  - host: hub.yourcompany.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: uhorse-hub
-            port:
-              number: 8080
-      - path: /ws
-        pathType: Prefix
-        backend:
-          service:
-            name: uhorse-hub
-            port:
-              number: 8081
-```
-
----
-
-## 监控配置
-
-### Prometheus ServiceMonitor
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: uhorse-hub
-  namespace: uhorse
-spec:
-  selector:
-    matchLabels:
-      app: uhorse-hub
-  endpoints:
-  - port: http
-    path: /metrics
-    interval: 30s
-```
-
-### 关键指标
-
-| 指标 | 说明 | 告警阈值 |
-|------|------|----------|
-| `uhorse_connected_nodes` | 连接的节点数 | < 1 |
-| `uhorse_active_tasks` | 活跃任务数 | > 100 |
-| `uhorse_task_duration_seconds` | 任务执行时间 | p99 > 30s |
-| `uhorse_websocket_connections` | WebSocket 连接数 | - |
-
----
-
-## 故障排查
-
-### Node 连接失败
+### 3. 验证 Hub
 
 ```bash
-# 检查 Node 日志
-tail -f node.log | grep -i "error\|failed"
-
-# 检查网络连通性
-ping hub.yourcompany.com
-telnet hub.yourcompany.com 8081
-
-# 检查 TLS 证书
-openssl s_client -connect hub.yourcompany.com:8081
-
-# 检查认证 Token
-# 确保 Token 有效且未过期
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/nodes
 ```
 
-### Hub 健康检查失败
+### 4. 关键判断标准
+
+- `/api/health` 正常返回
+- `/api/nodes` 能看到在线节点
+- Node 日志显示已连接 Hub
+- Hub 日志显示 `/ws` 连接建立
+
+---
+
+## 5. DingTalk Stream 配置
+
+如果要启用 DingTalk：
+
+```toml
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
+```
+
+当前主推荐是：
+
+- **Stream 模式**
+- 入站消息进入 Hub 任务链路
+- 任务结果按原 DingTalk 会话回发
+
+虽然仍保留：
+
+```text
+/api/v1/channels/dingtalk/webhook
+```
+
+但这不是当前推荐部署模式的主叙事。
+
+---
+
+## 6. LLM 与自定义模型服务商配置
+
+当前 Hub 会从统一配置的 `[llm]` 段初始化 LLM 客户端。
+
+### 内置 provider
+
+当前代码识别：
+
+- `openai`
+- `azure_openai`
+- `anthropic`
+- `gemini`
+
+### 自定义模型服务商
+
+当前也支持把 `provider` 写成任意自定义字符串，例如：
+
+```toml
+[llm]
+enabled = true
+provider = "my-company-llm"
+api_key = "your_api_key"
+base_url = "https://llm.example.com/v1"
+model = "my-model"
+temperature = 0.7
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse."
+```
+
+当前行为是：
+
+- 未识别的 provider 会作为 **Custom provider** 处理
+- 使用 Bearer Token
+- 请求地址为：
+
+```text
+{base_url}/chat/completions
+```
+
+所以你的自定义服务商需要兼容 OpenAI 风格接口。
+
+---
+
+## 7. systemd 示例
+
+### Hub
+
+`/etc/systemd/system/uhorse-hub.service`：
+
+```ini
+[Unit]
+Description=uHorse Hub
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/uhorse-hub --config /etc/uhorse/hub.toml --log-level info
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/lib/uhorse
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Node
+
+`/etc/systemd/system/uhorse-node.service`：
+
+```ini
+[Unit]
+Description=uHorse Node
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/uhorse-node --config /etc/uhorse/node.toml --log-level info
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/lib/uhorse
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用：
 
 ```bash
-# 检查 Hub 日志
-kubectl logs -f deployment/uhorse-hub -n uhorse
-
-# 检查数据库连接
-kubectl exec -it deployment/uhorse-hub -n uhorse -- \
-  psql $DATABASE_URL -c "SELECT 1"
-
-# 检查 Redis 连接
-kubectl exec -it deployment/uhorse-hub -n uhorse -- \
-  redis-cli -u $REDIS_URL ping
+sudo systemctl daemon-reload
+sudo systemctl enable --now uhorse-hub
+sudo systemctl enable --now uhorse-node
 ```
 
 ---
 
-## 版本升级
+## 8. 升级建议
 
-### 升级 Hub
+### Hub
 
-```bash
-# 1. 下载新版本
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0/uhorse-hub-4.0.0-*.tar.gz
+1. 备份 `hub.toml`
+2. 替换 `uhorse-hub` 二进制
+3. 重启服务
+4. 验证 `/api/health`
+5. 验证 `/api/nodes`
 
-# 2. 备份配置
-cp hub.toml hub.toml.bak
+### Node
 
-# 3. 停止旧版本
-sudo systemctl stop uhorse-hub
-
-# 4. 替换二进制
-tar -xzf uhorse-hub-*.tar.gz
-sudo cp uhorse-hub /usr/local/bin/
-
-# 5. 启动新版本
-sudo systemctl start uhorse-hub
-
-# 6. 验证
-sudo systemctl status uhorse-hub
-curl http://localhost:8080/health/ready
-```
-
-### 升级 Node
-
-```bash
-# 1. 下载新版本
-wget https://github.com/kts-kris/uHorse/releases/download/v4.0.0/uhorse-node-4.0.0-*.tar.gz
-
-# 2. 停止旧版本
-pkill uhorse-node
-
-# 3. 替换二进制
-tar -xzf uhorse-node-*.tar.gz
-
-# 4. 启动新版本
-./uhorse-node --config node.toml
-```
+1. 备份 `node.toml`
+2. 替换 `uhorse-node` 二进制
+3. 重启服务
+4. 验证是否重新连上 Hub
 
 ---
 
-## 检查清单
+## 9. 当前边界
 
-### Hub 部署检查
+部署时需要特别注意以下边界：
 
-- [ ] PostgreSQL 已配置并可访问
-- [ ] Redis 已配置并可访问
-- [ ] TLS 证书已配置
-- [ ] JWT 密钥已生成 (64 字符 hex)
-- [ ] 健康检查通过 (`/health/ready`)
-- [ ] WebSocket 端口可访问
-- [ ] 监控指标正常
+- 当前统一配置并不会覆盖所有 Hub 专属调度字段
+- `server.health.path` 不是当前实际对外健康检查路由的唯一真相，实际路由仍是 `/api/health`
+- `deployments/k8s/base/*` 仍偏旧单体视角，不应直接当作当前 v4.0 生产模板
+- 真实 DingTalk 企业联调仍依赖真实企业凭据
 
-### Node 部署检查
-
-- [ ] 工作空间路径正确
-- [ ] Hub URL 可访问
-- [ ] 认证 Token 有效
-- [ ] 权限配置符合安全要求
-- [ ] 禁止模式已配置
-- [ ] 日志显示连接成功
-
----
-
-**文档版本**: v4.0.0
-**最后更新**: 2026-03-18
-**维护者**: uHorse 团队
+如果你要做当前主线部署，请把这份文档和 [../CONFIG.md](../CONFIG.md) 一起看。

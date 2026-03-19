@@ -1,425 +1,216 @@
-# uHorse 通道集成指南
+# uHorse 通道指南
+
+本文档只描述 **当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
+
+当前最重要、也是主推荐路径的是：
+
+- **DingTalk Stream 模式**
+
+仓库中仍有 Telegram、Slack、Discord、WhatsApp、Feishu、WeCom 等通道模块，但当前 `uhorse-hub` 主运行时文档与验证重点是 DingTalk。
 
 ## 目录
 
-- [通道概述](#通道概述)
-- [Telegram Bot](#telegram-bot)
-- [Slack](#slack)
-- [Discord](#discord)
-- [WhatsApp Business](#whatsapp-business)
-- [Webhook 配置](#webhook-配置)
-- [消息格式](#消息格式)
+- [通道现状](#通道现状)
+- [DingTalk Stream 模式](#dingtalk-stream-模式)
+- [最小配置](#最小配置)
+- [Hub 启动后会发生什么](#hub-启动后会发生什么)
+- [消息如何进入任务链路](#消息如何进入任务链路)
+- [当前允许的 DingTalk 管理命令](#当前允许的-dingtalk-管理命令)
+- [消息回传](#消息回传)
+- [Webhook 路由说明](#webhook-路由说明)
+- [与 LLM / 自定义模型服务商的关系](#与-llm--自定义模型服务商的关系)
 - [测试验证](#测试验证)
+- [下一步](#下一步)
 
 ---
 
-## 通道概述
+## 通道现状
 
-uHorse 支持多通道消息发送和接收：
+| 通道 | 当前文档状态 | 当前主运行时状态 |
+|------|--------------|------------------|
+| DingTalk | 主文档路径 | 已接入主链路 |
+| Telegram | 模块存在 | 非当前主线文档重点 |
+| Slack | 模块存在 | 非当前主线文档重点 |
+| Discord | 模块存在 | 非当前主线文档重点 |
+| WhatsApp | 模块存在 | 非当前主线文档重点 |
+| Feishu / WeCom | 模块存在 | 非当前主线文档重点 |
 
-| 通道 | 类型 | 用途 |
-|------|------|------|
-| Telegram | Bot API | 个人用户聊天 |
-| Slack | Events API | 团队协作 |
-| Discord | Bot API | 社区管理 |
-| WhatsApp | Business API | 客户服务 |
+如果你正在做当前主线验证，请优先关注 DingTalk。
 
 ---
 
-## Telegram Bot
+## DingTalk Stream 模式
 
-### 1. 创建 Bot
+当前 `uhorse-hub` 使用 DingTalk 时，主推荐模式是：
 
-1. 在 Telegram 中搜索 [@BotFather](https://t.me/botfather)
-2. 发送 `/newbot` 创建新 Bot
-3. 按提示设置 Bot 名称和用户名
-4. 获得 Bot Token：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
+- **Stream 模式**
+- Hub 主动建立长连接
+- 不依赖公网 IP 才能接收入站消息
+- 不把 webhook 作为主入口说明
 
-### 2. 配置 uHorse
+这也是当前仓库 README 与配置手册对齐后的推荐路径。
 
-**config.toml:**
+---
+
+## 最小配置
+
+在统一配置文件里启用 DingTalk：
+
 ```toml
-[channels.telegram]
-bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "your_app_key"
+app_secret = "your_app_secret"
+agent_id = 123456789
 ```
 
-**或使用环境变量:**
-```bash
-export UHORSE_TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-```
-
-### 3. 设置 Webhook
-
-```bash
-curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://your-domain.com/api/v1/channels/telegram/webhook",
-    "secret_token": "your_webhook_secret"
-  }'
-```
-
-### 4. 测试 Bot
-
-```bash
-# 发送测试消息
-curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "chat_id": "YOUR_CHAT_ID",
-    "text": "Hello from uHorse!"
-  }'
-```
-
-### 5. 接收消息
-
-用户发送给 Bot 的消息会通过 Webhook 转发到 uHorse。
+> 注意：DingTalk 只能通过 **统一配置** 初始化。legacy `HubConfig` 模式不能初始化 DingTalk。
 
 ---
 
-## Slack
+## Hub 启动后会发生什么
 
-### 1. 创建 Slack App
+当 `channels.enabled` 包含 `dingtalk` 时，Hub 启动流程会：
 
-1. 访问 https://api.slack.com/apps
-2. 点击 "Create New App"
-3. 填写 App 名称和选择工作区
-4. 创建 Bot
+1. 读取 `[channels.dingtalk]`
+2. 初始化 `DingTalkChannel`
+3. 以 Stream 模式启动 DingTalk 消息接收
+4. 订阅入站消息
+5. 把入站文本转成 Hub 任务
+6. 在任务完成后按原会话回发结果
 
-### 2. 配置权限
+---
 
-**Bot Token Scopes:**
-- `chat:write` - 发送消息
-- `channels:read` - 读取频道
-- `groups:read` - 读取私聊
-- `im:write` - 发送私信
-- `mpim:write` - 发送群私聊
+## 消息如何进入任务链路
 
-**Event Subscriptions:**
-- `message.channels` - 频道消息
-- `message.groups` - 私聊消息
-- `message.im` - IM 消息
-- `message.mpim` - 群私聊消息
+当前主链路是：
 
-### 3. 安装到工作区
+```text
+DingTalk inbound message
+    → DingTalkChannel
+    → submit_dingtalk_task(...)
+    → Hub::submit_task(...)
+    → 调度到在线 Node
+    → Node 执行
+    → Node 回传 TaskResult
+    → Hub reply_task_result(...)
+    → 回发到原 DingTalk 会话
+```
 
-1. 在左侧菜单选择 "Install App"
-2. 选择要安装的工作区
-3. 点击 "Install"
+这意味着 DingTalk 消息不是在通道层本地直接处理，而是会进入 Hub-Node 任务执行链路。
 
-### 4. 获取凭证
+---
 
-1. **OAuth Token**: 在 "Basic Information" 中
-2. **Bot Token**: 在 "OAuth & Permissions" → "Bot Tokens" 中
-3. **Signing Secret**: 在 "Basic Information" → "App Credentials" 中
+## 当前允许的 DingTalk 管理命令
 
-### 5. 配置 uHorse
+当前 `uhorse-hub` 对 DingTalk 文本做了一个最小命令白名单，主要用于受控验证：
 
-**config.toml:**
+- `list` / `ls`
+- `search`
+- `read` / `cat`
+- `info`
+- `exists`
+
+这些命令会被转换为文件类任务，再交给 Node 在受控工作空间里执行。
+
+---
+
+## 消息回传
+
+当前结果回传逻辑会保留任务的完整执行结果，并尝试按原 DingTalk 会话回发。
+
+首版回传策略可以概括为：
+
+- 文本输出：直接回发
+- JSON 输出：格式化后回发
+- 失败结果：回发错误信息
+
+因此 DingTalk 在当前主线中不只是“入站入口”，也是任务结果的回传出口。
+
+---
+
+## Webhook 路由说明
+
+虽然当前主推荐是 Stream 模式，但 Hub 仍保留了兼容 / 辅助测试用 webhook 路由：
+
+```text
+GET  /api/v1/channels/dingtalk/webhook
+POST /api/v1/channels/dingtalk/webhook
+```
+
+注意：
+
+- 这不改变主推荐模式仍然是 Stream
+- 文档与部署设计不应再把 webhook 当成默认入口
+
+---
+
+## 与 LLM / 自定义模型服务商的关系
+
+DingTalk 与 LLM 都由 Hub 的统一配置驱动，因此二者通常一起出现在统一配置文件中。
+
+例如：
+
 ```toml
-[channels.slack]
-bot_token = "xoxb-YOUR-BOT-TOKEN"
-signing_secret = "YOUR_SIGNING_SECRET"
+[llm]
+enabled = true
+provider = "custom-provider"
+api_key = "your_api_key"
+base_url = "https://api.example.com/v1"
+model = "your-model"
+temperature = 0.7
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse."
 ```
 
-**或使用环境变量:**
-```bash
-export UHORSE_SLACK_BOT_TOKEN="xoxb-YOUR-BOT-TOKEN"
-export UHORSE_SLACK_SIGNING_SECRET="YOUR_SIGNING_SECRET"
-```
+当前代码支持自定义模型服务商：
 
-### 6. 配置事件订阅
+- `provider` 可以写成任意自定义字符串
+- 该 provider 会被当作 **Custom provider** 处理
+- 当前客户端默认按 **OpenAI 兼容接口** 请求：
+  - `POST {base_url}/chat/completions`
+  - `Authorization: Bearer <api_key>`
 
-```bash
-curl -X POST https://slack.com/api/methods.subscriptions.list \
-  -H "Authorization: Bearer xoxb-YOUR-TOKEN"
-```
-
----
-
-## Discord
-
-### 1. 创建 Discord Application
-
-1. 访问 https://discord.com/developers/applications
-2. 点击 "New Application"
-3. 填写应用名称
-4. 创建应用
-
-### 2. 创建 Bot
-
-1. 在左侧菜单选择 "Bot"
-2. 点击 "Add Bot"
-3. 设置 Bot 用户名和头像
-4. 保存获得 Bot Token
-
-### 3. 配置 Intents
-
-启用以下 Privileged Gateway Intents：
-- `SERVER_CONTENT` - 服务器内容
-- `MESSAGE_CONTENT` - 消息内容
-
-### 4. 邀请 Bot 到服务器
-
-生成 OAuth2 URL：
-1. 在 "OAuth2" → "URL Generator"
-2. 选择 scopes:
-   - `bot`
-   - `applications.commands`
-3. 选择 bot permissions:
-   - Send Messages
-   - Read Messages/View Channels
-   - Read Message History
-4. 生成 URL 并访问
-5. 选择服务器授权
-
-### 5. 配置 uHorse
-
-**config.toml:**
-```toml
-[channels.discord]
-bot_token = "MTIzNDU2Nzg5MA.Gh4b2.example"
-application_id = "123456789012345678"
-```
-
-**或使用环境变量:**
-```bash
-export UHORSE_DISCORD_BOT_TOKEN="MTIzNDU2Nzg5MA..."
-export UHORSE_DISCORD_APPLICATION_ID="123456789012345678"
-```
-
----
-
-## WhatsApp Business API
-
-### 1. 创建 Meta App
-
-1. 访问 https://developers.facebook.com/apps
-2. 点击 "Create App"
-3. 选择 "Business" 类型
-4. 填写应用名称
-
-### 2. 添加 WhatsApp 产品
-
-1. 在应用配置中选择 "Add Product"
-2. 选择 "WhatsApp"
-3. 配置 WhatsApp API 设置
-
-### 3. 配置 Webhook
-
-1. 在 WhatsApp → Configuration
-2. 设置 Webhook URL: `https://your-domain.com/api/v1/channels/whatsapp/webhook`
-3. 设置 Verify Token
-4. 订阅消息字段
-
-### 4. 获取凭证
-
-1. **Access Token**: 在 WhatsApp → API Setup 中生成
-2. **Phone Number ID**: 在发送方号码中查看
-3. **Business Account ID**: 在 WhatsApp Manager 中查看
-
-### 5. 配置 uHorse
-
-**config.toml:**
-```toml
-[channels.whatsapp]
-access_token = "YOUR_ACCESS_TOKEN"
-phone_number_id = "YOUR_PHONE_NUMBER_ID"
-business_account_id = "YOUR_BUSINESS_ACCOUNT_ID"
-webhook_verify_token = "YOUR_VERIFY_TOKEN"
-```
-
-**或使用环境变量:**
-```bash
-export UHORSE_WHATSAPP_ACCESS_TOKEN="..."
-export UHORSE_WHATSAPP_PHONE_NUMBER_ID="..."
-export UHORSE_WHATSAPP_BUSINESS_ACCOUNT_ID="..."
-```
-
----
-
-## Webhook 配置
-
-### 本地开发 Webhook
-
-使用 ngrok 暴露本地服务：
-
-```bash
-# 安装 ngrok
-brew install ngrok  # macOS
-# 或从 https://ngrok.com 下载
-
-# 启动 ngrok
-ngrok http 8080
-
-# 获得公网 URL
-# 例如: https://abc123.ngrok.io
-```
-
-配置 Webhook URL：
-```bash
-# Telegram
-curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -d '{
-    "url": "https://abc123.ngrok.io/api/v1/channels/telegram/webhook"
-  }'
-```
-
-### 生产环境 Webhook
-
-```bash
-# 使用 Nginx 反向代理
-location /api/v1/channels/ {
-    proxy_pass http://localhost:8080/api/v1/channels/;
-}
-```
-
----
-
-## 消息格式
-
-### 文本消息
-
-```json
-{
-  "type": "message",
-  "channel": "telegram",
-  "data": {
-    "chat_id": "123456789",
-    "content": {
-      "type": "text",
-      "text": "Hello from uHorse!"
-    }
-  }
-}
-```
-
-### 图片消息
-
-```json
-{
-  "type": "message",
-  "channel": "telegram",
-  "data": {
-    "chat_id": "123456789",
-    "content": {
-      "type": "image",
-      "url": "https://example.com/image.jpg",
-      "caption": "Image description"
-    }
-  }
-}
-```
-
-### 音频消息
-
-```json
-{
-  "type": "message",
-  "channel": "telegram",
-  "data": {
-    "chat_id": "123456789",
-    "content": {
-      "type": "audio",
-      "url": "https://example.com/audio.mp3"
-    }
-  }
-}
-```
+所以如果你要在 DingTalk 入口后接入企业内部模型平台，只要该平台兼容这套接口即可。
 
 ---
 
 ## 测试验证
 
-### Telegram 测试
+### 启动 Hub 并观察日志
 
 ```bash
-# 发送文本消息
-curl -X POST http://localhost:8080/api/v1/channels/telegram/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "chat_id": "YOUR_CHAT_ID",
-    "text": "Hello from uHorse!"
-  }'
+./target/release/uhorse-hub --config hub.toml --log-level info
 ```
 
-### Slack 测试
+重点关注：
+
+- DingTalk channel 是否初始化成功
+- 是否以 Stream 模式启动
+- 是否开始接收入站消息
+
+### 配合 Node 验证本地链路
 
 ```bash
-# 发送消息到频道
-curl -X POST http://localhost:8080/api/v1/channels/slack/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "channel": "#general",
-    "text": "Hello from uHorse!"
-  }'
+./target/release/uhorse-node --config node.toml --log-level info
+curl http://127.0.0.1:8765/api/nodes
 ```
 
-### Discord 测试
+### 本地已验证的基础闭环测试
 
 ```bash
-# 发送消息到频道
-curl -X POST http://localhost:8080/api/v1/channels/discord/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "channel_id": "CHANNEL_ID",
-    "content": "Hello from uHorse!"
-  }'
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 ```
 
-### WhatsApp 测试
-
-```bash
-# 发送消息
-curl -X POST http://localhost:8080/api/v1/channels/whatsapp/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "to": "1234567890",
-    "type": "text",
-    "text": "Hello from uHorse!"
-  }'
-```
-
----
-
-## 通道状态监控
-
-### 查看所有通道状态
-
-```bash
-curl http://localhost:8080/api/v1/channels/status
-```
-
-**响应:**
-```json
-{
-  "channels": {
-    "telegram": {
-      "connected": true,
-      "webhook": "active",
-      "last_message": "2026-03-02T12:00:00Z"
-    },
-    "slack": {
-      "connected": true,
-      "webhook": "active",
-      "last_message": "2026-03-02T11:55:00Z"
-    },
-    "discord": {
-      "connected": false,
-      "error": "Bot token not configured"
-    },
-    "whatsapp": {
-      "connected": false,
-      "error": "Access token expired"
-    }
-  }
-}
-```
+这条测试不依赖真实 DingTalk 凭据，但能证明 Hub-Node 任务执行主链路已闭合。
 
 ---
 
 ## 下一步
 
-- [配置指南](CONFIG.md)
-- [API 使用指南](API.md)
-- [部署指南](deployments/DEPLOYMENT.md)
+- [CONFIG.md](CONFIG.md)：统一配置与 legacy 配置边界
+- [README.md](README.md)：项目总览
+- [TESTING.md](TESTING.md)：测试与验证
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4.0 部署说明
