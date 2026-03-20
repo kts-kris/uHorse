@@ -27,7 +27,7 @@ struct Args {
     log_level: String,
 
     /// Hub 地址
-    #[arg(short, long, default_value = "ws://localhost:8765")]
+    #[arg(short = 'u', long, default_value = "ws://localhost:8765/ws")]
     hub_url: String,
 
     /// 工作空间路径

@@ -191,7 +191,7 @@ impl ConfigValidator for ChannelsValidator {
         // 验证启用的通道
         for channel in &config.channels.enabled {
             match channel.as_str() {
-                "telegram" | "slack" | "discord" | "whatsapp" => {}
+                "telegram" | "dingtalk" | "slack" | "discord" | "whatsapp" => {}
                 _ => {
                     errors.push(format!("Unknown channel type: {}", channel));
                 }
@@ -209,6 +209,23 @@ impl ConfigValidator for ChannelsValidator {
                 }
             } else {
                 errors.push("Telegram config is missing".to_string());
+            }
+        }
+
+        // 验证 DingTalk 配置
+        if config.channels.enabled.contains(&"dingtalk".to_string()) {
+            if let Some(dingtalk) = &config.channels.dingtalk {
+                if dingtalk.app_key.is_empty() {
+                    errors.push("DingTalk app_key is required".to_string());
+                }
+                if dingtalk.app_secret.is_empty() {
+                    errors.push("DingTalk app_secret is required".to_string());
+                }
+                if dingtalk.agent_id == 0 {
+                    errors.push("DingTalk agent_id must be > 0".to_string());
+                }
+            } else {
+                errors.push("DingTalk config is missing".to_string());
             }
         }
 

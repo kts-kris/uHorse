@@ -245,6 +245,7 @@ Hub 启动时可关注：
 - DingTalk 是否初始化
 - LLM 是否初始化
 - `/ws` 是否有 Node 连接
+- 任务完成后是否出现 DingTalk 结果回发日志
 
 Node 启动时可关注：
 
@@ -271,6 +272,8 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 5. Node 执行结果回传到 Hub
 
 这是当前最直接的本地闭环验证方式。
+
+如果你还要继续验证 DingTalk 最后一跳，可在统一配置里填入真实企业凭据后补做一轮真实消息联调。当前主线已经完成一次真实企业验证：非法命令会即时错误回显，合法 `exists` 命令会把 JSON 结果原路回传到原会话。
 
 ---
 

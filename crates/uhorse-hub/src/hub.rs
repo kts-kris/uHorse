@@ -186,6 +186,7 @@ impl Hub {
             .register_node(node_id.clone(), name, capabilities, workspace, tags)
             .await?;
         info!("Node {} connected", node_id);
+        self.dispatch_pending_tasks().await?;
         Ok(())
     }
 
@@ -198,9 +199,25 @@ impl Hub {
 
     /// 处理来自节点的消息
     pub async fn handle_node_message(&self, node_id: &NodeId, message: NodeToHub) -> HubResult<()> {
+        let should_dispatch = matches!(
+            message,
+            NodeToHub::TaskResult { .. }
+                | NodeToHub::Heartbeat { .. }
+                | NodeToHub::Error {
+                    task_id: Some(_),
+                    ..
+                }
+        );
+
         self.message_router
             .route_node_message(node_id, message)
-            .await
+            .await?;
+
+        if should_dispatch {
+            self.dispatch_pending_tasks().await?;
+        }
+
+        Ok(())
     }
 
     /// 提交任务
@@ -213,7 +230,8 @@ impl Hub {
         required_tags: Vec<String>,
         workspace_hint: Option<String>,
     ) -> HubResult<TaskId> {
-        self.task_scheduler
+        let task_id = self
+            .task_scheduler
             .submit_task(
                 command,
                 context,
@@ -222,7 +240,25 @@ impl Hub {
                 required_tags,
                 workspace_hint,
             )
-            .await
+            .await?;
+
+        self.dispatch_pending_tasks().await?;
+
+        Ok(task_id)
+    }
+
+    /// 触发待调度任务分发
+    pub async fn dispatch_pending_tasks(&self) -> HubResult<()> {
+        loop {
+            let senders = self.message_router.node_senders().read().await.clone();
+            if senders.is_empty() {
+                return Ok(());
+            }
+
+            if self.task_scheduler.schedule_next(&senders).await?.is_none() {
+                return Ok(());
+            }
+        }
     }
 
     /// 获取任务状态

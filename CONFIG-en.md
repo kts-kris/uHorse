@@ -295,7 +295,12 @@ When `channels.enabled` contains `dingtalk`, Hub startup will:
 1. initialize `DingTalkChannel`
 2. subscribe to inbound DingTalk messages
 3. convert inbound text into Hub tasks
-4. reply task results back to the original conversation
+4. prefer replying through `session_webhook` back to the original conversation; when the webhook is unavailable or expired, fall back to group or personal message sending
+
+The current mainline has already been validated once with a real enterprise tenant:
+
+- invalid commands return immediate errors
+- a valid `exists` command routes JSON back to the original conversation
 
 ---
 

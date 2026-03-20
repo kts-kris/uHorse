@@ -119,13 +119,19 @@ These are converted into file-oriented tasks and executed by the Node inside its
 
 ## Reply path
 
-The current result handling keeps the full execution result and attempts to route it back to the original DingTalk session.
+The current result handling keeps the full execution result and tries to get back to the original DingTalk session in this order:
+
+- prefer `session_webhook` when it is still valid
+- fall back to group-message sending via `conversation_id`
+- fall back to direct personal sending via `sender_user_id`
 
 The current reply strategy is roughly:
 
 - text output → reply directly
 - JSON output → pretty-print then reply
 - failure → reply with error text
+
+The current mainline has already been validated with a real enterprise tenant: invalid commands return immediate errors, and a valid `exists` command routes JSON back to the original conversation.
 
 So DingTalk is both the inbound entrypoint and the result return channel.
 

@@ -11,14 +11,15 @@ use crate::workspace::Workspace;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use uhorse_protocol::{
-    Command, CommandResult, HubToNode, MessageCodec, NodeCapabilities, NodeId, NodeStatus,
-    NodeToHub, TaskContext, TaskId, TaskStatus,
+    Command, CommandResult, ErrorSource, ExecutionError, ExecutionMetrics, HubToNode,
+    NodeCapabilities, NodeId, NodeStatus, NodeToHub, TaskContext, TaskId,
 };
 
 /// 节点配置
@@ -172,7 +173,12 @@ impl Node {
         let (status_tx, status_rx) = broadcast::channel(16);
 
         // 创建连接
-        let connection = HubConnection::new(node_id.clone(), config.connection.clone());
+        let connection = HubConnection::new(
+            node_id.clone(),
+            config.connection.clone(),
+            config.name.clone(),
+            workspace.root().to_string_lossy().to_string(),
+        );
 
         Ok(Self {
             config,
@@ -203,11 +209,11 @@ impl Node {
         self.permission_manager.load_default_rules().await;
 
         // 2. 连接到 Hub
-        let hub_rx = self.connection.start().await?;
+        let (hub_rx, outbound_tx) = self.connection.start().await?;
 
         // 3. 启动后台任务
         self.start_status_task();
-        self.start_message_handler(hub_rx);
+        self.start_message_handler(hub_rx, outbound_tx);
 
         info!("Node started successfully");
         Ok(())
@@ -238,15 +244,20 @@ impl Node {
     }
 
     /// 启动消息处理器
-    fn start_message_handler(&self, mut receiver: mpsc::Receiver<HubToNode>) {
+    fn start_message_handler(
+        &self,
+        mut receiver: mpsc::Receiver<HubToNode>,
+        outbound_tx: mpsc::Sender<NodeToHub>,
+    ) {
         let running = self.running.clone();
         let executor = self.executor.clone();
         let metrics = self.metrics.clone();
         let running_tasks = self.running_tasks.clone();
+        let node_id = self.node_id.clone();
 
         tokio::spawn(async move {
             loop {
-                if !running.load(std::sync::atomic::Ordering::SeqCst) {
+                if !running.load(Ordering::SeqCst) {
                     break;
                 }
 
@@ -256,10 +267,12 @@ impl Node {
                         match msg {
                             Some(message) => {
                                 if let Err(e) = Self::handle_hub_message(
+                                    &node_id,
                                     &message,
                                     &executor,
                                     &metrics,
                                     &running_tasks,
+                                    &outbound_tx,
                                 ).await {
                                     error!("Failed to handle Hub message: {}", e);
                                 }
@@ -277,10 +290,12 @@ impl Node {
 
     /// 处理 Hub 消息
     async fn handle_hub_message(
+        node_id: &NodeId,
         message: &HubToNode,
         executor: &Arc<CommandExecutor>,
         metrics: &Arc<RwLock<Metrics>>,
         running_tasks: &Arc<RwLock<HashMap<TaskId, RunningTask>>>,
+        outbound_tx: &mpsc::Sender<NodeToHub>,
     ) -> NodeResult<()> {
         match message {
             HubToNode::TaskAssignment {
@@ -290,14 +305,36 @@ impl Node {
                 ..
             } => {
                 info!("Received task: {}", task_id);
+                let started_at = Instant::now();
+
+                let (cancel_tx, _cancel_rx) = mpsc::channel(1);
+                {
+                    let mut tasks = running_tasks.write().await;
+                    tasks.insert(
+                        task_id.clone(),
+                        RunningTask {
+                            task_id: task_id.clone(),
+                            command: command.clone(),
+                            context: context.clone(),
+                            started_at: Utc::now(),
+                            cancel_tx,
+                        },
+                    );
+                }
 
                 // 执行任务
-                let result = executor.execute(task_id, command, context).await;
+                let execution = executor.execute(task_id, command, context).await;
+                let duration_ms = started_at.elapsed().as_millis() as u64;
+
+                let result = match execution {
+                    Ok(result) => result,
+                    Err(error) => Self::command_result_from_node_error(&error, duration_ms),
+                };
 
                 // 更新指标
                 {
                     let mut m = metrics.write().await;
-                    m.record_execution(result.is_ok(), 0); // TODO: 实际持续时间
+                    m.record_execution(result.success, duration_ms);
                 }
 
                 // 更新 running_tasks
@@ -306,10 +343,25 @@ impl Node {
                     tasks.remove(task_id);
                 }
 
+                let message = NodeToHub::TaskResult {
+                    message_id: uhorse_protocol::MessageId::new(),
+                    task_id: task_id.clone(),
+                    result: result.clone(),
+                    metrics: ExecutionMetrics {
+                        duration_ms,
+                        ..Default::default()
+                    },
+                };
+
+                outbound_tx.send(message).await.map_err(|e| {
+                    NodeError::Connection(format!("Failed to send task result: {}", e))
+                })?;
+
                 info!(
-                    "Task {} completed: {:?}",
+                    "Task {} completed on node {}: {}",
                     task_id,
-                    result.as_ref().map(|_| "success").unwrap_or("failed")
+                    node_id,
+                    if result.success { "success" } else { "failed" }
                 );
             }
 
@@ -351,6 +403,39 @@ impl Node {
         }
 
         Ok(())
+    }
+
+    fn command_result_from_node_error(error: &NodeError, duration_ms: u64) -> CommandResult {
+        let execution_error = match error {
+            NodeError::Permission(message) => ExecutionError::permission_denied(message.clone()),
+            NodeError::Timeout(message) => ExecutionError::timeout(message.clone()),
+            NodeError::Execution(message) => ExecutionError::execution_failed(message.clone()),
+            NodeError::Workspace(message) => {
+                ExecutionError::validation_failed(message.clone())
+            }
+            NodeError::Config(message) => ExecutionError::validation_failed(message.clone()),
+            NodeError::Connection(message) => {
+                ExecutionError::new("CONNECTION_FAILED", message.clone(), ErrorSource::External)
+            }
+            NodeError::Protocol(error) => ExecutionError::new(
+                "PROTOCOL_ERROR",
+                error.to_string(),
+                ErrorSource::Internal,
+            ),
+            NodeError::Io(error) => {
+                ExecutionError::new("IO_ERROR", error.to_string(), ErrorSource::Executor)
+            }
+            NodeError::Serialization(error) => ExecutionError::new(
+                "SERIALIZATION_ERROR",
+                error.to_string(),
+                ErrorSource::Internal,
+            ),
+            NodeError::Internal(message) => {
+                ExecutionError::new("INTERNAL_ERROR", message.clone(), ErrorSource::Internal)
+            }
+        };
+
+        CommandResult::failure(execution_error).with_duration(duration_ms)
     }
 
     /// 停止节点

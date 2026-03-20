@@ -10,7 +10,7 @@ pub mod telegram;
 pub mod wework;
 pub mod whatsapp;
 
-pub use dingtalk::DingTalkChannel;
+pub use dingtalk::{DingTalkChannel, DingTalkInboundMessage};
 pub use discord::DiscordChannel;
 pub use feishu::FeishuChannel;
 pub use slack::SlackChannel;

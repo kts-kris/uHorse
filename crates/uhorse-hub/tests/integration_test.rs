@@ -2,10 +2,16 @@
 //!
 //! 测试 Hub 和 Node 之间的完整通信流程
 
-use uhorse_hub::{Hub, HubConfig};
+use std::sync::Arc;
+use std::time::Duration;
+
+use tempfile::tempdir;
+use tokio::time::timeout;
+use uhorse_hub::{create_router, Hub, HubConfig, WebState};
+use uhorse_node::{ConnectionConfig, Node, NodeConfig};
 use uhorse_protocol::{
-    Command, FileCommand, NodeCapabilities, NodeId, Priority, SessionId, ShellCommand, TaskContext,
-    UserId, WorkspaceInfo,
+    Command, CommandOutput, FileCommand, NodeCapabilities, NodeId, Priority, SessionId,
+    ShellCommand, TaskContext, UserId, WorkspaceInfo,
 };
 
 /// 创建测试用的工作空间信息
@@ -289,4 +295,106 @@ async fn test_node_disconnect() {
     // 验证节点已断开
     let nodes = hub.get_online_nodes().await;
     assert_eq!(nodes.len(), 0);
+}
+
+#[tokio::test]
+async fn test_local_hub_node_roundtrip_file_exists() {
+    let workspace = tempdir().unwrap();
+    let existing_file = workspace.path().join("roundtrip.txt");
+    std::fs::write(&existing_file, "ok").unwrap();
+
+    let hub_config = HubConfig {
+        hub_id: "roundtrip-test-hub".to_string(),
+        bind_address: "127.0.0.1".to_string(),
+        port: 18765,
+        heartbeat_timeout_secs: 10,
+        task_timeout_secs: 30,
+        ..Default::default()
+    };
+
+    let (hub, mut task_result_rx) = Hub::new(hub_config.clone());
+    let hub = Arc::new(hub);
+    hub.start().await.unwrap();
+
+    let web_state = WebState::new(hub.clone(), None, None);
+    let app = create_router(web_state);
+    let listener = tokio::net::TcpListener::bind((hub_config.bind_address.as_str(), hub_config.port))
+        .await
+        .unwrap();
+
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut node = Node::new(NodeConfig {
+        name: "roundtrip-node".to_string(),
+        workspace_path: workspace.path().to_string_lossy().to_string(),
+        connection: ConnectionConfig {
+            hub_url: format!("ws://127.0.0.1:{}/ws", hub_config.port),
+            reconnect_interval_secs: 1,
+            heartbeat_interval_secs: 1,
+            connect_timeout_secs: 5,
+            max_reconnect_attempts: 1,
+            auth_token: None,
+        },
+        ..Default::default()
+    })
+    .unwrap();
+
+    node.start().await.unwrap();
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if hub.get_online_nodes().await.len() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let task_id = hub
+        .submit_task(
+            Command::File(FileCommand::Exists {
+                path: existing_file.to_string_lossy().to_string(),
+            }),
+            create_test_context("test-user", "roundtrip-session"),
+            Priority::Normal,
+            None,
+            vec![],
+            Some(workspace.path().to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let result = timeout(Duration::from_secs(10), task_result_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.task_id, task_id);
+    assert!(result.result.success);
+    match &result.result.output {
+        CommandOutput::Json { content } => {
+            assert_eq!(content.get("exists").and_then(|value| value.as_bool()), Some(true));
+        }
+        other => panic!("unexpected output: {:?}", other),
+    }
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            match hub.get_task_status(&task_id).await {
+                Some(status) if format!("{:?}", status.status) == "Completed" => break,
+                _ => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    node.stop().await.unwrap();
+    server.abort();
+    let _ = server.await;
+    hub.shutdown().await.unwrap();
 }

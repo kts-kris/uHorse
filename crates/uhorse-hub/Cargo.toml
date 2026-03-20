@@ -53,7 +53,7 @@ async-trait = { workspace = true }
 reqwest = { workspace = true }
 
 # Web server
-axum = { workspace = true }
+axum = { workspace = true, features = ["ws"] }
 tower-http = { workspace = true }
 
 # CLI
@@ -66,6 +66,7 @@ tracing-subscriber = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+uhorse-node = { path = "../uhorse-node" }
 tokio-test = { workspace = true }
 tempfile = { workspace = true }
 criterion = { version = "0.5", features = ["async_tokio"] }

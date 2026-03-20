@@ -162,7 +162,7 @@ app_secret = "your_app_secret"
 agent_id = 123456789
 ```
 
-启动 Hub 后，重点看日志里是否出现 DingTalk 初始化成功。
+启动 Hub 后，重点看日志里是否出现 DingTalk 初始化成功，以及任务完成后的 DingTalk 回传日志。
 
 ### LLM 初始化验证
 
@@ -203,6 +203,7 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 - LLM client 是否成功初始化
 - `/api/nodes` 是否能看到在线 Node
 - 本地 roundtrip 是否成功
+- 真实 DingTalk 会话里是否能看到错误即时回显与成功结果原路回传
 
 ---
 
@@ -213,7 +214,7 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 - 旧单体 `uhorse` 的 `/health/live` / `/health/ready`
 - 旧 `OPENCLAW_*` 环境变量链路
 - `deployments/k8s/base/*` 直接用于 v4.0 Hub-Node 生产部署
-- 未提供真实企业凭据情况下的 DingTalk 最后一跳联调
+- 未提供真实企业凭据时，无法在你自己的环境复现 DingTalk 最后一跳联调
 
 当前已经明确验证的是：
 
@@ -221,8 +222,9 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 - 本机启动 Node
 - Node 连接 Hub
 - Hub → Node → Hub 的真实 roundtrip 测试
+- 真实企业租户下的 DingTalk 回传闭环：非法命令即时报错，合法 `exists` 命令原路回传 JSON 结果
 
-真实 DingTalk 企业联调仍依赖真实配置。
+因此，如果你只是验证本地代码链路，可先用本地 roundtrip 测试；如果你要复现 DingTalk 最后一跳，仍需要准备你自己的真实配置。
 
 ---
 

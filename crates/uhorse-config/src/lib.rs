@@ -222,6 +222,8 @@ pub struct ChannelsConfig {
     pub enabled: Vec<String>,
     /// Telegram 配置
     pub telegram: Option<TelegramConfig>,
+    /// DingTalk 配置
+    pub dingtalk: Option<DingTalkConfig>,
     /// Slack 配置
     pub slack: Option<SlackConfig>,
     /// Discord 配置
@@ -236,6 +238,7 @@ impl Default for ChannelsConfig {
         Self {
             enabled: vec![],
             telegram: None,
+            dingtalk: None,
             slack: None,
             discord: None,
             whatsapp: None,
@@ -257,6 +260,17 @@ pub struct TelegramConfig {
 
 fn default_telegram_max_connections() -> usize {
     100
+}
+
+/// DingTalk 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DingTalkConfig {
+    /// App Key
+    pub app_key: String,
+    /// App Secret
+    pub app_secret: String,
+    /// Agent ID
+    pub agent_id: u64,
 }
 
 /// Slack 配置

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 use uhorse_protocol::{
-    Command, HubToNode, MessageId, NodeCapabilities, NodeId, Priority, TaskContext, TaskId,
-    TaskStatus, TaskStatus as ProtocolTaskStatus, WorkspaceInfo,
+    Command, CommandResult, ExecutionError, HubToNode, MessageId, NodeCapabilities, NodeId,
+    Priority, TaskContext, TaskId, TaskStatus,
 };
 
 use crate::error::{HubError, HubResult};
@@ -76,10 +76,8 @@ pub struct CompletedTask {
     pub started_at: DateTime<Utc>,
     /// 完成时间
     pub completed_at: DateTime<Utc>,
-    /// 是否成功
-    pub success: bool,
-    /// 错误信息
-    pub error: Option<String>,
+    /// 完整执行结果
+    pub result: CommandResult,
 }
 
 /// 任务结果
@@ -89,10 +87,8 @@ pub struct TaskResult {
     pub task_id: TaskId,
     /// 节点 ID
     pub node_id: NodeId,
-    /// 是否成功
-    pub success: bool,
-    /// 错误信息
-    pub error: Option<String>,
+    /// 完整执行结果
+    pub result: CommandResult,
 }
 
 /// 调度任务
@@ -239,7 +235,7 @@ impl TaskScheduler {
     /// 调度下一个任务
     pub async fn schedule_next(
         &self,
-        sender: &mpsc::Sender<HubToNode>,
+        senders: &HashMap<NodeId, mpsc::Sender<HubToNode>>,
     ) -> HubResult<Option<ScheduledTask>> {
         let priorities = [
             Priority::Critical,
@@ -265,55 +261,80 @@ impl TaskScheduler {
             };
 
             if let Some(task) = task {
-                // 选择合适的节点
-                if let Some(node) = self
-                    .node_manager
-                    .select_node(
-                        task.required_capabilities.as_ref(),
-                        &task.required_tags,
-                        task.workspace_hint.as_deref(),
-                    )
-                    .await
-                {
-                    // 发送任务到节点
-                    let assignment = HubToNode::TaskAssignment {
-                        message_id: MessageId::new(),
-                        task_id: task.task_id.clone(),
-                        command: task.command.clone(),
-                        priority: task.priority,
-                        deadline: Some(
-                            Utc::now() + chrono::Duration::seconds(self.task_timeout_secs as i64),
-                        ),
-                        context: uhorse_protocol::TaskContext {
-                            user_id: task.context.user_id.clone(),
-                            session_id: task.context.session_id.clone(),
-                            channel: task.context.channel.clone(),
-                            intent: task.context.intent.clone(),
-                            env: task.context.env.clone(),
-                            created_at: task.context.created_at,
-                        },
-                        retry_count: task.retry_count,
-                        max_retries: task.max_retries,
+                let mut candidates = self.node_manager.get_online_nodes().await;
+                candidates.retain(|node| {
+                    if !senders.contains_key(&node.node_id) {
+                        return false;
+                    }
+
+                    if let Some(required) = task.required_capabilities.as_ref() {
+                        if !node.capabilities.meets(required) {
+                            return false;
+                        }
+                    }
+
+                    if !task.required_tags.is_empty()
+                        && !task.required_tags.iter().any(|tag| node.tags.contains(tag))
+                    {
+                        return false;
+                    }
+
+                    if let Some(hint) = task.workspace_hint.as_deref() {
+                        if !node.workspace.path.contains(hint) {
+                            return false;
+                        }
+                    }
+
+                    true
+                });
+
+                candidates.sort_by(|a, b| {
+                    a.load
+                        .score()
+                        .partial_cmp(&b.load.score())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                let mut task = Some(task);
+
+                for node in candidates {
+                    let assignment = {
+                        let task_ref = task.as_ref().expect("task should exist before scheduling");
+                        HubToNode::TaskAssignment {
+                            message_id: MessageId::new(),
+                            task_id: task_ref.task_id.clone(),
+                            command: task_ref.command.clone(),
+                            priority: task_ref.priority,
+                            deadline: Some(
+                                Utc::now() + chrono::Duration::seconds(self.task_timeout_secs as i64),
+                            ),
+                            context: uhorse_protocol::TaskContext {
+                                user_id: task_ref.context.user_id.clone(),
+                                session_id: task_ref.context.session_id.clone(),
+                                channel: task_ref.context.channel.clone(),
+                                intent: task_ref.context.intent.clone(),
+                                env: task_ref.context.env.clone(),
+                                created_at: task_ref.context.created_at,
+                            },
+                            retry_count: task_ref.retry_count,
+                            max_retries: task_ref.max_retries,
+                        }
                     };
+
+                    let sender = senders
+                        .get(&node.node_id)
+                        .expect("candidate nodes must have active senders");
 
                     if let Err(e) = self
                         .node_manager
                         .send_to_node(&node.node_id, assignment, sender)
                         .await
                     {
-                        warn!("Failed to send task to node: {}", e);
-
-                        // 如果发送失败，将任务放回队列
-                        if task.retry_count < task.max_retries {
-                            let mut task = task;
-                            task.retry_count += 1;
-                            let mut pending = self.pending_tasks.write().await;
-                            if let Some(queue) = pending.get_mut(&priority) {
-                                queue.insert(0, task);
-                            }
-                        }
+                        warn!("Failed to send task to node {}: {}", node.node_id, e);
                         continue;
                     }
+
+                    let task = task.take().expect("task should only be scheduled once");
 
                     // 记录运行中的任务
                     let running = RunningTask {
@@ -340,14 +361,18 @@ impl TaskScheduler {
 
                     info!("Task {} scheduled to node {}", task.task_id, node.node_id);
                     return Ok(Some(scheduled));
-                } else {
-                    // 没有合适的节点，将任务放回队列
-                    let mut pending = self.pending_tasks.write().await;
-                    if let Some(queue) = pending.get_mut(&priority) {
-                        queue.insert(0, task);
-                    }
-                    debug!("No suitable node available for task");
                 }
+
+                let mut task = task.expect("task should be returned to queue when not scheduled");
+                if task.retry_count < task.max_retries && !senders.is_empty() {
+                    task.retry_count += 1;
+                }
+
+                let mut pending = self.pending_tasks.write().await;
+                if let Some(queue) = pending.get_mut(&priority) {
+                    queue.insert(0, task);
+                }
+                debug!("No suitable node available for task");
             }
         }
 
@@ -359,8 +384,7 @@ impl TaskScheduler {
         &self,
         task_id: &TaskId,
         node_id: &NodeId,
-        success: bool,
-        error: Option<String>,
+        result: CommandResult,
     ) -> HubResult<()> {
         let mut running_tasks = self.running_tasks.write().await;
 
@@ -372,8 +396,7 @@ impl TaskScheduler {
                 node_id: node_id.clone(),
                 started_at: running.started_at,
                 completed_at: Utc::now(),
-                success,
-                error: error.clone(),
+                result: result.clone(),
             };
 
             // 添加到已完成任务列表
@@ -398,14 +421,13 @@ impl TaskScheduler {
             }
 
             // 发送结果通知
-            let result = TaskResult {
+            let task_result = TaskResult {
                 task_id: task_id.clone(),
                 node_id: node_id.clone(),
-                success,
-                error,
+                result: result.clone(),
             };
 
-            if self.result_tx.send(result).await.is_err() {
+            if self.result_tx.send(task_result).await.is_err() {
                 warn!("Failed to send task result notification");
             }
 
@@ -413,7 +435,7 @@ impl TaskScheduler {
                 "Task {} completed on node {}: {}",
                 task_id,
                 node_id,
-                if success { "success" } else { "failed" }
+                if result.success { "success" } else { "failed" }
             );
         }
 
@@ -453,6 +475,8 @@ impl TaskScheduler {
             if let Some(running) = running_tasks.remove(task_id) {
                 warn!("Task {} timed out on node {}", task_id, running.node_id);
 
+                let result = CommandResult::failure(ExecutionError::timeout("Task timed out"));
+
                 let completed = CompletedTask {
                     task_id: task_id.clone(),
                     command: running.command,
@@ -460,12 +484,24 @@ impl TaskScheduler {
                     node_id: running.node_id.clone(),
                     started_at: running.started_at,
                     completed_at: now,
-                    success: false,
-                    error: Some("Task timed out".to_string()),
+                    result: result.clone(),
                 };
 
                 let mut completed_tasks = self.completed_tasks.write().await;
                 completed_tasks.insert(task_id.clone(), completed);
+
+                if self
+                    .result_tx
+                    .send(TaskResult {
+                        task_id: task_id.clone(),
+                        node_id: running.node_id,
+                        result,
+                    })
+                    .await
+                    .is_err()
+                {
+                    warn!("Failed to send timeout task result notification");
+                }
             }
         }
 
@@ -495,7 +531,7 @@ impl TaskScheduler {
             if let Some(completed) = completed_tasks.get(task_id) {
                 return Some(TaskStatusInfo {
                     task_id: task_id.clone(),
-                    status: if completed.success {
+                    status: if completed.result.success {
                         TaskStatus::Completed
                     } else {
                         TaskStatus::Failed
@@ -503,7 +539,7 @@ impl TaskScheduler {
                     node_id: Some(completed.node_id.clone()),
                     started_at: Some(completed.started_at),
                     completed_at: Some(completed.completed_at),
-                    error: completed.error.clone(),
+                    error: completed.result.error.as_ref().map(|error| error.message.clone()),
                 });
             }
         }
@@ -542,7 +578,7 @@ impl TaskScheduler {
         let mut completed_count = 0;
         let mut failed_count = 0;
         for task in completed_tasks.values() {
-            if task.success {
+            if task.result.success {
                 completed_count += 1;
             } else {
                 failed_count += 1;

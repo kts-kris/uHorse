@@ -4,7 +4,7 @@
 
 use crate::error::{NodeError, NodeResult};
 use chrono::{DateTime, Utc};
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -60,7 +60,7 @@ fn default_max_reconnect_attempts() -> u32 {
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
-            hub_url: "ws://localhost:8080/ws".to_string(),
+            hub_url: "ws://localhost:8765/ws".to_string(),
             reconnect_interval_secs: default_reconnect_interval(),
             heartbeat_interval_secs: default_heartbeat_interval(),
             connect_timeout_secs: default_connect_timeout(),
@@ -130,6 +130,12 @@ pub struct HubConnection {
     /// 节点 ID
     node_id: NodeId,
 
+    /// 节点名称
+    node_name: String,
+
+    /// 工作空间路径
+    workspace_path: String,
+
     /// 连接状态
     state: Arc<RwLock<ConnectionState>>,
 
@@ -142,10 +148,17 @@ pub struct HubConnection {
 
 impl HubConnection {
     /// 创建新的 Hub 连接
-    pub fn new(node_id: NodeId, config: ConnectionConfig) -> Self {
+    pub fn new(
+        node_id: NodeId,
+        config: ConnectionConfig,
+        node_name: String,
+        workspace_path: String,
+    ) -> Self {
         Self {
             config,
             node_id,
+            node_name,
+            workspace_path,
             state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
             running: Arc::new(AtomicBool::new(false)),
             receiver: None,
@@ -153,15 +166,18 @@ impl HubConnection {
     }
 
     /// 启动连接
-    pub async fn start(&mut self) -> NodeResult<mpsc::Receiver<HubToNode>> {
+    pub async fn start(
+        &mut self,
+    ) -> NodeResult<(mpsc::Receiver<HubToNode>, mpsc::Sender<NodeToHub>)> {
         if self.running.load(Ordering::SeqCst) {
             return Err(NodeError::Connection(
                 "Connection already running".to_string(),
             ));
         }
 
-        let (tx, rx) = mpsc::channel(100);
-        self.receiver = Some(rx);
+        let (inbound_tx, inbound_rx) = mpsc::channel(100);
+        let (outbound_tx, outbound_rx) = mpsc::channel(100);
+        self.receiver = Some(inbound_rx);
 
         self.running.store(true, Ordering::SeqCst);
         *self.state.write().await = ConnectionState::Connecting;
@@ -171,12 +187,24 @@ impl HubConnection {
         let running = self.running.clone();
         let config = self.config.clone();
         let node_id = self.node_id.clone();
+        let node_name = self.node_name.clone();
+        let workspace_path = self.workspace_path.clone();
 
         tokio::spawn(async move {
-            Self::connection_loop(state, running, config, node_id, tx).await;
+            Self::connection_loop(
+                state,
+                running,
+                config,
+                node_id,
+                node_name,
+                workspace_path,
+                inbound_tx,
+                outbound_rx,
+            )
+            .await;
         });
 
-        Ok(self.receiver.take().unwrap())
+        Ok((self.receiver.take().unwrap(), outbound_tx))
     }
 
     /// 连接循环
@@ -185,13 +213,29 @@ impl HubConnection {
         running: Arc<AtomicBool>,
         config: ConnectionConfig,
         node_id: NodeId,
+        node_name: String,
+        workspace_path: String,
         inbound_tx: mpsc::Sender<HubToNode>,
+        outbound_rx: mpsc::Receiver<NodeToHub>,
     ) {
         let mut reconnect_attempts = 0;
 
+        let outbound_rx = Arc::new(tokio::sync::Mutex::new(outbound_rx));
+
         while running.load(Ordering::SeqCst) {
             // 尝试连接
-            match Self::connect_and_run(&state, &config, &node_id, &inbound_tx, &running).await {
+            match Self::connect_and_run(
+                &state,
+                &config,
+                &node_id,
+                &node_name,
+                &workspace_path,
+                &inbound_tx,
+                &outbound_rx,
+                &running,
+            )
+            .await
+            {
                 Ok(_) => {
                     // 连接正常关闭
                     reconnect_attempts = 0;
@@ -227,7 +271,10 @@ impl HubConnection {
         state: &Arc<RwLock<ConnectionState>>,
         config: &ConnectionConfig,
         node_id: &NodeId,
+        node_name: &str,
+        workspace_path: &str,
         inbound_tx: &mpsc::Sender<HubToNode>,
+        outbound_rx: &Arc<tokio::sync::Mutex<mpsc::Receiver<NodeToHub>>>,
         running: &Arc<AtomicBool>,
     ) -> NodeResult<()> {
         info!("Connecting to Hub: {}", config.hub_url);
@@ -251,17 +298,20 @@ impl HubConnection {
         info!("Connected to Hub successfully");
 
         // 发送注册消息
+        let workspace_name = std::path::Path::new(workspace_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace")
+            .to_string();
+
         let register_msg = NodeToHub::Register {
             message_id: uhorse_protocol::MessageId::new(),
             node_id: node_id.clone(),
-            name: format!(
-                "node-{}",
-                node_id.as_str().split('-').next().unwrap_or("unknown")
-            ),
+            name: node_name.to_string(),
             capabilities: uhorse_protocol::NodeCapabilities::default(),
             workspace: uhorse_protocol::WorkspaceInfo {
-                name: "default".to_string(),
-                path: "/workspace".to_string(),
+                name: workspace_name,
+                path: workspace_path.to_string(),
                 read_only: false,
                 allowed_patterns: vec!["**/*".to_string()],
                 denied_patterns: vec![],
@@ -270,13 +320,9 @@ impl HubConnection {
             timestamp: Utc::now(),
         };
 
-        let encoded = MessageCodec::encode_node_to_hub(&register_msg)?;
-        ws_sender
-            .send(WsMessage::Binary(encoded))
+        Self::send_node_message(&mut ws_sender, &register_msg)
             .await
-            .map_err(|e| {
-                NodeError::Connection(format!("Failed to send register message: {}", e))
-            })?;
+            .map_err(|e| NodeError::Connection(format!("Failed to send register message: {}", e)))?;
 
         // 更新状态
         *state.write().await = ConnectionState::Authenticated {
@@ -327,6 +373,22 @@ impl HubConnection {
                     }
                 }
 
+                // 发送业务出站消息
+                outbound = Self::recv_outbound_message(outbound_rx) => {
+                    match outbound {
+                        Some(message) => {
+                            if let Err(e) = Self::send_node_message(&mut ws_sender, &message).await {
+                                warn!("Failed to send outbound message {}: {}", message.message_type(), e);
+                                break;
+                            }
+                        }
+                        None => {
+                            debug!("Outbound channel closed");
+                            break;
+                        }
+                    }
+                }
+
                 // 定期发送心跳
                 _ = tokio::time::sleep(Duration::from_secs(config.heartbeat_interval_secs)) => {
                     let heartbeat = NodeToHub::Heartbeat {
@@ -352,17 +414,34 @@ impl HubConnection {
                         timestamp: Utc::now(),
                     };
 
-                    if let Ok(encoded) = MessageCodec::encode_node_to_hub(&heartbeat) {
-                        if ws_sender.send(WsMessage::Binary(encoded)).await.is_err() {
-                            warn!("Failed to send heartbeat");
-                            break;
-                        }
+                    if let Err(e) = Self::send_node_message(&mut ws_sender, &heartbeat).await {
+                        warn!("Failed to send heartbeat: {}", e);
+                        break;
                     }
                 }
             }
         }
 
         Ok(())
+    }
+
+    async fn send_node_message<S>(sender: &mut S, message: &NodeToHub) -> Result<(), String>
+    where
+        S: Sink<WsMessage> + Unpin,
+        S::Error: std::fmt::Display,
+    {
+        let encoded = MessageCodec::encode_node_to_hub(message).map_err(|e| e.to_string())?;
+        sender
+            .send(WsMessage::Binary(encoded))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn recv_outbound_message(
+        outbound_rx: &Arc<tokio::sync::Mutex<mpsc::Receiver<NodeToHub>>>,
+    ) -> Option<NodeToHub> {
+        let mut receiver = outbound_rx.lock().await;
+        receiver.recv().await
     }
 
     /// 停止连接

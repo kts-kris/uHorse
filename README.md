@@ -55,7 +55,7 @@ uHorse 当前仓库的主线是 **v4.0 Hub-Node 架构**：
 | Node → Hub 结果回传 | ✅ | Node 会发送完整 `NodeToHub::TaskResult` |
 | 本地闭环验证 | ✅ | 已有真实集成测试 `test_local_hub_node_roundtrip_file_exists` |
 | DingTalk Stream 接入 | ✅ | 当前方向为 Stream 模式，无需公网 IP 才能建立消息流 |
-| DingTalk 真实企业凭据联调 | ⏳ | 代码链路已接通，最终联调仍依赖真实企业配置 |
+| DingTalk 真实企业联调 | ✅ | 已完成真实企业验证：非法命令会即时错误回显，合法 `exists` 命令已原路回传 JSON 结果 |
 
 ## 快速开始
 

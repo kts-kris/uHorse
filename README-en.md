@@ -55,7 +55,7 @@ These docs are now aligned to what is actually implemented in the repository. Th
 | Node → Hub result return | ✅ | Node sends full `NodeToHub::TaskResult` |
 | Local roundtrip verification | ✅ | covered by `test_local_hub_node_roundtrip_file_exists` |
 | DingTalk Stream integration | ✅ | Stream mode is the intended path; no public webhook is required for message intake |
-| Real DingTalk tenant verification | ⏳ | final validation still depends on real enterprise credentials |
+| Real DingTalk tenant verification | ✅ | validated with a real enterprise tenant: invalid commands return immediate errors and a valid `exists` command round-trips JSON back to the original conversation |
 
 ## Quick Start
 

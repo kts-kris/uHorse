@@ -64,7 +64,7 @@
 - Hub 与 Node 分离
 - Hub 对外提供 `/api/health`、`/api/nodes`、`/ws`
 - Node 通过 `hub_url` 连接 Hub
-- DingTalk 使用 Stream 模式
+- DingTalk 使用 Stream 模式，并优先通过 `session_webhook` 把结果原路回发
 - LLM 支持内置 provider 与自定义 provider
 
 ---

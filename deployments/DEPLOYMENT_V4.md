@@ -285,7 +285,8 @@ agent_id = 123456789
 
 - **Stream 模式**
 - 入站消息进入 Hub 任务链路
-- 任务结果按原 DingTalk 会话回发
+- 任务结果优先通过 `session_webhook` 原路回发；webhook 不可用时回退到群消息或单聊发送
+- 当前主线已完成一次真实企业租户验证：非法命令即时报错，合法 `exists` 命令原路回传 JSON 结果
 
 虽然仍保留：
 
@@ -416,6 +417,6 @@ sudo systemctl enable --now uhorse-node
 - 当前统一配置并不会覆盖所有 Hub 专属调度字段
 - `server.health.path` 不是当前实际对外健康检查路由的唯一真相，实际路由仍是 `/api/health`
 - `deployments/k8s/base/*` 仍偏旧单体视角，不应直接当作当前 v4.0 生产模板
-- 真实 DingTalk 企业联调仍依赖真实企业凭据
+- 若要在你自己的环境复现 DingTalk 最后一跳，仍需要准备你自己的真实企业凭据
 
 如果你要做当前主线部署，请把这份文档和 [../CONFIG.md](../CONFIG.md) 一起看。

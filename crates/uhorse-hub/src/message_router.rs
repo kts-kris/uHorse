@@ -2,9 +2,11 @@
 //!
 //! 负责 Hub 与 Node 之间的消息路由，复用 uhorse-channel 的多通道能力
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use uhorse_protocol::{HubToNode, NodeId, NodeToHub, TaskId};
+use uhorse_protocol::{CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub, TaskId};
 
 use crate::error::{HubError, HubResult};
 use crate::node_manager::NodeManager;
@@ -20,6 +22,8 @@ pub struct MessageRouter {
     node_manager: Arc<NodeManager>,
     /// 任务调度器
     task_scheduler: Arc<TaskScheduler>,
+    /// 节点消息发送器映射 (用于 WebSocket 连接)
+    node_senders: Arc<RwLock<HashMap<NodeId, mpsc::Sender<HubToNode>>>>,
 }
 
 impl MessageRouter {
@@ -28,7 +32,28 @@ impl MessageRouter {
         Self {
             node_manager,
             task_scheduler,
+            node_senders: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 注册节点的消息发送器 (WebSocket 连接时调用)
+    pub async fn register_node_sender(&self, node_id: NodeId, sender: mpsc::Sender<HubToNode>) {
+        let mut senders = self.node_senders.write().await;
+        senders.insert(node_id.clone(), sender);
+        info!("Registered message sender for node {}", node_id);
+    }
+
+    /// 注销节点的消息发送器 (WebSocket 断开时调用)
+    pub async fn unregister_node_sender(&self, node_id: &NodeId) {
+        let mut senders = self.node_senders.write().await;
+        if senders.remove(node_id).is_some() {
+            info!("Unregistered message sender for node {}", node_id);
+        }
+    }
+
+    /// 获取节点发送器的引用 (用于内部调用)
+    pub fn node_senders(&self) -> Arc<RwLock<HashMap<NodeId, mpsc::Sender<HubToNode>>>> {
+        self.node_senders.clone()
     }
 
     /// 处理来自节点的消息
@@ -59,18 +84,18 @@ impl MessageRouter {
             NodeToHub::TaskResult {
                 task_id, result, ..
             } => {
-                let success = result.success;
-                let error_msg = result.error.as_ref().map(|e| e.message.clone());
-                if success {
+                if result.success {
                     info!("Task {} completed on node {}", task_id, node_id);
                 } else {
                     warn!(
                         "Task {} failed on node {}: {:?}",
-                        task_id, node_id, error_msg
+                        task_id,
+                        node_id,
+                        result.error.as_ref().map(|e| e.message.as_str())
                     );
                 }
                 self.task_scheduler
-                    .complete_task(&task_id, node_id, success, error_msg)
+                    .complete_task(&task_id, node_id, result)
                     .await?;
             }
 
@@ -78,7 +103,17 @@ impl MessageRouter {
                 if let Some(tid) = task_id {
                     error!("Error from node {} for task {}: {:?}", node_id, tid, error);
                     self.task_scheduler
-                        .complete_task(&tid, node_id, false, Some(error.message.clone()))
+                        .complete_task(
+                            &tid,
+                            node_id,
+                            CommandResult::failure(
+                                ExecutionError::new(
+                                    error.code,
+                                    error.message,
+                                    ErrorSource::Executor,
+                                ),
+                            ),
+                        )
                         .await?;
                 } else {
                     error!("Error from node {}: {:?}", node_id, error);
@@ -131,14 +166,9 @@ impl MessageRouter {
     }
 
     /// 广播消息到所有在线节点
-    pub async fn broadcast(
-        &self,
-        message: HubToNode,
-        senders: &HashMap<NodeId, mpsc::Sender<HubToNode>>,
-    ) -> HubResult<usize> {
-        use std::collections::HashMap;
-
+    pub async fn broadcast(&self, message: HubToNode) -> HubResult<usize> {
         let nodes = self.node_manager.get_online_nodes().await;
+        let senders = self.node_senders.read().await;
         let mut success_count = 0;
 
         for node in &nodes {
@@ -153,19 +183,14 @@ impl MessageRouter {
     }
 
     /// 请求节点取消任务
-    pub async fn cancel_task(
-        &self,
-        task_id: &TaskId,
-        reason: &str,
-        senders: &HashMap<NodeId, mpsc::Sender<HubToNode>>,
-    ) -> HubResult<()> {
-        use std::collections::HashMap;
+    pub async fn cancel_task(&self, task_id: &TaskId, reason: &str) -> HubResult<()> {
         use uhorse_protocol::MessageId;
 
         // 先从任务调度器获取任务状态
         if let Some(status) = self.task_scheduler.get_task_status(task_id).await {
             if let Some(node_id) = status.node_id {
                 // 发送取消命令到节点
+                let senders = self.node_senders.read().await;
                 if let Some(sender) = senders.get(&node_id) {
                     let cancellation = HubToNode::TaskCancellation {
                         message_id: MessageId::new(),
@@ -185,6 +210,3 @@ impl MessageRouter {
         Ok(())
     }
 }
-
-// 导入 HashMap
-use std::collections::HashMap;

@@ -99,5 +99,5 @@ deployments/
 
 - Hub 负责 API、WebSocket、调度、DingTalk、结果回传
 - Node 负责受控工作空间执行
-- DingTalk 采用 Stream 模式
+- DingTalk 采用 Stream 模式，并优先通过 `session_webhook` 原路回发结果
 - LLM 支持内置 provider 和自定义 provider（OpenAI 兼容）
