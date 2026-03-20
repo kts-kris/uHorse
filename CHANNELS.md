@@ -15,7 +15,7 @@
 - [最小配置](#最小配置)
 - [Hub 启动后会发生什么](#hub-启动后会发生什么)
 - [消息如何进入任务链路](#消息如何进入任务链路)
-- [当前允许的 DingTalk 管理命令](#当前允许的-dingtalk-管理命令)
+- [DingTalk 自然语言规划与本地校验](#dingtalk-自然语言规划与本地校验)
 - [消息回传](#消息回传)
 - [Webhook 路由说明](#webhook-路由说明)
 - [与 LLM / 自定义模型服务商的关系](#与-llm--自定义模型服务商的关系)
@@ -91,29 +91,31 @@ agent_id = 123456789
 DingTalk inbound message
     → DingTalkChannel
     → submit_dingtalk_task(...)
+    → plan_dingtalk_command(...)
     → Hub::submit_task(...)
     → 调度到在线 Node
     → Node 执行
     → Node 回传 TaskResult
     → Hub reply_task_result(...)
+    → summarize_task_result(...)
     → 回发到原 DingTalk 会话
 ```
 
-这意味着 DingTalk 消息不是在通道层本地直接处理，而是会进入 Hub-Node 任务执行链路。
+这意味着 DingTalk 消息不是在通道层本地直接处理，而是会先进入 LLM 规划，再进入 Hub-Node 任务执行链路。
 
 ---
 
-## 当前允许的 DingTalk 管理命令
+## DingTalk 自然语言规划与本地校验
 
-当前 `uhorse-hub` 对 DingTalk 文本做了一个最小命令白名单，主要用于受控验证：
+当前 `uhorse-hub` 不再把 DingTalk 文本限制为固定命令白名单，而是会：
 
-- `list` / `ls`
-- `search`
-- `read` / `cat`
-- `info`
-- `exists`
+1. 读取用户原始自然语言请求
+2. 通过 LLM 规划单个 `Command`
+3. 仅接受 `FileCommand` 或 `ShellCommand`
+4. 对路径做本地校验，禁止绝对路径越界和 `..`
+5. 拒绝危险 git，例如 `git reset --hard`、`git clean -fd`、`git push --force`
 
-这些命令会被转换为文件类任务，再交给 Node 在受控工作空间里执行。
+如果 LLM 返回非法 JSON、越界路径或危险命令，Hub 会直接报错，不会下发到 Node。
 
 ---
 
@@ -125,13 +127,13 @@ DingTalk inbound message
 - 群会话回退到 `conversation_id` 群消息发送
 - 单聊回退到 `sender_user_id` 直接发送
 
-首版回传策略可以概括为：
+回传内容策略可以概括为：
 
-- 文本输出：直接回发
-- JSON 输出：格式化后回发
-- 失败结果：回发错误信息
+- 优先使用 LLM 基于 `CompletedTask` 生成自然语言总结
+- 如果总结失败，则回退到结构化文本结果
+- 任务规划或本地校验阶段失败时，会即时回发错误信息
 
-当前主线已经用真实企业租户验证：非法命令会即时错误回显，合法 `exists` 命令会把 JSON 结果原路回传到原会话。
+当前主线已经用真实企业租户验证：不安全请求会即时错误回显，合法请求的执行结果会原路回传到原会话。
 
 因此 DingTalk 在当前主线中不只是“入站入口”，也是任务结果的回传出口。
 

@@ -337,6 +337,7 @@ async fn test_local_hub_node_roundtrip_file_exists() {
             max_reconnect_attempts: 1,
             auth_token: None,
         },
+        require_git_repo: false,
         ..Default::default()
     })
     .unwrap();

@@ -5,7 +5,7 @@
 use crate::error::{HubError, HubResult};
 use crate::message_router::MessageRouter;
 use crate::node_manager::{NodeManager, NodeManagerStats};
-use crate::task_scheduler::{SchedulerStats, TaskScheduler, TaskStatusInfo};
+use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskStatusInfo};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -264,6 +264,10 @@ impl Hub {
     /// 获取任务状态
     pub async fn get_task_status(&self, task_id: &TaskId) -> Option<TaskStatusInfo> {
         self.task_scheduler.get_task_status(task_id).await
+    }
+
+    pub async fn get_completed_task(&self, task_id: &TaskId) -> Option<CompletedTask> {
+        self.task_scheduler.get_completed_task(task_id).await
     }
 
     /// 取消任务

@@ -29,7 +29,7 @@
 ## 前置要求
 
 - Rust `1.78+`
-- 可用的本地工作目录
+- 可用的本地工作目录（默认建议为 git 仓库）
 - 本地空闲端口（默认 `8765`）
 
 如需启用 DingTalk 或 LLM：
@@ -74,6 +74,11 @@ max_retries = 3
 ```toml
 name = "local-node"
 workspace_path = "."
+git_protection_enabled = true
+watch_workspace = true
+auto_git_add_new_files = true
+require_git_repo = true
+internal_work_dir = ".uhorse"
 
 [connection]
 hub_url = "ws://127.0.0.1:8765/ws"
@@ -273,7 +278,7 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 
 这是当前最直接的本地闭环验证方式。
 
-如果你还要继续验证 DingTalk 最后一跳，可在统一配置里填入真实企业凭据后补做一轮真实消息联调。当前主线已经完成一次真实企业验证：非法命令会即时错误回显，合法 `exists` 命令会把 JSON 结果原路回传到原会话。
+如果你还要继续验证 DingTalk 最后一跳，可在统一配置里填入真实企业凭据后补做一轮真实消息联调。当前主线已经完成一次真实企业验证：不安全请求会即时错误回显，合法请求的执行结果会原路回传到原会话。
 
 ---
 

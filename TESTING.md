@@ -203,7 +203,9 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 - LLM client 是否成功初始化
 - `/api/nodes` 是否能看到在线 Node
 - 本地 roundtrip 是否成功
+- 自然语言请求是否被规划为受本地校验约束的 `FileCommand` / `ShellCommand`
 - 真实 DingTalk 会话里是否能看到错误即时回显与成功结果原路回传
+- 结果总结失败时是否能回退到结构化文本
 
 ---
 
@@ -222,7 +224,7 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 - 本机启动 Node
 - Node 连接 Hub
 - Hub → Node → Hub 的真实 roundtrip 测试
-- 真实企业租户下的 DingTalk 回传闭环：非法命令即时报错，合法 `exists` 命令原路回传 JSON 结果
+- 真实企业租户下的 DingTalk 回传闭环：不安全请求即时报错，合法请求结果可原路回传
 
 因此，如果你只是验证本地代码链路，可先用本地 roundtrip 测试；如果你要复现 DingTalk 最后一跳，仍需要准备你自己的真实配置。
 

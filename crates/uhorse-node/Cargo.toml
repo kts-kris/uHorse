@@ -44,6 +44,9 @@ sysinfo = { workspace = true }
 # Glob matching
 glob-match = { workspace = true }
 
+# File watching
+notify = "6.1"
+
 # HTTP client
 reqwest = { workspace = true }
 

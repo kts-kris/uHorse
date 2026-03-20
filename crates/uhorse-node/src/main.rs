@@ -79,11 +79,11 @@ async fn main() -> anyhow::Result<()> {
     // 加载或使用默认配置
     let config = load_config(&args.config, &args)?;
 
+    info!("📡 Connecting to Hub: {}", config.connection.hub_url);
+    info!("📁 Workspace: {}", config.workspace_path);
+
     // 创建节点
     let mut node = Node::new(config)?;
-
-    info!("📡 Connecting to Hub: {}", args.hub_url);
-    info!("📁 Workspace: {}", args.workspace);
 
     // 启动节点
     if let Err(e) = node.start().await {
@@ -158,11 +158,12 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
 fn check_workspace(workspace_path: &str) -> anyhow::Result<()> {
     println!("🔍 Checking workspace: {}", workspace_path);
 
-    let _workspace = Workspace::new(workspace_path)?;
+    let workspace = Workspace::new(workspace_path)?;
 
     println!("✅ Workspace validated successfully");
     println!("  Path: {}", workspace_path);
-    println!("  Absolute: {:?}", std::fs::canonicalize(workspace_path)?);
+    println!("  Absolute: {:?}", workspace.root());
+    println!("  Git repo: {}", workspace.is_git_repo());
 
     Ok(())
 }

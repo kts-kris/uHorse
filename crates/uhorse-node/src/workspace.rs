@@ -6,8 +6,9 @@ use crate::error::{NodeError, NodeResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use tracing::{debug, info};
 
 /// 工作空间配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,28 +81,7 @@ pub struct Workspace {
 impl Workspace {
     /// 创建新的工作空间
     pub fn new<P: AsRef<Path>>(path: P) -> NodeResult<Self> {
-        let path = path.as_ref();
-
-        // 检查路径是否存在
-        if !path.exists() {
-            return Err(NodeError::Workspace(format!(
-                "Path does not exist: {:?}",
-                path
-            )));
-        }
-
-        // 检查是否为目录
-        if !path.is_dir() {
-            return Err(NodeError::Workspace(format!(
-                "Path is not a directory: {:?}",
-                path
-            )));
-        }
-
-        // 规范化路径（解析符号链接、相对路径等）
-        let canonical_path = path
-            .canonicalize()
-            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))?;
+        let canonical_path = Self::canonicalize_root(path.as_ref())?;
 
         let config = WorkspaceConfig {
             name: canonical_path
@@ -123,19 +103,7 @@ impl Workspace {
 
     /// 使用配置创建工作空间
     pub fn with_config(mut config: WorkspaceConfig) -> NodeResult<Self> {
-        // 检查路径是否存在
-        if !config.root_path.exists() {
-            return Err(NodeError::Workspace(format!(
-                "Path does not exist: {:?}",
-                config.root_path
-            )));
-        }
-
-        // 规范化路径
-        config.root_path = config
-            .root_path
-            .canonicalize()
-            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))?;
+        config.root_path = Self::canonicalize_root(&config.root_path)?;
 
         Ok(Self {
             config,
@@ -155,27 +123,52 @@ impl Workspace {
         &self.config.root_path
     }
 
-    /// 检查路径是否在工作空间内
-    pub fn contains<P: AsRef<Path>>(&self, path: P) -> bool {
+    /// 解析工作空间内路径
+    pub fn resolve_path<P: AsRef<Path>>(&self, path: P) -> NodeResult<PathBuf> {
         let path = path.as_ref();
-
-        // 规范化路径
-        let canonical = match path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => return false,
+        let candidate = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.config.root_path.join(path)
         };
 
-        // 检查是否在根目录下
-        canonical.starts_with(&self.config.root_path)
+        Self::normalize_existing_aware(&candidate)
+    }
+
+    /// 获取内部目录路径
+    pub fn internal_path<P: AsRef<Path>>(&self, path: P) -> PathBuf {
+        self.config.root_path.join(path)
+    }
+
+    /// 检查是否为 git 工作树
+    pub fn is_git_repo(&self) -> bool {
+        matches!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&self.config.root_path)
+                .arg("rev-parse")
+                .arg("--is-inside-work-tree")
+                .output(),
+            Ok(output)
+                if output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).trim() == "true"
+        )
+    }
+
+    /// 检查路径是否在工作空间内
+    pub fn contains<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.resolve_path(path)
+            .map(|resolved| resolved.starts_with(&self.config.root_path))
+            .unwrap_or(false)
     }
 
     /// 检查路径是否可访问
     pub fn can_access<P: AsRef<Path>>(&self, path: P, write: bool) -> NodeResult<bool> {
-        let path = path.as_ref();
+        let resolved = self.resolve_path(path)?;
 
         // 1. 检查是否在工作空间内
-        if !self.contains(path) {
-            debug!("Path not in workspace: {:?}", path);
+        if !resolved.starts_with(&self.config.root_path) {
+            debug!("Path not in workspace: {:?}", resolved);
             return Ok(false);
         }
 
@@ -185,10 +178,16 @@ impl Workspace {
             return Ok(false);
         }
 
-        // 3. 检查禁止模式
-        let relative = path.strip_prefix(&self.config.root_path).unwrap_or(path);
-        let relative_str = relative.to_string_lossy();
+        let relative = resolved
+            .strip_prefix(&self.config.root_path)
+            .unwrap_or_else(|_| Path::new(""));
+        let relative_str = if relative.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            relative.to_string_lossy().replace('\\', "/")
+        };
 
+        // 3. 检查禁止模式
         for pattern in &self.config.denied_patterns {
             if glob_match::glob_match(pattern, &relative_str) {
                 debug!("Path matches denied pattern: {}", pattern);
@@ -196,14 +195,17 @@ impl Workspace {
             }
         }
 
-        // 4. 检查允许模式
-        let mut allowed = false;
-        for pattern in &self.config.allowed_patterns {
-            if glob_match::glob_match(pattern, &relative_str) {
-                allowed = true;
-                break;
-            }
+        // 4. 工作空间根目录始终允许访问
+        if relative_str == "." {
+            return Ok(true);
         }
+
+        // 5. 检查允许模式
+        let allowed = self
+            .config
+            .allowed_patterns
+            .iter()
+            .any(|pattern| glob_match::glob_match(pattern, &relative_str));
 
         if !allowed {
             debug!("Path does not match any allowed pattern");
@@ -224,57 +226,62 @@ impl Workspace {
 
     /// 获取文件信息
     pub fn get_file_info<P: AsRef<Path>>(&self, path: P) -> NodeResult<FileInfo> {
-        let path = path.as_ref();
+        let resolved = self.resolve_path(path)?;
 
         // 检查访问权限
-        if !self.can_access(path, false)? {
+        if !self.can_access(&resolved, false)? {
             return Err(NodeError::Permission(format!(
                 "Cannot access path: {:?}",
-                path
+                resolved
             )));
         }
 
-        let metadata = std::fs::metadata(path)
+        let metadata = std::fs::metadata(&resolved)
             .map_err(|e| NodeError::Workspace(format!("Failed to get metadata: {}", e)))?;
 
-        let name = path
+        let name = resolved
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
         Ok(FileInfo {
-            path: path.to_string_lossy().to_string(),
+            path: resolved.to_string_lossy().to_string(),
             name,
             is_dir: metadata.is_dir(),
             size: metadata.len(),
             modified: metadata.modified().ok().map(|t| t.into()),
             created: metadata.created().ok().map(|t| t.into()),
-            mode: None, // Unix mode not available on all platforms
+            mode: None,
         })
     }
 
     /// 列出目录内容
     pub fn list_dir<P: AsRef<Path>>(&self, path: P) -> NodeResult<Vec<FileInfo>> {
-        let path = path.as_ref();
+        let resolved = self.resolve_path(path)?;
 
         // 检查访问权限
-        if !self.can_access(path, false)? {
+        if !self.can_access(&resolved, false)? {
             return Err(NodeError::Permission(format!(
                 "Cannot access path: {:?}",
-                path
+                resolved
             )));
         }
 
         let mut entries = Vec::new();
-        let dir = std::fs::read_dir(path)
+        let dir = std::fs::read_dir(&resolved)
             .map_err(|e| NodeError::Workspace(format!("Failed to read directory: {}", e)))?;
 
         for entry in dir {
             let entry =
                 entry.map_err(|e| NodeError::Workspace(format!("Failed to read entry: {}", e)))?;
+            let entry_path = entry.path();
 
-            if let Ok(info) = self.get_file_info(entry.path()) {
+            if !self.can_access(&entry_path, false)? {
+                continue;
+            }
+
+            if let Ok(info) = self.get_file_info(entry_path) {
                 entries.push(info);
             }
         }
@@ -312,15 +319,15 @@ impl Workspace {
                 entry.map_err(|e| NodeError::Workspace(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
 
-            // 检查是否可访问
-            if self.can_access(&path, false)? {
-                self.file_index.insert(path.clone());
-                *count += 1;
+            if !self.can_access(&path, false)? {
+                continue;
+            }
 
-                // 如果是目录，递归
-                if path.is_dir() {
-                    self.walk_directory(&path, count)?;
-                }
+            self.file_index.insert(path.clone());
+            *count += 1;
+
+            if path.is_dir() {
+                self.walk_directory(&path, count)?;
             }
         }
 
@@ -334,19 +341,7 @@ impl Workspace {
 
     /// 更新配置
     pub fn update_config(&mut self, mut config: WorkspaceConfig) -> NodeResult<()> {
-        // 检查新路径是否存在
-        if !config.root_path.exists() {
-            return Err(NodeError::Workspace(format!(
-                "Path does not exist: {:?}",
-                config.root_path
-            )));
-        }
-
-        // 规范化路径
-        config.root_path = config
-            .root_path
-            .canonicalize()
-            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))?;
+        config.root_path = Self::canonicalize_root(&config.root_path)?;
 
         self.config = config;
         self.file_index.clear();
@@ -364,6 +359,62 @@ impl Workspace {
             allowed_patterns: self.config.allowed_patterns.clone(),
             denied_patterns: self.config.denied_patterns.clone(),
         }
+    }
+
+    fn canonicalize_root(path: &Path) -> NodeResult<PathBuf> {
+        if !path.exists() {
+            return Err(NodeError::Workspace(format!(
+                "Path does not exist: {:?}",
+                path
+            )));
+        }
+
+        if !path.is_dir() {
+            return Err(NodeError::Workspace(format!(
+                "Path is not a directory: {:?}",
+                path
+            )));
+        }
+
+        path.canonicalize()
+            .map_err(|e| NodeError::Workspace(format!("Failed to canonicalize path: {}", e)))
+    }
+
+    fn normalize_existing_aware(path: &Path) -> NodeResult<PathBuf> {
+        let mut existing_ancestor = Some(path);
+        let ancestor = loop {
+            match existing_ancestor {
+                Some(candidate) if candidate.exists() => break candidate.to_path_buf(),
+                Some(candidate) => existing_ancestor = candidate.parent(),
+                None => {
+                    return Err(NodeError::Workspace(format!(
+                        "Failed to resolve path: {:?}",
+                        path
+                    )))
+                }
+            }
+        };
+
+        let mut normalized = ancestor.canonicalize().map_err(|e| {
+            NodeError::Workspace(format!("Failed to canonicalize ancestor {:?}: {}", ancestor, e))
+        })?;
+
+        let remainder = path.strip_prefix(&ancestor).map_err(|_| {
+            NodeError::Workspace(format!("Failed to resolve relative path for {:?}", path))
+        })?;
+
+        for component in remainder.components() {
+            match component {
+                Component::CurDir => {}
+                Component::Normal(part) => normalized.push(part),
+                Component::ParentDir => {
+                    normalized.pop();
+                }
+                Component::RootDir | Component::Prefix(_) => {}
+            }
+        }
+
+        Ok(normalized)
     }
 }
 
@@ -402,17 +453,14 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let workspace = Workspace::new(temp.path()).unwrap();
 
-        // 规范化路径后比较（macOS 上 /var 是 /private/var 的符号链接）
         let canonical_temp = temp.path().canonicalize().unwrap();
         assert!(workspace.contains(temp.path()));
         assert_eq!(workspace.root(), canonical_temp);
     }
 
     #[test]
-    fn test_workspace_can_access() {
+    fn test_workspace_can_access_existing_file() {
         let temp = TempDir::new().unwrap();
-
-        // 创建一个测试文件
         let file = temp.path().join("test.txt");
         std::fs::write(&file, "test").unwrap();
 
@@ -420,5 +468,49 @@ mod tests {
 
         assert!(workspace.can_access(&file, false).unwrap());
         assert!(workspace.can_access(&file, true).unwrap());
+    }
+
+    #[test]
+    fn test_workspace_contains_new_file_and_directory() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Workspace::new(temp.path()).unwrap();
+
+        let new_dir = temp.path().join("new-dir");
+        let new_file = new_dir.join("test.txt");
+
+        assert!(workspace.contains(&new_dir));
+        assert!(workspace.contains(&new_file));
+        assert!(workspace.can_access(&new_dir, true).unwrap());
+        assert!(workspace.can_access(&new_file, true).unwrap());
+    }
+
+    #[test]
+    fn test_workspace_rejects_parent_escape() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Workspace::new(temp.path()).unwrap();
+        let escaped = temp.path().join("..").join("escaped.txt");
+
+        assert!(!workspace.contains(&escaped));
+        assert!(!workspace.can_access(&escaped, true).unwrap());
+    }
+
+    #[test]
+    fn test_workspace_rejects_absolute_outside_path() {
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let workspace = Workspace::new(temp.path()).unwrap();
+        let outside_file = outside.path().join("outside.txt");
+
+        assert!(!workspace.contains(&outside_file));
+        assert!(!workspace.can_access(&outside_file, false).unwrap());
+    }
+
+    #[test]
+    fn test_workspace_resolves_relative_paths_against_root() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Workspace::new(temp.path()).unwrap();
+        let resolved = workspace.resolve_path("nested/file.txt").unwrap();
+
+        assert_eq!(resolved, workspace.root().join("nested/file.txt"));
     }
 }

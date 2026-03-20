@@ -55,7 +55,10 @@ uHorse 当前仓库的主线是 **v4.0 Hub-Node 架构**：
 | Node → Hub 结果回传 | ✅ | Node 会发送完整 `NodeToHub::TaskResult` |
 | 本地闭环验证 | ✅ | 已有真实集成测试 `test_local_hub_node_roundtrip_file_exists` |
 | DingTalk Stream 接入 | ✅ | 当前方向为 Stream 模式，无需公网 IP 才能建立消息流 |
-| DingTalk 真实企业联调 | ✅ | 已完成真实企业验证：非法命令会即时错误回显，合法 `exists` 命令已原路回传 JSON 结果 |
+| DingTalk 自然语言任务规划 | ✅ | Hub 会通过 LLM 把自然语言请求规划为受本地校验约束的 `FileCommand` / `ShellCommand` |
+| DingTalk 结果自然语言总结 | ✅ | Hub 会基于 `CompletedTask` 用 LLM 总结结果，并在失败时回退到结构化文本 |
+| Node 工作区保护与 git 自动化 | ✅ | Node 默认限制在 workspace 内执行，拒绝危险 git，并自动 `git add` 新建文件 |
+| DingTalk 真实企业联调 | ✅ | 已完成真实企业验证，当前消息入口与原会话回传链路可用 |
 
 ## 快速开始
 
@@ -148,8 +151,9 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 
 - 推荐模式：**Stream 模式**
 - 优点：无需公网 IP、无需额外 webhook 暴露即可接收入站消息
-- 当前支持的管理命令白名单：`list` / `ls`、`search`、`read` / `cat`、`info`、`exists`
-- Hub 会把 Node 执行结果按会话路由回发到 DingTalk
+- Hub 会先使用 LLM 把自然语言请求规划为受本地校验约束的 `FileCommand` / `ShellCommand`
+- 本地校验会限制路径在 workspace 内，并拒绝危险 git 命令
+- Hub 会优先用 LLM 总结执行结果，再按会话路由回发到 DingTalk；总结失败时回退为结构化文本
 
 要启用 DingTalk，请使用统一配置文件，见 [CONFIG.md](CONFIG.md) 和 [CHANNELS.md](CHANNELS.md)。
 

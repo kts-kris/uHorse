@@ -15,7 +15,7 @@ The repository still contains Telegram, Slack, Discord, WhatsApp, Feishu, and We
 - [Minimal config](#minimal-config)
 - [What happens when Hub starts](#what-happens-when-hub-starts)
 - [How messages enter the task pipeline](#how-messages-enter-the-task-pipeline)
-- [Current DingTalk command allowlist](#current-dingtalk-command-allowlist)
+- [DingTalk natural-language planning and local validation](#dingtalk-natural-language-planning-and-local-validation)
 - [Reply path](#reply-path)
 - [Webhook route note](#webhook-route-note)
 - [Relationship with LLMs and custom providers](#relationship-with-llms-and-custom-providers)
@@ -91,29 +91,31 @@ The current main flow is:
 DingTalk inbound message
     → DingTalkChannel
     → submit_dingtalk_task(...)
+    → plan_dingtalk_command(...)
     → Hub::submit_task(...)
     → scheduled to an online Node
     → Node executes
     → Node sends TaskResult back
     → Hub reply_task_result(...)
+    → summarize_task_result(...)
     → reply to the original DingTalk conversation
 ```
 
-So DingTalk messages do not stop at the channel layer. They enter the Hub-Node execution pipeline.
+So DingTalk messages do not stop at the channel layer. They first go through LLM planning, then enter the Hub-Node execution pipeline.
 
 ---
 
-## Current DingTalk command allowlist
+## DingTalk natural-language planning and local validation
 
-The current Hub runtime exposes a minimal DingTalk text-command allowlist for controlled execution:
+The current `uhorse-hub` runtime no longer limits DingTalk text to a fixed command allowlist. Instead it:
 
-- `list` / `ls`
-- `search`
-- `read` / `cat`
-- `info`
-- `exists`
+1. reads the user's original natural-language request
+2. asks the LLM to plan a single `Command`
+3. only accepts `FileCommand` or `ShellCommand`
+4. validates paths locally and rejects `..` or out-of-workspace absolute paths
+5. blocks dangerous git commands such as `git reset --hard`, `git clean -fd`, and `git push --force`
 
-These are converted into file-oriented tasks and executed by the Node inside its controlled workspace.
+If the LLM returns invalid JSON, an out-of-workspace path, or a dangerous command, Hub rejects it before anything is dispatched to the Node.
 
 ---
 
@@ -125,13 +127,13 @@ The current result handling keeps the full execution result and tries to get bac
 - fall back to group-message sending via `conversation_id`
 - fall back to direct personal sending via `sender_user_id`
 
-The current reply strategy is roughly:
+The reply-content strategy is:
 
-- text output → reply directly
-- JSON output → pretty-print then reply
-- failure → reply with error text
+- prefer an LLM-generated natural-language summary based on `CompletedTask`
+- fall back to structured text when summarization fails
+- return immediate error text when planning or local validation fails
 
-The current mainline has already been validated with a real enterprise tenant: invalid commands return immediate errors, and a valid `exists` command routes JSON back to the original conversation.
+The current mainline has already been validated with a real enterprise tenant: unsafe requests return immediate errors, and valid request results are routed back to the original conversation.
 
 So DingTalk is both the inbound entrypoint and the result return channel.
 

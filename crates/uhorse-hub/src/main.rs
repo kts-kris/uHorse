@@ -18,7 +18,7 @@ use uhorse_hub::{
     web::{reply_dingtalk_error, reply_task_result, submit_dingtalk_task},
     Hub, HubConfig, WebState,
 };
-use uhorse_llm::OpenAIClient;
+use uhorse_llm::{LLMClient, OpenAIClient};
 
 /// uHorse Hub - 云端中枢
 #[derive(Parser, Debug)]
@@ -300,7 +300,7 @@ async fn init_dingtalk_channel(
 }
 
 /// 初始化 LLM 客户端
-async fn init_llm_client(config: &UHorseConfig) -> anyhow::Result<Option<Arc<OpenAIClient>>> {
+async fn init_llm_client(config: &UHorseConfig) -> anyhow::Result<Option<Arc<dyn LLMClient>>> {
     if !config.llm.enabled {
         info!("🤖 LLM is disabled in configuration");
         return Ok(None);

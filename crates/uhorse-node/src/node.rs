@@ -9,10 +9,13 @@ use crate::permission::PermissionManager;
 use crate::status::{Metrics, StatusReporter};
 use crate::workspace::Workspace;
 use chrono::{DateTime, Utc};
+use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command as StdCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc as std_mpsc, Arc};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::Instant;
@@ -58,6 +61,26 @@ pub struct NodeConfig {
     /// 标签（用于任务路由）
     #[serde(default)]
     pub tags: Vec<String>,
+
+    /// 是否启用 git 保护
+    #[serde(default = "default_git_protection_enabled")]
+    pub git_protection_enabled: bool,
+
+    /// 是否监听工作区变更
+    #[serde(default = "default_watch_workspace")]
+    pub watch_workspace: bool,
+
+    /// 是否自动将新增文件加入 git
+    #[serde(default = "default_auto_git_add_new_files")]
+    pub auto_git_add_new_files: bool,
+
+    /// 是否要求工作区必须是 git 仓库
+    #[serde(default = "default_require_git_repo")]
+    pub require_git_repo: bool,
+
+    /// 内部工作目录
+    #[serde(default = "default_internal_work_dir")]
+    pub internal_work_dir: String,
 }
 
 fn default_heartbeat_interval() -> u64 {
@@ -72,6 +95,26 @@ fn default_max_tasks() -> usize {
     5
 }
 
+fn default_git_protection_enabled() -> bool {
+    true
+}
+
+fn default_watch_workspace() -> bool {
+    true
+}
+
+fn default_auto_git_add_new_files() -> bool {
+    true
+}
+
+fn default_require_git_repo() -> bool {
+    true
+}
+
+fn default_internal_work_dir() -> String {
+    ".uhorse".to_string()
+}
+
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
@@ -84,6 +127,11 @@ impl Default for NodeConfig {
             max_concurrent_tasks: default_max_tasks(),
             capabilities: NodeCapabilities::default(),
             tags: vec!["default".to_string()],
+            git_protection_enabled: default_git_protection_enabled(),
+            watch_workspace: default_watch_workspace(),
+            auto_git_add_new_files: default_auto_git_add_new_files(),
+            require_git_repo: default_require_git_repo(),
+            internal_work_dir: default_internal_work_dir(),
         }
     }
 }
@@ -126,6 +174,9 @@ pub struct Node {
     /// 状态更新接收器
     status_rx: broadcast::Receiver<NodeStatus>,
     status_tx: broadcast::Sender<NodeStatus>,
+
+    /// 工作区 watcher
+    workspace_watcher: Option<RecommendedWatcher>,
 }
 
 /// 运行中的任务
@@ -153,13 +204,24 @@ impl Node {
         // 创建工作空间
         let workspace = Arc::new(Workspace::new(&config.workspace_path)?);
 
+        if config.require_git_repo && !workspace.is_git_repo() {
+            return Err(NodeError::Config(format!(
+                "Workspace must be a git repository when require_git_repo is enabled: {}",
+                workspace.root().display()
+            )));
+        }
+
         // 创建权限管理器
-        let permission_manager = Arc::new(PermissionManager::new(workspace.clone()));
+        let permission_manager = Arc::new(PermissionManager::new(
+            workspace.clone(),
+            config.git_protection_enabled,
+        ));
 
         // 创建执行器
         let executor = Arc::new(CommandExecutor::new(
             workspace.clone(),
             permission_manager.clone(),
+            config.internal_work_dir.clone(),
         ));
 
         // 创建节点 ID
@@ -194,6 +256,7 @@ impl Node {
             stop_signal,
             status_rx,
             status_tx,
+            workspace_watcher: None,
         })
     }
 
@@ -211,11 +274,134 @@ impl Node {
         // 2. 连接到 Hub
         let (hub_rx, outbound_tx) = self.connection.start().await?;
 
+        if self.config.watch_workspace {
+            if let Err(error) = self.start_workspace_watcher() {
+                self.running.store(false, Ordering::SeqCst);
+                self.connection.stop().await;
+                return Err(error);
+            }
+        }
+
         // 3. 启动后台任务
         self.start_status_task();
         self.start_message_handler(hub_rx, outbound_tx);
 
         info!("Node started successfully");
+        Ok(())
+    }
+
+    fn start_workspace_watcher(&mut self) -> NodeResult<()> {
+        let root = self.workspace.root().to_path_buf();
+        let internal_work_dir = self.config.internal_work_dir.clone();
+        let auto_git_add_new_files = self.config.auto_git_add_new_files;
+        let running = self.running.clone();
+        let (tx, rx) = std_mpsc::channel();
+
+        let mut watcher = RecommendedWatcher::new(
+            move |result| {
+                let _ = tx.send(result);
+            },
+            NotifyConfig::default(),
+        )
+        .map_err(|e| NodeError::Execution(format!("Failed to create workspace watcher: {}", e)))?;
+
+        watcher
+            .watch(&root, RecursiveMode::Recursive)
+            .map_err(|e| NodeError::Execution(format!("Failed to watch workspace {:?}: {}", root, e)))?;
+
+        let watcher_root = root.clone();
+        tokio::task::spawn_blocking(move || {
+            while running.load(Ordering::SeqCst) {
+                match rx.recv_timeout(Duration::from_millis(500)) {
+                    Ok(Ok(event)) => {
+                        if let Err(error) = Self::handle_workspace_event(
+                            &watcher_root,
+                            &internal_work_dir,
+                            auto_git_add_new_files,
+                            event,
+                        ) {
+                            warn!("Failed to handle workspace event: {}", error);
+                        }
+                    }
+                    Ok(Err(error)) => {
+                        warn!("Workspace watcher error: {}", error);
+                    }
+                    Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        });
+
+        self.workspace_watcher = Some(watcher);
+        info!("Workspace watcher started for {}", root.display());
+        Ok(())
+    }
+
+    fn handle_workspace_event(
+        root: &Path,
+        internal_work_dir: &str,
+        auto_git_add_new_files: bool,
+        event: Event,
+    ) -> NodeResult<()> {
+        if !auto_git_add_new_files || !matches!(event.kind, EventKind::Create(_)) {
+            return Ok(());
+        }
+
+        for path in event.paths {
+            if Self::should_skip_watched_path(root, internal_work_dir, &path) {
+                continue;
+            }
+
+            if path.is_dir() {
+                continue;
+            }
+
+            Self::git_add_path(root, &path)?;
+        }
+
+        Ok(())
+    }
+
+    fn should_skip_watched_path(root: &Path, internal_work_dir: &str, path: &Path) -> bool {
+        let Ok(relative) = path.strip_prefix(root) else {
+            return true;
+        };
+
+        let mut components = relative.components();
+        let Some(first) = components.next() else {
+            return true;
+        };
+
+        let first = first.as_os_str().to_string_lossy();
+        first == ".git" || first == internal_work_dir
+    }
+
+    fn git_add_path(root: &Path, path: &Path) -> NodeResult<()> {
+        let relative = path.strip_prefix(root).map_err(|_| {
+            NodeError::Execution(format!(
+                "Failed to derive relative path for watched file: {}",
+                path.display()
+            ))
+        })?;
+
+        let output = StdCommand::new("git")
+            .arg("-C")
+            .arg(root)
+            .arg("add")
+            .arg("--")
+            .arg(relative)
+            .output()
+            .map_err(|e| NodeError::Execution(format!("Failed to run git add: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(NodeError::Execution(format!(
+                "git add failed for {}: {}",
+                relative.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+
+        info!("Auto staged new file: {}", relative.display());
         Ok(())
     }
 
@@ -439,7 +625,7 @@ impl Node {
     }
 
     /// 停止节点
-    pub async fn stop(&self) -> NodeResult<()> {
+    pub async fn stop(&mut self) -> NodeResult<()> {
         if !self
             .running
             .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -451,6 +637,8 @@ impl Node {
 
         // 发送停止信号
         let _ = self.stop_signal.send(());
+
+        self.workspace_watcher = None;
 
         // 停止连接
         self.connection.stop().await;
@@ -486,11 +674,93 @@ impl Drop for Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use notify::event::{CreateKind, EventAttributes, ModifyKind};
+    use std::path::PathBuf;
+    use std::process::Command as StdCommand;
+    use tempfile::TempDir;
 
     #[test]
     fn test_node_config_default() {
         let config = NodeConfig::default();
         assert_eq!(config.name, "uHorse-Node");
         assert_eq!(config.max_concurrent_tasks, 5);
+        assert!(config.git_protection_enabled);
+        assert!(config.watch_workspace);
+        assert!(config.auto_git_add_new_files);
+        assert!(config.require_git_repo);
+        assert_eq!(config.internal_work_dir, ".uhorse");
+    }
+
+    #[test]
+    fn test_node_new_requires_git_repo_when_enabled() {
+        let temp = TempDir::new().unwrap();
+        let result = Node::new(NodeConfig {
+            workspace_path: temp.path().to_string_lossy().to_string(),
+            ..Default::default()
+        });
+
+        match result {
+            Err(NodeError::Config(_)) => {}
+            other => panic!("unexpected result: {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn test_node_new_allows_non_git_workspace_when_disabled() {
+        let temp = TempDir::new().unwrap();
+        let node = Node::new(NodeConfig {
+            workspace_path: temp.path().to_string_lossy().to_string(),
+            require_git_repo: false,
+            ..Default::default()
+        });
+
+        assert!(node.is_ok());
+    }
+
+    #[test]
+    fn test_workspace_watcher_skips_internal_and_git_paths() {
+        let root = PathBuf::from("/tmp/workspace");
+
+        assert!(Node::should_skip_watched_path(
+            &root,
+            ".uhorse",
+            &root.join(".uhorse/script.py")
+        ));
+        assert!(Node::should_skip_watched_path(
+            &root,
+            ".uhorse",
+            &root.join(".git/index")
+        ));
+        assert!(!Node::should_skip_watched_path(
+            &root,
+            ".uhorse",
+            &root.join("src/main.rs")
+        ));
+    }
+
+    #[test]
+    fn test_handle_workspace_event_ignores_non_create_events() {
+        let root = PathBuf::from("/tmp/workspace");
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Any),
+            paths: vec![root.join("new.txt")],
+            attrs: EventAttributes::default(),
+        };
+
+        let result = Node::handle_workspace_event(&root, ".uhorse", true, event);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_workspace_event_skips_internal_dir_without_git() {
+        let root = PathBuf::from("/tmp/workspace");
+        let event = Event {
+            kind: EventKind::Create(CreateKind::File),
+            paths: vec![root.join(".uhorse/code.py")],
+            attrs: EventAttributes::default(),
+        };
+
+        let result = Node::handle_workspace_event(&root, ".uhorse", true, event);
+        assert!(result.is_ok());
     }
 }

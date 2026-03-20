@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 use uhorse_protocol::{
     ApiCommand, BrowserCommand, CodeCommand, CodeLanguage, Command, CommandOutput,
     CommandResult as ProtocolCommandResult, DatabaseCommand, ExecutionError, FileCommand,
@@ -30,6 +30,9 @@ pub struct CommandExecutor {
 
     /// 权限管理器
     permission_manager: Arc<PermissionManager>,
+
+    /// 内部工作目录
+    internal_work_dir: String,
 
     /// 执行超时
     default_timeout: Duration,
@@ -65,12 +68,17 @@ pub struct ExecutorStats {
 
 impl CommandExecutor {
     /// 创建新的命令执行器
-    pub fn new(workspace: Arc<Workspace>, permission_manager: Arc<PermissionManager>) -> Self {
+    pub fn new(
+        workspace: Arc<Workspace>,
+        permission_manager: Arc<PermissionManager>,
+        internal_work_dir: impl Into<String>,
+    ) -> Self {
         Self {
             workspace,
             permission_manager,
+            internal_work_dir: internal_work_dir.into(),
             default_timeout: Duration::from_secs(60),
-            max_output_size: 10 * 1024 * 1024, // 10 MB
+            max_output_size: 10 * 1024 * 1024,
             stats: Arc::new(RwLock::new(ExecutorStats::default())),
         }
     }
@@ -78,13 +86,12 @@ impl CommandExecutor {
     /// 执行命令
     pub async fn execute(
         &self,
-        task_id: &TaskId,
+        _task_id: &TaskId,
         command: &Command,
         context: &TaskContext,
     ) -> NodeResult<ProtocolCommandResult> {
         let start = Instant::now();
 
-        // 1. 检查权限
         match self.permission_manager.check(command, context).await {
             PermissionResult::Allowed => {}
             PermissionResult::Denied(reason) => {
@@ -93,18 +100,16 @@ impl CommandExecutor {
                 ));
             }
             PermissionResult::RequiresApproval { request_id, reason } => {
-                // 返回需要审批的结果
                 let error = ExecutionError::permission_denied(&format!(
                     "Operation requires approval. Request ID: {}, Reason: {}",
                     request_id, reason
                 ))
-                .with_retryable(1000); // 1秒后可重试
+                .with_retryable(1000);
 
                 return Ok(ProtocolCommandResult::failure(error));
             }
         }
 
-        // 2. 执行命令
         let result = match command {
             Command::File(cmd) => self.execute_file(cmd).await,
             Command::Shell(cmd) => self.execute_shell(cmd).await,
@@ -115,21 +120,22 @@ impl CommandExecutor {
             Command::Skill(cmd) => self.execute_skill(cmd).await,
         };
 
-        // 3. 更新统计
         let duration = start.elapsed();
         {
             let mut stats = self.stats.write().await;
             stats.total_executions += 1;
             stats.total_duration_ms += duration.as_millis() as u64;
             stats.avg_duration_ms = stats.total_duration_ms as f64 / stats.total_executions as f64;
-            if result.is_ok() {
-                stats.successful_executions += 1;
-            } else {
-                stats.failed_executions += 1;
+            match &result {
+                Ok(_) => stats.successful_executions += 1,
+                Err(NodeError::Timeout(_)) => {
+                    stats.failed_executions += 1;
+                    stats.timeout_count += 1;
+                }
+                Err(_) => stats.failed_executions += 1,
             }
         }
 
-        // 4. 返回结果
         result.map(|output| {
             ProtocolCommandResult::success(output).with_duration(duration.as_millis() as u64)
         })
@@ -189,22 +195,12 @@ impl CommandExecutor {
         limit: Option<usize>,
         offset: Option<usize>,
     ) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
+        let path = self.resolve_file_path(path, false)?;
 
-        // 检查访问权限
-        if !self.workspace.can_access(path, false)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot read file: {:?}",
-                path
-            )));
-        }
-
-        // 读取文件
-        let content = tokio::fs::read_to_string(path)
+        let content = tokio::fs::read_to_string(&path)
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to read file {:?}: {}", path, e)))?;
 
-        // 应用偏移和限制
         let content = if let Some(offset) = offset {
             let start = content
                 .char_indices()
@@ -237,17 +233,8 @@ impl CommandExecutor {
         content: &str,
         overwrite: bool,
     ) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
+        let path = self.resolve_file_path(path, true)?;
 
-        // 检查访问权限
-        if !self.workspace.can_access(path, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot write to file: {:?}",
-                path
-            )));
-        }
-
-        // 检查文件是否存在
         if path.exists() && !overwrite {
             return Err(NodeError::Execution(format!(
                 "File already exists: {:?}",
@@ -255,8 +242,13 @@ impl CommandExecutor {
             )));
         }
 
-        // 写入文件
-        tokio::fs::write(path, content)
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+            })?;
+        }
+
+        tokio::fs::write(&path, content)
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to write file {:?}: {}", path, e)))?;
 
@@ -268,21 +260,18 @@ impl CommandExecutor {
 
     /// 追加内容
     async fn file_append(&self, path: &str, content: &str) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
+        let path = self.resolve_file_path(path, true)?;
 
-        // 检查访问权限
-        if !self.workspace.can_access(path, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot append to file: {:?}",
-                path
-            )));
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+            })?;
         }
 
-        // 追加内容
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(path)
+            .open(&path)
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to open file {:?}: {}", path, e)))?;
 
@@ -298,25 +287,20 @@ impl CommandExecutor {
 
     /// 删除文件/目录
     async fn file_delete(&self, path: &str, recursive: bool) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
-
-        // 检查访问权限
-        if !self.workspace.can_access(path, true)? {
-            return Err(NodeError::Permission(format!("Cannot delete: {:?}", path)));
-        }
+        let path = self.resolve_file_path(path, true)?;
 
         if path.is_dir() {
             if recursive {
-                tokio::fs::remove_dir_all(path).await.map_err(|e| {
+                tokio::fs::remove_dir_all(&path).await.map_err(|e| {
                     NodeError::Execution(format!("Failed to delete directory {:?}: {}", path, e))
                 })?;
             } else {
-                tokio::fs::remove_dir(path).await.map_err(|e| {
+                tokio::fs::remove_dir(&path).await.map_err(|e| {
                     NodeError::Execution(format!("Failed to delete directory {:?}: {}", path, e))
                 })?;
             }
         } else {
-            tokio::fs::remove_file(path).await.map_err(|e| {
+            tokio::fs::remove_file(&path).await.map_err(|e| {
                 NodeError::Execution(format!("Failed to delete file {:?}: {}", path, e))
             })?;
         }
@@ -331,22 +315,13 @@ impl CommandExecutor {
         recursive: bool,
         pattern: Option<&str>,
     ) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
-
-        // 检查访问权限
-        if !self.workspace.can_access(path, false)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot list directory: {:?}",
-                path
-            )));
-        }
-
+        let path = self.resolve_file_path(path, false)?;
         let mut entries = Vec::new();
 
         if recursive {
-            self.list_recursive(path, pattern, &mut entries)?;
+            self.list_recursive(&path, pattern, &mut entries)?;
         } else {
-            let mut dir = tokio::fs::read_dir(path).await.map_err(|e| {
+            let mut dir = tokio::fs::read_dir(&path).await.map_err(|e| {
                 NodeError::Execution(format!("Failed to read directory {:?}: {}", path, e))
             })?;
 
@@ -356,8 +331,11 @@ impl CommandExecutor {
                 .map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?
             {
                 let entry_path = entry.path();
-                let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
+                if !self.workspace.can_access(&entry_path, false)? {
+                    continue;
+                }
 
+                let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
                 if let Some(p) = pattern {
                     if !glob_match::glob_match(p, &name) {
                         continue;
@@ -395,10 +373,16 @@ impl CommandExecutor {
                 entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let entry_path = entry.path();
-            let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
+            if !self.workspace.can_access(&entry_path, false)? {
+                continue;
+            }
 
+            let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
             if let Some(p) = pattern {
                 if !glob_match::glob_match(p, &name) {
+                    if entry_path.is_dir() {
+                        self.list_recursive(&entry_path, pattern, entries)?;
+                    }
                     continue;
                 }
             }
@@ -427,22 +411,13 @@ impl CommandExecutor {
         recursive: bool,
         content_pattern: Option<&str>,
     ) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
-
-        // 检查访问权限
-        if !self.workspace.can_access(path, false)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot search in: {:?}",
-                path
-            )));
-        }
-
+        let path = self.resolve_file_path(path, false)?;
         let mut results = Vec::new();
 
         if recursive {
-            self.search_recursive(path, pattern, content_pattern, &mut results)?;
+            self.search_recursive(&path, pattern, content_pattern, &mut results)?;
         } else {
-            self.search_single_dir(path, pattern, content_pattern, &mut results)?;
+            self.search_single_dir(&path, pattern, content_pattern, &mut results)?;
         }
 
         Ok(CommandOutput::json(
@@ -467,8 +442,11 @@ impl CommandExecutor {
                 entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let entry_path = entry.path();
-            let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
+            if !self.workspace.can_access(&entry_path, false)? {
+                continue;
+            }
 
+            let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
             if glob_match::glob_match(pattern, &name) {
                 if let Some(content_pattern) = content_pattern {
                     if entry_path.is_file() {
@@ -515,8 +493,11 @@ impl CommandExecutor {
                 entry.map_err(|e| NodeError::Execution(format!("Failed to read entry: {}", e)))?;
 
             let entry_path = entry.path();
-            let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
+            if !self.workspace.can_access(&entry_path, false)? {
+                continue;
+            }
 
+            let name = entry_path.file_name().unwrap_or_default().to_string_lossy();
             if glob_match::glob_match(pattern, &name) {
                 if let Some(content_pattern) = content_pattern {
                     if entry_path.is_file() {
@@ -544,21 +525,9 @@ impl CommandExecutor {
 
     /// 复制文件
     async fn file_copy(&self, from: &str, to: &str, overwrite: bool) -> NodeResult<CommandOutput> {
-        let from = Path::new(from);
-        let to = Path::new(to);
+        let from = self.resolve_file_path(from, false)?;
+        let to = self.resolve_file_path(to, true)?;
 
-        // 检查访问权限
-        if !self.workspace.can_access(from, false)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot read from: {:?}",
-                from
-            )));
-        }
-        if !self.workspace.can_access(to, true)? {
-            return Err(NodeError::Permission(format!("Cannot write to: {:?}", to)));
-        }
-
-        // 检查目标是否存在
         if to.exists() && !overwrite {
             return Err(NodeError::Execution(format!(
                 "Destination already exists: {:?}",
@@ -566,8 +535,13 @@ impl CommandExecutor {
             )));
         }
 
-        // 复制文件
-        tokio::fs::copy(from, to)
+        if let Some(parent) = to.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+            })?;
+        }
+
+        tokio::fs::copy(&from, &to)
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to copy: {}", e)))?;
 
@@ -576,21 +550,9 @@ impl CommandExecutor {
 
     /// 移动文件
     async fn file_move(&self, from: &str, to: &str, overwrite: bool) -> NodeResult<CommandOutput> {
-        let from = Path::new(from);
-        let to = Path::new(to);
+        let from = self.resolve_file_path(from, true)?;
+        let to = self.resolve_file_path(to, true)?;
 
-        // 检查访问权限
-        if !self.workspace.can_access(from, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot move from: {:?}",
-                from
-            )));
-        }
-        if !self.workspace.can_access(to, true)? {
-            return Err(NodeError::Permission(format!("Cannot move to: {:?}", to)));
-        }
-
-        // 检查目标是否存在
         if to.exists() && !overwrite {
             return Err(NodeError::Execution(format!(
                 "Destination already exists: {:?}",
@@ -598,8 +560,13 @@ impl CommandExecutor {
             )));
         }
 
-        // 移动文件
-        tokio::fs::rename(from, to)
+        if let Some(parent) = to.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+            })?;
+        }
+
+        tokio::fs::rename(&from, &to)
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to move: {}", e)))?;
 
@@ -614,22 +581,14 @@ impl CommandExecutor {
 
     /// 创建目录
     async fn file_create_dir(&self, path: &str, recursive: bool) -> NodeResult<CommandOutput> {
-        let path = Path::new(path);
-
-        // 检查访问权限
-        if !self.workspace.can_access(path, true)? {
-            return Err(NodeError::Permission(format!(
-                "Cannot create directory: {:?}",
-                path
-            )));
-        }
+        let path = self.resolve_file_path(path, true)?;
 
         if recursive {
-            tokio::fs::create_dir_all(path).await.map_err(|e| {
+            tokio::fs::create_dir_all(&path).await.map_err(|e| {
                 NodeError::Execution(format!("Failed to create directory {:?}: {}", path, e))
             })?;
         } else {
-            tokio::fs::create_dir(path).await.map_err(|e| {
+            tokio::fs::create_dir(&path).await.map_err(|e| {
                 NodeError::Execution(format!("Failed to create directory {:?}: {}", path, e))
             })?;
         }
@@ -639,7 +598,10 @@ impl CommandExecutor {
 
     /// 检查文件是否存在
     async fn file_exists(&self, path: &str) -> NodeResult<CommandOutput> {
-        let exists = Path::new(path).exists();
+        let path = self.resolve_file_path(path, false)?;
+        let exists = tokio::fs::try_exists(&path)
+            .await
+            .map_err(|e| NodeError::Execution(format!("Failed to check file {:?}: {}", path, e)))?;
         Ok(CommandOutput::json(serde_json::json!({ "exists": exists })))
     }
 
@@ -647,48 +609,24 @@ impl CommandExecutor {
     async fn execute_shell(&self, cmd: &ShellCommand) -> NodeResult<CommandOutput> {
         debug!("Executing shell command: {} {:?}", cmd.command, cmd.args);
 
+        let cwd = self.resolve_execution_dir(cmd.cwd.as_deref())?;
         let mut command = TokioCommand::new(&cmd.command);
-        command.args(&cmd.args);
-
-        if let Some(cwd) = &cmd.cwd {
-            command.current_dir(cwd);
-        }
+        command
+            .args(&cmd.args)
+            .current_dir(&cwd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         for (key, value) in &cmd.env {
             command.env(key, value);
         }
 
-        command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-        // 执行命令
-        let output = command
-            .output()
-            .await
-            .map_err(|e| NodeError::Execution(format!("Failed to execute command: {}", e)))?;
-
-        // 构建输出
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        if output.status.success() {
-            if cmd.capture_stderr && !stderr.is_empty() {
-                Ok(CommandOutput::text(format!("{}\n{}", stdout, stderr)))
-            } else {
-                Ok(CommandOutput::text(stdout))
-            }
-        } else {
-            Err(NodeError::Execution(format!(
-                "Command failed with exit code {:?}: {}",
-                output.status.code(),
-                stderr
-            )))
-        }
+        self.run_process(command, cmd.timeout).await
     }
 
     /// 执行代码
     async fn execute_code(&self, cmd: &CodeCommand) -> NodeResult<CommandOutput> {
-        let lang_str = format!("{:?}", cmd.language);
-        info!("Executing {} code", lang_str);
+        info!("Executing {:?} code", cmd.language);
 
         match cmd.language {
             CodeLanguage::Python => self.execute_python(cmd).await,
@@ -700,7 +638,7 @@ impl CommandExecutor {
                     command: "sh".to_string(),
                     args: vec!["-c".to_string(), cmd.code.clone()],
                     cwd: cmd.workdir.clone(),
-                    env: HashMap::new(),
+                    env: cmd.env.clone(),
                     timeout: cmd.timeout,
                     capture_stderr: true,
                 };
@@ -719,77 +657,58 @@ impl CommandExecutor {
 
     /// 执行 Python 代码
     async fn execute_python(&self, cmd: &CodeCommand) -> NodeResult<CommandOutput> {
-        // 创建临时文件
-        let temp_dir = std::env::temp_dir();
-        let temp_path = temp_dir.join(format!("uhorse_code_{}.py", uuid::Uuid::new_v4()));
+        let workdir = self.resolve_code_workdir(cmd)?;
+        let temp_path = self.create_temp_code_file("py", &cmd.code).await?;
 
-        // 同步写入文件
-        std::fs::write(&temp_path, &cmd.code)
-            .map_err(|e| NodeError::Execution(format!("Failed to write temp file: {}", e)))?;
+        let mut command = TokioCommand::new("python3");
+        command
+            .arg(&temp_path)
+            .current_dir(&workdir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        let path = temp_path.to_string_lossy().to_string();
+        for (key, value) in &cmd.env {
+            command.env(key, value);
+        }
 
-        let shell_cmd = ShellCommand {
-            command: "python3".to_string(),
-            args: vec![path.clone()],
-            cwd: cmd.workdir.clone(),
-            env: HashMap::new(),
-            timeout: cmd.timeout,
-            capture_stderr: true,
-        };
-
-        let result = self.execute_shell(&shell_cmd).await;
-
-        // 清理临时文件
-        let _ = std::fs::remove_file(&temp_path);
-
+        let result = self.run_process(command, cmd.timeout).await;
+        let _ = tokio::fs::remove_file(&temp_path).await;
         result
     }
 
     /// 执行 JavaScript 代码
     async fn execute_javascript(&self, cmd: &CodeCommand) -> NodeResult<CommandOutput> {
+        let workdir = self.resolve_code_workdir(cmd)?;
         let ext = if matches!(cmd.language, CodeLanguage::TypeScript) {
-            ".ts"
+            "ts"
         } else {
-            ".js"
+            "js"
         };
-
-        // 创建临时文件
-        let temp_dir = std::env::temp_dir();
-        let temp_path = temp_dir.join(format!("uhorse_code_{}{}", uuid::Uuid::new_v4(), ext));
-
-        // 同步写入文件
-        std::fs::write(&temp_path, &cmd.code)
-            .map_err(|e| NodeError::Execution(format!("Failed to write temp file: {}", e)))?;
-
-        let path = temp_path.to_string_lossy().to_string();
-
+        let temp_path = self.create_temp_code_file(ext, &cmd.code).await?;
         let runner = if matches!(cmd.language, CodeLanguage::TypeScript) {
             "ts-node"
         } else {
             "node"
         };
 
-        let shell_cmd = ShellCommand {
-            command: runner.to_string(),
-            args: vec![path.clone()],
-            cwd: cmd.workdir.clone(),
-            env: HashMap::new(),
-            timeout: cmd.timeout,
-            capture_stderr: true,
-        };
+        let mut command = TokioCommand::new(runner);
+        command
+            .arg(&temp_path)
+            .current_dir(&workdir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        let result = self.execute_shell(&shell_cmd).await;
+        for (key, value) in &cmd.env {
+            command.env(key, value);
+        }
 
-        // 清理临时文件
-        let _ = std::fs::remove_file(&temp_path);
-
+        let result = self.run_process(command, cmd.timeout).await;
+        let _ = tokio::fs::remove_file(&temp_path).await;
         result
     }
 
     /// 执行数据库查询
     async fn execute_database(&self, _cmd: &DatabaseCommand) -> NodeResult<CommandOutput> {
-        // 数据库执行需要更复杂的实现
         Err(NodeError::Execution(
             "Database execution not yet implemented".to_string(),
         ))
@@ -797,8 +716,7 @@ impl CommandExecutor {
 
     /// 执行 API 调用
     async fn execute_api(&self, cmd: &ApiCommand) -> NodeResult<CommandOutput> {
-        let method_str = format!("{:?}", cmd.method);
-        info!("Making {} request to {}", method_str, cmd.url);
+        info!("Making {:?} request to {}", cmd.method, cmd.url);
 
         let client = reqwest::Client::builder()
             .timeout(cmd.timeout)
@@ -815,17 +733,14 @@ impl CommandExecutor {
             HttpMethod::Head => client.head(&cmd.url),
         };
 
-        // 添加请求头
         for (key, value) in &cmd.headers {
             request = request.header(key, value);
         }
 
-        // 添加查询参数
         for (key, value) in &cmd.query {
             request = request.query(&[(key, value)]);
         }
 
-        // 添加请求体
         if let Some(body) = &cmd.body {
             request = request.json(body);
         }
@@ -841,7 +756,6 @@ impl CommandExecutor {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
-
         let body = response.json::<serde_json::Value>().await.ok();
 
         Ok(CommandOutput::ApiResponse {
@@ -853,7 +767,6 @@ impl CommandExecutor {
 
     /// 执行浏览器操作
     async fn execute_browser(&self, _cmd: &BrowserCommand) -> NodeResult<CommandOutput> {
-        // 浏览器执行需要 headless browser 集成
         Err(NodeError::Execution(
             "Browser execution not yet implemented".to_string(),
         ))
@@ -861,7 +774,6 @@ impl CommandExecutor {
 
     /// 执行技能
     async fn execute_skill(&self, _cmd: &SkillCommand) -> NodeResult<CommandOutput> {
-        // 技能执行需要技能系统
         Err(NodeError::Execution(
             "Skill execution not yet implemented".to_string(),
         ))
@@ -870,6 +782,127 @@ impl CommandExecutor {
     /// 获取统计
     pub async fn get_stats(&self) -> ExecutorStats {
         self.stats.read().await.clone()
+    }
+
+    fn resolve_file_path(&self, path: &str, write: bool) -> NodeResult<PathBuf> {
+        let resolved = self.workspace.resolve_path(path)?;
+        if !self.workspace.can_access(&resolved, write)? {
+            return Err(NodeError::Permission(format!(
+                "Cannot access path: {:?}",
+                resolved
+            )));
+        }
+        Ok(resolved)
+    }
+
+    fn resolve_execution_dir(&self, dir: Option<&str>) -> NodeResult<PathBuf> {
+        let resolved = if let Some(dir) = dir {
+            self.workspace.resolve_path(dir)?
+        } else {
+            self.workspace.root().to_path_buf()
+        };
+
+        if !self.workspace.can_access(&resolved, false)? {
+            return Err(NodeError::Permission(format!(
+                "Working directory outside workspace: {:?}",
+                resolved
+            )));
+        }
+
+        Ok(resolved)
+    }
+
+    fn resolve_code_workdir(&self, cmd: &CodeCommand) -> NodeResult<PathBuf> {
+        self.resolve_execution_dir(cmd.workdir.as_deref())
+    }
+
+    async fn ensure_internal_work_dir(&self) -> NodeResult<PathBuf> {
+        let internal_dir = self.workspace.internal_path(&self.internal_work_dir);
+        if !self.workspace.can_access(&internal_dir, true)? {
+            return Err(NodeError::Permission(format!(
+                "Internal work directory outside workspace: {:?}",
+                internal_dir
+            )));
+        }
+
+        tokio::fs::create_dir_all(&internal_dir).await.map_err(|e| {
+            NodeError::Execution(format!(
+                "Failed to create internal work directory {:?}: {}",
+                internal_dir, e
+            ))
+        })?;
+
+        Ok(internal_dir)
+    }
+
+    async fn create_temp_code_file(&self, extension: &str, content: &str) -> NodeResult<PathBuf> {
+        let internal_dir = self.ensure_internal_work_dir().await?;
+        let file_path = internal_dir.join(format!(
+            "code-{}.{}",
+            uuid::Uuid::new_v4(),
+            extension.trim_start_matches('.')
+        ));
+
+        tokio::fs::write(&file_path, content).await.map_err(|e| {
+            NodeError::Execution(format!("Failed to write temp file {:?}: {}", file_path, e))
+        })?;
+
+        Ok(file_path)
+    }
+
+    async fn run_process(
+        &self,
+        mut command: TokioCommand,
+        timeout_duration: Duration,
+    ) -> NodeResult<CommandOutput> {
+        let timeout_duration = if timeout_duration.is_zero() {
+            self.default_timeout
+        } else {
+            timeout_duration
+        };
+
+        let output = match tokio::time::timeout(timeout_duration, command.output()).await {
+            Ok(result) => result.map_err(|e| {
+                NodeError::Execution(format!("Failed to execute command: {}", e))
+            })?,
+            Err(_) => {
+                return Err(NodeError::Timeout(format!(
+                    "Command timed out after {:?}",
+                    timeout_duration
+                )))
+            }
+        };
+
+        let stdout = self.limit_output(String::from_utf8_lossy(&output.stdout).to_string());
+        let stderr = self.limit_output(String::from_utf8_lossy(&output.stderr).to_string());
+
+        if output.status.success() {
+            if !stderr.is_empty() {
+                Ok(CommandOutput::text(format!("{}{}{}", stdout, if stdout.is_empty() { "" } else { "\n" }, stderr)))
+            } else {
+                Ok(CommandOutput::text(stdout))
+            }
+        } else {
+            let message = if stderr.is_empty() {
+                format!("Command failed with exit code {:?}", output.status.code())
+            } else {
+                format!(
+                    "Command failed with exit code {:?}: {}",
+                    output.status.code(),
+                    stderr
+                )
+            };
+            Err(NodeError::Execution(message))
+        }
+    }
+
+    fn limit_output(&self, output: String) -> String {
+        if output.len() <= self.max_output_size {
+            return output;
+        }
+
+        let truncated = &output[..self.max_output_size];
+        format!("{}\n... output truncated ...", truncated)
     }
 }
 
@@ -934,5 +967,115 @@ impl ExecutionContext {
         self.success = Some(success);
         self.error = error;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use uhorse_protocol::{CodeLanguage, SessionId, UserId};
+
+    fn create_context() -> TaskContext {
+        TaskContext::new(
+            UserId::from_string("test-user"),
+            SessionId::from_string("test-session"),
+            "test-channel",
+        )
+    }
+
+    fn create_executor(temp: &TempDir) -> CommandExecutor {
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let permission_manager = Arc::new(PermissionManager::new(workspace.clone(), true));
+        CommandExecutor::new(workspace, permission_manager, ".uhorse")
+    }
+
+    #[tokio::test]
+    async fn test_execute_shell_defaults_to_workspace_root() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let result = executor
+            .execute_shell(&ShellCommand::new("pwd"))
+            .await
+            .unwrap();
+
+        match result {
+            CommandOutput::Text { content } => {
+                assert_eq!(content.trim(), temp.path().canonicalize().unwrap().to_string_lossy());
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_shell_timeout_is_enforced() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let command = ShellCommand::new("sh")
+            .with_args(vec!["-c".to_string(), "sleep 2".to_string()])
+            .with_timeout(Duration::from_millis(100));
+
+        let error = executor.execute_shell(&command).await.unwrap_err();
+        assert!(matches!(error, NodeError::Timeout(_)));
+    }
+
+    #[tokio::test]
+    async fn test_python_temp_file_is_created_inside_workspace_internal_dir() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let command = CodeCommand::new(
+            CodeLanguage::Python,
+            "import pathlib\nprint(pathlib.Path(__file__).resolve())",
+        );
+
+        let result = executor.execute_code(&command).await.unwrap();
+        match result {
+            CommandOutput::Text { content } => {
+                let temp_path = content.trim();
+                assert!(temp_path.contains(".uhorse"));
+                assert!(temp_path.starts_with(&temp.path().canonicalize().unwrap().to_string_lossy().to_string()));
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_exists_respects_workspace_boundary() {
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let error = executor
+            .file_exists(&outside.path().join("outside.txt").to_string_lossy())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, NodeError::Permission(_)));
+    }
+
+    #[tokio::test]
+    async fn test_execute_wraps_permission_denial_as_failure_result() {
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let command = Command::Shell(
+            ShellCommand::new("pwd").with_cwd(outside.path().to_string_lossy().to_string()),
+        );
+        let result = executor
+            .execute(&TaskId::from_string("task-1"), &command, &create_context())
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(result.error.is_some());
     }
 }

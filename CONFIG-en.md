@@ -228,6 +228,11 @@ heartbeat_interval_secs = 30
 status_interval_secs = 60
 max_concurrent_tasks = 5
 tags = ["default", "macos"]
+git_protection_enabled = true
+watch_workspace = true
+auto_git_add_new_files = true
+require_git_repo = true
+internal_work_dir = ".uhorse"
 
 [connection]
 hub_url = "wss://hub.example.com/ws"
@@ -237,6 +242,16 @@ connect_timeout_secs = 10
 max_reconnect_attempts = 10
 auth_token = ""
 ```
+
+### Node workspace protection
+
+The current `uhorse-node` runtime keeps execution inside `workspace_path` and additionally enables these defaults:
+
+- `git_protection_enabled = true`: block dangerous git commands
+- `watch_workspace = true`: watch for newly created files in the workspace
+- `auto_git_add_new_files = true`: run local `git add` for newly created files
+- `require_git_repo = true`: require the workspace itself to already be a git repository
+- `internal_work_dir = ".uhorse"`: internal temp-code directory that the watcher skips by default
 
 ### Node CLI arguments
 
@@ -281,12 +296,8 @@ agent_id = 123456789
 
 - The main runtime path is **Stream mode** and does not depend on a public webhook to receive inbound messages.
 - Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
-- The current DingTalk-triggered management command allowlist is:
-  - `list` / `ls`
-  - `search`
-  - `read` / `cat`
-  - `info`
-  - `exists`
+- DingTalk text is first planned by the LLM into a single `FileCommand` or `ShellCommand`.
+- Hub validates path scope locally before dispatch and rejects dangerous git commands.
 
 ### What happens when enabled
 
@@ -294,13 +305,14 @@ When `channels.enabled` contains `dingtalk`, Hub startup will:
 
 1. initialize `DingTalkChannel`
 2. subscribe to inbound DingTalk messages
-3. convert inbound text into Hub tasks
-4. prefer replying through `session_webhook` back to the original conversation; when the webhook is unavailable or expired, fall back to group or personal message sending
+3. send inbound natural language to the LLM for safe command planning
+4. submit only locally validated commands as Hub tasks
+5. prefer an LLM-generated result summary before replying through `session_webhook`; when the webhook is unavailable or expired, fall back to group or personal message sending
 
 The current mainline has already been validated once with a real enterprise tenant:
 
-- invalid commands return immediate errors
-- a valid `exists` command routes JSON back to the original conversation
+- invalid or unsafe requests return immediate errors
+- valid requests route results back to the original conversation
 
 ---
 

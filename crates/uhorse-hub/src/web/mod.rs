@@ -20,10 +20,10 @@ use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
 use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
 use uhorse_core::{Channel, MessageContent};
-use uhorse_llm::OpenAIClient;
+use uhorse_llm::{ChatMessage, LLMClient};
 use uhorse_protocol::{Command, CommandOutput, FileCommand, TaskContext, TaskId, UserId};
 
-use crate::{Hub, HubStats};
+use crate::{task_scheduler::{CompletedTask, TaskResult}, Hub, HubStats};
 pub use ws::ws_handler;
 
 /// DingTalk 回传路由
@@ -45,14 +45,11 @@ pub struct DingTalkReplyRoute {
     pub robot_code: Option<String>,
 }
 
-/// 允许的 DingTalk 管理动作
-#[derive(Debug, Clone)]
-enum AllowedDingTalkCommand {
-    List { path: String, recursive: bool },
-    Search { path: String, pattern: String },
-    Read { path: String, limit: Option<usize> },
-    Info { path: String },
-    Exists { path: String },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PlannedDingTalkCommand {
+    command: Command,
+    #[serde(default)]
+    workspace_path: Option<String>,
 }
 
 /// Web 服务器状态
@@ -63,7 +60,7 @@ pub struct WebState {
     /// DingTalk 通道
     pub dingtalk_channel: Option<Arc<DingTalkChannel>>,
     /// LLM 客户端
-    pub llm_client: Option<Arc<OpenAIClient>>,
+    pub llm_client: Option<Arc<dyn LLMClient>>,
     /// 任务回传路由
     pub dingtalk_routes: Arc<RwLock<HashMap<TaskId, DingTalkReplyRoute>>>,
 }
@@ -73,7 +70,7 @@ impl WebState {
     pub fn new(
         hub: Arc<Hub>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
-        llm_client: Option<Arc<OpenAIClient>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
     ) -> Self {
         Self {
             hub,
@@ -302,9 +299,8 @@ pub async fn submit_dingtalk_task(
         return Err("No online node available".into());
     };
 
-    let allowed_command = parse_allowed_dingtalk_command(text)?;
     let workspace_hint = node.workspace.path.clone();
-    let command = build_dingtalk_command(&allowed_command, &workspace_hint);
+    let command = plan_dingtalk_command(state, text, &workspace_hint).await?;
 
     let task_context = TaskContext::new(
         UserId::from_string(
@@ -354,102 +350,128 @@ pub async fn submit_dingtalk_task(
     Ok(())
 }
 
-fn parse_allowed_dingtalk_command(
+async fn plan_dingtalk_command(
+    state: &Arc<WebState>,
     text: &str,
-) -> Result<AllowedDingTalkCommand, Box<dyn std::error::Error + Send + Sync>> {
-    let parts: Vec<&str> = text.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err("空命令".into());
-    }
+    workspace_root: &str,
+) -> Result<Command, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(llm_client) = state.llm_client.as_ref() else {
+        return Err("LLM client is not configured".into());
+    };
 
-    match parts[0] {
-        "list" | "ls" => {
-            if parts.len() < 2 {
-                return Err("用法：list <path> [--recursive]".into());
-            }
-            Ok(AllowedDingTalkCommand::List {
-                path: normalize_relative_path(parts[1])?,
-                recursive: parts.iter().skip(2).any(|arg| *arg == "--recursive" || *arg == "-r"),
-            })
-        }
-        "search" => {
-            if parts.len() < 3 {
-                return Err("用法：search <path> <glob-pattern>".into());
-            }
-            Ok(AllowedDingTalkCommand::Search {
-                path: normalize_relative_path(parts[1])?,
-                pattern: parts[2].to_string(),
-            })
-        }
-        "read" | "cat" => {
-            if parts.len() < 2 {
-                return Err("用法：read <path> [limit]".into());
-            }
-            let limit = parts
-                .get(2)
-                .map(|value| value.parse::<usize>())
-                .transpose()
-                .map_err(|_| "limit 必须是数字")?;
-            Ok(AllowedDingTalkCommand::Read {
-                path: normalize_relative_path(parts[1])?,
-                limit,
-            })
-        }
-        "info" => {
-            if parts.len() < 2 {
-                return Err("用法：info <path>".into());
-            }
-            Ok(AllowedDingTalkCommand::Info {
-                path: normalize_relative_path(parts[1])?,
-            })
-        }
-        "exists" => {
-            if parts.len() < 2 {
-                return Err("用法：exists <path>".into());
-            }
-            Ok(AllowedDingTalkCommand::Exists {
-                path: normalize_relative_path(parts[1])?,
-            })
-        }
-        _ => Err(
-            "仅支持白名单管理命令：list/ls、search、read/cat、info、exists。".into(),
+    let response = llm_client
+        .chat_completion(build_dingtalk_plan_messages(text, workspace_root))
+        .await?;
+
+    parse_planned_command(&response, workspace_root)
+}
+
+fn build_dingtalk_plan_messages(text: &str, workspace_root: &str) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage::system(
+            "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON> }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 命令。禁止生成 code/database/api/browser/skill 命令。路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。如果无法安全规划，返回一个会在本地校验失败的命令并附带原因到路径字段之外是不允许的，因此应返回最接近且可解析的安全命令。shell 命令只允许只读、安全的本地仓库检查或目录查看。".to_string(),
         ),
-    }
+        ChatMessage::user(format!(
+            "workspace_root: {}\nuser_request: {}\n请输出单个 JSON 对象。",
+            workspace_root, text
+        )),
+    ]
 }
 
-fn build_dingtalk_command(command: &AllowedDingTalkCommand, workspace_root: &str) -> Command {
+fn parse_planned_command(
+    response: &str,
+    workspace_root: &str,
+) -> Result<Command, Box<dyn std::error::Error + Send + Sync>> {
+    let planned: PlannedDingTalkCommand =
+        serde_json::from_str(response).map_err(|e| format!("LLM 返回了无效 JSON：{}", e))?;
+
+    validate_planned_command(&planned.command, workspace_root)?;
+    Ok(planned.command)
+}
+
+fn validate_planned_command(
+    command: &Command,
+    workspace_root: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match command {
-        AllowedDingTalkCommand::List { path, recursive } => Command::File(FileCommand::List {
-            path: workspace_path(workspace_root, path),
-            recursive: *recursive,
-            pattern: None,
-        }),
-        AllowedDingTalkCommand::Search { path, pattern } => Command::File(FileCommand::Search {
-            pattern: pattern.clone(),
-            path: workspace_path(workspace_root, path),
-            recursive: true,
-            content_pattern: None,
-        }),
-        AllowedDingTalkCommand::Read { path, limit } => Command::File(FileCommand::Read {
-            path: workspace_path(workspace_root, path),
-            limit: Some(limit.unwrap_or(4000)),
-            offset: None,
-        }),
-        AllowedDingTalkCommand::Info { path } => Command::File(FileCommand::Info {
-            path: workspace_path(workspace_root, path),
-        }),
-        AllowedDingTalkCommand::Exists { path } => Command::File(FileCommand::Exists {
-            path: workspace_path(workspace_root, path),
-        }),
+        Command::File(file_command) => validate_file_command(file_command, workspace_root),
+        Command::Shell(shell_command) => validate_shell_command(shell_command, workspace_root),
+        _ => Err("仅允许规划 FileCommand 或 ShellCommand。".into()),
     }
 }
 
-fn workspace_path(workspace_root: &str, relative_path: &str) -> String {
-    let mut buf = PathBuf::from(workspace_root);
-    if relative_path != "." {
-        buf.push(relative_path);
+fn validate_file_command(
+    command: &FileCommand,
+    workspace_root: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match command {
+        FileCommand::Read { path, .. }
+        | FileCommand::Write { path, .. }
+        | FileCommand::Append { path, .. }
+        | FileCommand::Delete { path, .. }
+        | FileCommand::List { path, .. }
+        | FileCommand::Search { path, .. }
+        | FileCommand::Info { path }
+        | FileCommand::CreateDir { path, .. }
+        | FileCommand::Exists { path } => {
+            ensure_workspace_path(path, workspace_root)?;
+        }
+        FileCommand::Copy { from, to, .. } | FileCommand::Move { from, to, .. } => {
+            ensure_workspace_path(from, workspace_root)?;
+            ensure_workspace_path(to, workspace_root)?;
+        }
     }
-    buf.to_string_lossy().to_string()
+
+    Ok(())
+}
+
+fn validate_shell_command(
+    command: &uhorse_protocol::ShellCommand,
+    workspace_root: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(cwd) = command.cwd.as_deref() {
+        ensure_workspace_path(cwd, workspace_root)?;
+    }
+
+    let command_text = std::iter::once(command.command.as_str())
+        .chain(command.args.iter().map(|arg| arg.as_str()))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+
+    for pattern in [
+        "git reset --hard",
+        "git clean -fd",
+        "git clean -f -d",
+        "git checkout --",
+        "git restore --source",
+        "git push --force",
+        "git push -f",
+    ] {
+        if command_text.contains(pattern) {
+            return Err(format!("禁止危险 git 命令：{}", pattern).into());
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_workspace_path(
+    value: &str,
+    workspace_root: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let root = PathBuf::from(workspace_root);
+    let path = PathBuf::from(value);
+
+    if path.is_absolute() {
+        if !path.starts_with(&root) {
+            return Err("路径必须位于 workspace 内。".into());
+        }
+        return Ok(());
+    }
+
+    normalize_relative_path(value)?;
+    Ok(())
 }
 
 fn normalize_relative_path(
@@ -478,25 +500,9 @@ fn normalize_relative_path(
     }
 }
 
-fn extract_sender_user_id(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()?
-        .get("senderId")?
-        .as_str()
-        .map(|value| value.to_string())
-}
-
-fn extract_conversation_type(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()?
-        .get("conversationType")?
-        .as_str()
-        .map(|value| value.to_string())
-}
-
 pub async fn reply_task_result(
     state: Arc<WebState>,
-    task_result: crate::task_scheduler::TaskResult,
+    task_result: TaskResult,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let Some(channel) = state.dingtalk_channel.as_ref() else {
         warn!("Skip DingTalk reply because channel is unavailable");
@@ -512,7 +518,7 @@ pub async fn reply_task_result(
         return Ok(());
     };
 
-    let reply_text = format_task_result_message(&task_result.result);
+    let reply_text = build_task_result_reply_text(&state, &task_result).await;
     send_dingtalk_reply(channel, &route, &reply_text).await?;
 
     info!("Replied DingTalk task result for {}", task_result.task_id);
@@ -597,6 +603,64 @@ async fn send_dingtalk_reply(
     }
 
     Ok(())
+}
+
+async fn build_task_result_reply_text(state: &Arc<WebState>, task_result: &TaskResult) -> String {
+    let Some(completed_task) = state.hub.get_completed_task(&task_result.task_id).await else {
+        return format_task_result_message(&task_result.result);
+    };
+
+    summarize_task_result_or_fallback(state, &completed_task).await
+}
+
+async fn summarize_task_result_or_fallback(
+    state: &Arc<WebState>,
+    completed_task: &CompletedTask,
+) -> String {
+    match summarize_task_result(state, completed_task).await {
+        Ok(summary) => summary,
+        Err(error) => {
+            warn!(
+                "Failed to summarize task result with LLM for {}: {}",
+                completed_task.task_id, error
+            );
+            format_task_result_message(&completed_task.result)
+        }
+    }
+}
+
+async fn summarize_task_result(
+    state: &Arc<WebState>,
+    completed_task: &CompletedTask,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(llm_client) = state.llm_client.as_ref() else {
+        return Err("LLM client is not configured".into());
+    };
+
+    let response = llm_client
+        .chat_completion(build_result_summary_messages(completed_task))
+        .await?;
+
+    let summary = response.trim();
+    if summary.is_empty() {
+        return Err("LLM returned empty summary".into());
+    }
+
+    Ok(summary.to_string())
+}
+
+fn build_result_summary_messages(completed_task: &CompletedTask) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage::system(
+            "你是 DingTalk 任务执行结果总结助手。请基于用户原始意图、实际执行命令和执行结果，生成简短、自然的中文回复。要求：1）直接回答结果；2）成功时说明关键发现；3）失败时说明失败原因；4）不要输出 Markdown 代码块；5）不要编造未执行的信息。".to_string(),
+        ),
+        ChatMessage::user(format!(
+            "user_intent: {}\ncommand: {}\nresult: {}",
+            completed_task.context.intent.clone().unwrap_or_default(),
+            serde_json::to_string(&completed_task.command).unwrap_or_else(|_| "{}".to_string()),
+            serde_json::to_string(&completed_task.result).unwrap_or_else(|_| "{}".to_string())
+        )),
+    ]
 }
 
 fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String {
@@ -748,11 +812,169 @@ pub async fn start_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
+    use tempfile::tempdir;
+    use uhorse_protocol::{CommandResult, ExecutionError, ShellCommand};
+
+    use crate::HubConfig;
+
+    struct StubLlmClient {
+        response: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMClient for StubLlmClient {
+        async fn chat_completion(&self, _messages: Vec<ChatMessage>) -> Result<String> {
+            Ok(self.response.clone())
+        }
+    }
+
+    struct FailingLlmClient;
+
+    #[async_trait::async_trait]
+    impl LLMClient for FailingLlmClient {
+        async fn chat_completion(&self, _messages: Vec<ChatMessage>) -> Result<String> {
+            Err(anyhow::anyhow!("llm failed"))
+        }
+    }
 
     #[test]
     fn test_web_config_default() {
         let config = WebConfig::default();
         assert_eq!(config.port, 3000);
         assert!(config.enable_cors);
+    }
+
+    #[test]
+    fn test_parse_planned_command_accepts_workspace_file_command() {
+        let workspace = "/tmp/workspace";
+        let response = format!(
+            r#"{{"command":{{"type":"file","action":"exists","path":"{}/Cargo.toml"}}}}"#,
+            workspace
+        );
+
+        let command = parse_planned_command(&response, workspace).unwrap();
+        match command {
+            Command::File(FileCommand::Exists { path }) => {
+                assert_eq!(path, "/tmp/workspace/Cargo.toml");
+            }
+            other => panic!("unexpected command: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_planned_command_rejects_invalid_json() {
+        let error = parse_planned_command("not-json", "/tmp/workspace").unwrap_err();
+        assert!(error.to_string().contains("无效 JSON"));
+    }
+
+    #[test]
+    fn test_parse_planned_command_rejects_path_outside_workspace() {
+        let response = r#"{"command":{"type":"file","action":"exists","path":"/etc/passwd"}}"#;
+        let error = parse_planned_command(response, "/tmp/workspace").unwrap_err();
+        assert!(error.to_string().contains("workspace"));
+    }
+
+    #[test]
+    fn test_parse_planned_command_rejects_dangerous_git_shell() {
+        let response = r#"{"command":{"type":"shell","command":"git","args":["reset","--hard"],"cwd":"/tmp/workspace","env":{},"timeout":30,"capture_stderr":true}}"#;
+        let error = parse_planned_command(response, "/tmp/workspace").unwrap_err();
+        assert!(error.to_string().contains("危险 git"));
+    }
+
+    #[tokio::test]
+    async fn test_summarize_task_result_or_fallback_falls_back_when_llm_fails() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(Arc::new(hub), None, Some(Arc::new(FailingLlmClient))));
+        let completed_task = CompletedTask {
+            task_id: TaskId::from_string("task-fallback"),
+            command: Command::File(FileCommand::Exists {
+                path: "/tmp/workspace/file.txt".to_string(),
+            }),
+            context: TaskContext::new(
+                UserId::from_string("user-1"),
+                uhorse_protocol::SessionId::from_string("session-1"),
+                "dingtalk",
+            )
+            .with_intent("检查文件是否存在"),
+            node_id: uhorse_protocol::NodeId::from_string("node-1"),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            result: CommandResult::success(CommandOutput::text("raw output")),
+        };
+
+        let reply = summarize_task_result_or_fallback(&state, &completed_task).await;
+        assert_eq!(reply, "raw output");
+    }
+
+    #[tokio::test]
+    async fn test_summarize_task_result_or_fallback_uses_llm_summary() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: "总结结果".to_string(),
+            })),
+        ));
+        let completed_task = CompletedTask {
+            task_id: TaskId::from_string("task-summary"),
+            command: Command::File(FileCommand::Exists {
+                path: "/tmp/workspace/file.txt".to_string(),
+            }),
+            context: TaskContext::new(
+                UserId::from_string("user-1"),
+                uhorse_protocol::SessionId::from_string("session-1"),
+                "dingtalk",
+            )
+            .with_intent("检查文件是否存在"),
+            node_id: uhorse_protocol::NodeId::from_string("node-1"),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            result: CommandResult::success(CommandOutput::text("raw output")),
+        };
+
+        let reply = summarize_task_result_or_fallback(&state, &completed_task).await;
+        assert_eq!(reply, "总结结果");
+    }
+
+    #[tokio::test]
+    async fn test_plan_dingtalk_command_uses_llm_output() {
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: format!(
+                    r#"{{"command":{{"type":"file","action":"exists","path":"{}/Cargo.toml"}}}}"#,
+                    workspace_root
+                ),
+            })),
+        ));
+
+        let command = plan_dingtalk_command(&state, "检查 Cargo.toml 是否存在", &workspace_root)
+            .await
+            .unwrap();
+
+        match command {
+            Command::File(FileCommand::Exists { path }) => {
+                assert_eq!(path, format!("{}/Cargo.toml", workspace_root));
+            }
+            other => panic!("unexpected command: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_validate_shell_command_allows_workspace_cwd_none() {
+        let command = ShellCommand::new("pwd");
+        assert!(validate_shell_command(&command, "/tmp/workspace").is_ok());
+    }
+
+    #[test]
+    fn test_format_task_result_message_failure() {
+        let result = CommandResult::failure(ExecutionError::execution_failed("boom"));
+        assert_eq!(format_task_result_message(&result), "执行失败：boom");
     }
 }

@@ -228,6 +228,11 @@ heartbeat_interval_secs = 30
 status_interval_secs = 60
 max_concurrent_tasks = 5
 tags = ["default", "macos"]
+git_protection_enabled = true
+watch_workspace = true
+auto_git_add_new_files = true
+require_git_repo = true
+internal_work_dir = ".uhorse"
 
 [connection]
 hub_url = "wss://hub.example.com/ws"
@@ -237,6 +242,16 @@ connect_timeout_secs = 10
 max_reconnect_attempts = 10
 auth_token = ""
 ```
+
+### Node 工作区保护
+
+当前 `uhorse-node` 默认会把执行限制在 `workspace_path` 内，并额外启用以下行为：
+
+- `git_protection_enabled = true`：拒绝危险 git 命令
+- `watch_workspace = true`：监听工作区新增文件
+- `auto_git_add_new_files = true`：对新增文件执行本地 `git add`
+- `require_git_repo = true`：要求工作区本身就是 git 仓库
+- `internal_work_dir = ".uhorse"`：内部临时代码目录，默认不会被 watcher 自动加入 git
 
 ### Node CLI 参数
 
@@ -281,12 +296,8 @@ agent_id = 123456789
 
 - 当前主路径是 **Stream 模式**，不依赖公网 webhook 才能接收消息。
 - Hub 仍保留 `GET/POST /api/v1/channels/dingtalk/webhook` 路由，用于兼容或辅助测试。
-- 当前允许从 DingTalk 触发的管理命令是白名单：
-  - `list` / `ls`
-  - `search`
-  - `read` / `cat`
-  - `info`
-  - `exists`
+- DingTalk 文本会先经过 LLM 规划，再转换为单个 `FileCommand` 或 `ShellCommand`。
+- Hub 会在本地下发前校验路径范围，并拒绝危险 git 命令。
 
 ### 启用后会发生什么
 
@@ -294,13 +305,14 @@ agent_id = 123456789
 
 1. 初始化 `DingTalkChannel`
 2. 订阅 DingTalk 入站消息流
-3. 把入站文本解析为 Hub 任务
-4. 在任务完成后优先通过 `session_webhook` 原路回发结果；当 webhook 不可用或已过期时，回退到群消息或单聊发送
+3. 把入站自然语言交给 LLM 规划为安全命令
+4. 把通过本地校验的命令提交为 Hub 任务
+5. 在任务完成后优先通过 LLM 总结结果，再经 `session_webhook` 原路回发；当 webhook 不可用或已过期时，回退到群消息或单聊发送
 
 当前主线已经完成一次真实企业租户验证：
 
-- 非法命令会即时错误回显
-- 合法 `exists` 命令会把 JSON 结果原路回传到原会话
+- 非法或不安全请求会即时错误回显
+- 合法请求的执行结果会原路回传到原会话
 
 ---
 

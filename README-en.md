@@ -55,7 +55,10 @@ These docs are now aligned to what is actually implemented in the repository. Th
 | Node → Hub result return | ✅ | Node sends full `NodeToHub::TaskResult` |
 | Local roundtrip verification | ✅ | covered by `test_local_hub_node_roundtrip_file_exists` |
 | DingTalk Stream integration | ✅ | Stream mode is the intended path; no public webhook is required for message intake |
-| Real DingTalk tenant verification | ✅ | validated with a real enterprise tenant: invalid commands return immediate errors and a valid `exists` command round-trips JSON back to the original conversation |
+| DingTalk natural-language planning | ✅ | Hub uses an LLM to plan natural-language requests into locally validated `FileCommand` / `ShellCommand` values |
+| DingTalk natural-language result summary | ✅ | Hub summarizes `CompletedTask` results with an LLM and falls back to structured text when summarization fails |
+| Node workspace protection and git automation | ✅ | Node stays inside the workspace by default, blocks dangerous git commands, and auto-stages newly created files |
+| Real DingTalk tenant verification | ✅ | the message intake and original-conversation reply path have been validated with a real enterprise tenant |
 
 ## Quick Start
 
@@ -148,8 +151,9 @@ The current `uhorse-hub` runtime already wires DingTalk into the main execution 
 
 - Recommended mode: **Stream mode**
 - Benefit: no public IP or public webhook is required for inbound message delivery
-- Current command allowlist: `list` / `ls`, `search`, `read` / `cat`, `info`, `exists`
-- Hub can route Node execution results back to the original DingTalk conversation
+- Hub first uses an LLM to plan natural-language requests into locally validated `FileCommand` / `ShellCommand` values
+- Local validation keeps paths inside the workspace and rejects dangerous git commands
+- Hub prefers LLM-generated result summaries before replying to the original DingTalk conversation, and falls back to structured text if summarization fails
 
 To enable DingTalk, use a unified config file. See [CONFIG-en.md](CONFIG-en.md) and [CHANNELS-en.md](CHANNELS-en.md).
 

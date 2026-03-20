@@ -7,11 +7,21 @@ use crate::workspace::Workspace;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
-use uhorse_protocol::{Command, TaskContext};
+use tracing::{debug, info};
+use uhorse_protocol::{CodeCommand, Command, ShellCommand, TaskContext};
+
+/// 默认拒绝的危险 git 命令片段
+const DANGEROUS_GIT_PATTERNS: &[&str] = &[
+    "git reset --hard",
+    "git clean -fd",
+    "git clean -f -d",
+    "git checkout --",
+    "git restore --source",
+    "git push --force",
+    "git push -f",
+];
 
 /// 权限检查结果
 #[derive(Debug, Clone)]
@@ -125,12 +135,10 @@ impl PermissionRule {
             return false;
         }
 
-        // 检查资源模式
         if !self.resource.matches(command, context) {
             return false;
         }
 
-        // 检查操作
         let required_actions = self.get_required_actions(command);
         for required in required_actions {
             if !self.actions.contains(&required) {
@@ -138,7 +146,6 @@ impl PermissionRule {
             }
         }
 
-        // 检查条件
         for condition in &self.conditions {
             if !condition.evaluate(context) {
                 return false;
@@ -184,73 +191,42 @@ pub enum ResourcePattern {
     AllowAll,
 
     /// 精确路径
-    ExactPath {
-        /// 路径
-        path: String,
-    },
+    ExactPath { path: String },
 
     /// 路径前缀
-    PathPrefix {
-        /// 前缀
-        prefix: String,
-    },
+    PathPrefix { prefix: String },
 
     /// Glob 模式
-    Glob {
-        /// 模式
-        pattern: String,
-    },
+    Glob { pattern: String },
 
     /// 正则表达式
-    Regex {
-        /// 表达式
-        pattern: String,
-    },
+    Regex { pattern: String },
 
     /// 命令类型
-    CommandType {
-        /// 允许的命令类型
-        types: Vec<String>,
-    },
+    CommandType { types: Vec<String> },
 
     /// 组合模式（AND）
-    All {
-        /// 子模式
-        patterns: Vec<ResourcePattern>,
-    },
+    All { patterns: Vec<ResourcePattern> },
 
     /// 组合模式（OR）
-    Any {
-        /// 子模式
-        patterns: Vec<ResourcePattern>,
-    },
+    Any { patterns: Vec<ResourcePattern> },
 }
 
 impl ResourcePattern {
     /// 检查是否匹配命令
-    pub fn matches(&self, command: &Command, _context: &TaskContext) -> bool {
+    pub fn matches(&self, command: &Command, context: &TaskContext) -> bool {
         match self {
             Self::AllowAll => true,
-
             Self::ExactPath { path } => self.command_involves_path(command, path),
-
             Self::PathPrefix { prefix } => self.command_path_starts_with(command, prefix),
-
             Self::Glob { pattern } => self.command_path_matches_glob(command, pattern),
-
-            Self::Regex { pattern } => {
-                // 简化处理，实际应该使用正则表达式
-                self.command_path_contains(command, pattern)
-            }
-
+            Self::Regex { pattern } => self.command_path_contains(command, pattern),
             Self::CommandType { types } => {
                 let cmd_type = format!("{:?}", command.command_type()).to_lowercase();
                 types.iter().any(|t| t.to_lowercase() == cmd_type)
             }
-
-            Self::All { patterns } => patterns.iter().all(|p| p.matches(command, _context)),
-
-            Self::Any { patterns } => patterns.iter().any(|p| p.matches(command, _context)),
+            Self::All { patterns } => patterns.iter().all(|p| p.matches(command, context)),
+            Self::Any { patterns } => patterns.iter().any(|p| p.matches(command, context)),
         }
     }
 
@@ -259,6 +235,11 @@ impl ResourcePattern {
             Command::File(file_cmd) => file_cmd.target_path() == target_path,
             Command::Shell(shell_cmd) => shell_cmd
                 .cwd
+                .as_ref()
+                .map(|p| p == target_path)
+                .unwrap_or(false),
+            Command::Code(code_cmd) => code_cmd
+                .workdir
                 .as_ref()
                 .map(|p| p == target_path)
                 .unwrap_or(false),
@@ -271,6 +252,11 @@ impl ResourcePattern {
             Command::File(file_cmd) => file_cmd.target_path().starts_with(prefix),
             Command::Shell(shell_cmd) => shell_cmd
                 .cwd
+                .as_ref()
+                .map(|p| p.starts_with(prefix))
+                .unwrap_or(false),
+            Command::Code(code_cmd) => code_cmd
+                .workdir
                 .as_ref()
                 .map(|p| p.starts_with(prefix))
                 .unwrap_or(false),
@@ -314,36 +300,19 @@ pub enum Action {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Condition {
     /// 时间范围
-    TimeRange {
-        /// 开始时间 (HH:MM)
-        start: String,
-        /// 结束时间 (HH:MM)
-        end: String,
-    },
+    TimeRange { start: String, end: String },
 
     /// 用户限制
-    UserRestriction {
-        /// 允许的用户 ID
-        allowed_users: Vec<String>,
-    },
+    UserRestriction { allowed_users: Vec<String> },
 
     /// 大小限制
-    SizeLimit {
-        /// 最大字节数
-        max_bytes: u64,
-    },
+    SizeLimit { max_bytes: u64 },
 
     /// 工作日限制
-    WeekdayRestriction {
-        /// 允许的日期（0=周日, 1=周一, ..., 6=周六）
-        allowed_days: Vec<u8>,
-    },
+    WeekdayRestriction { allowed_days: Vec<u8> },
 
     /// IP 白名单
-    IpWhitelist {
-        /// 允许的 IP 地址
-        allowed_ips: Vec<String>,
-    },
+    IpWhitelist { allowed_ips: Vec<String> },
 }
 
 impl Condition {
@@ -355,27 +324,17 @@ impl Condition {
                 let current_time = now.format("%H:%M").to_string();
                 current_time >= *start && current_time <= *end
             }
-
             Self::UserRestriction { allowed_users } => {
                 allowed_users.contains(&context.user_id.as_str().to_string())
             }
-
-            Self::SizeLimit { max_bytes } => {
-                // 简化处理，实际需要检查命令涉及的数据大小
-                true
-            }
-
+            Self::SizeLimit { .. } => true,
             Self::WeekdayRestriction { allowed_days } => {
                 use chrono::Datelike;
                 let now = Utc::now();
                 let weekday = now.weekday().num_days_from_sunday() as u8;
                 allowed_days.contains(&weekday)
             }
-
-            Self::IpWhitelist { allowed_ips } => {
-                // 简化处理，实际需要检查客户端 IP
-                true
-            }
+            Self::IpWhitelist { .. } => true,
         }
     }
 }
@@ -416,18 +375,13 @@ pub enum ApprovalStatus {
     Pending,
     /// 已批准
     Approved {
-        /// 审批人
         approver: String,
-        /// 审批时间
         approved_at: DateTime<Utc>,
     },
     /// 已拒绝
     Rejected {
-        /// 审批人
         rejector: String,
-        /// 拒绝时间
         rejected_at: DateTime<Utc>,
-        /// 拒绝原因
         reason: String,
     },
     /// 已过期
@@ -443,6 +397,9 @@ pub struct PermissionManager {
     /// 工作空间
     workspace: Arc<Workspace>,
 
+    /// 是否启用 git 保护
+    git_protection_enabled: bool,
+
     /// 待审批请求
     pending_approvals: Arc<RwLock<HashMap<String, ApprovalRequest>>>,
 
@@ -452,12 +409,13 @@ pub struct PermissionManager {
 
 impl PermissionManager {
     /// 创建新的权限管理器
-    pub fn new(workspace: Arc<Workspace>) -> Self {
+    pub fn new(workspace: Arc<Workspace>, git_protection_enabled: bool) -> Self {
         Self {
             rules: Arc::new(RwLock::new(Vec::new())),
             workspace,
+            git_protection_enabled,
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
-            approval_timeout_secs: 300, // 5 分钟
+            approval_timeout_secs: 300,
         }
     }
 
@@ -465,7 +423,6 @@ impl PermissionManager {
     pub async fn add_rule(&self, rule: PermissionRule) {
         let mut rules = self.rules.write().await;
         rules.push(rule);
-        // 按优先级排序
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     }
 
@@ -479,20 +436,21 @@ impl PermissionManager {
 
     /// 检查命令权限
     pub async fn check(&self, command: &Command, context: &TaskContext) -> PermissionResult {
-        // 1. 检查工作空间限制
-        if !self.check_workspace(command) {
-            return PermissionResult::Denied("Operation outside workspace".to_string());
+        if let Some(reason) = self.check_workspace(command) {
+            return PermissionResult::Denied(reason);
         }
 
-        // 2. 检查权限规则
-        let rules = self.rules.read().await;
+        if let Some(reason) = self.check_git_safety(command) {
+            return PermissionResult::Denied(reason);
+        }
 
+        let rules = self.rules.read().await;
         for rule in rules.iter() {
             if rule.matches(command, context) {
                 if rule.require_approval {
                     let request_id = uuid::Uuid::new_v4().to_string();
                     return PermissionResult::RequiresApproval {
-                        request_id: request_id.clone(),
+                        request_id,
                         reason: format!("Rule '{}' requires approval", rule.name),
                     };
                 }
@@ -500,41 +458,97 @@ impl PermissionManager {
             }
         }
 
-        // 3. 默认拒绝
         PermissionResult::Denied("No matching permission rule".to_string())
     }
 
     /// 检查工作空间限制
-    fn check_workspace(&self, command: &Command) -> bool {
+    fn check_workspace(&self, command: &Command) -> Option<String> {
         match command {
-            Command::File(file_cmd) => {
-                let path = file_cmd.target_path();
-                let is_write = matches!(
-                    file_cmd,
-                    uhorse_protocol::FileCommand::Write { .. }
-                        | uhorse_protocol::FileCommand::Append { .. }
-                        | uhorse_protocol::FileCommand::Delete { .. }
-                        | uhorse_protocol::FileCommand::Move { .. }
-                        | uhorse_protocol::FileCommand::CreateDir { .. }
-                );
-                self.workspace.can_access(path, is_write).unwrap_or(false)
-            }
-            Command::Shell(shell_cmd) => {
-                if let Some(cwd) = &shell_cmd.cwd {
-                    self.workspace.can_execute(cwd)
-                } else {
-                    true
+            Command::File(file_cmd) => match file_cmd {
+                uhorse_protocol::FileCommand::Read { path, .. }
+                | uhorse_protocol::FileCommand::List { path, .. }
+                | uhorse_protocol::FileCommand::Info { path }
+                | uhorse_protocol::FileCommand::Exists { path } => {
+                    self.validate_file_path(path, false)
                 }
-            }
-            Command::Code(code_cmd) => {
-                if let Some(workdir) = &code_cmd.workdir {
-                    self.workspace.can_execute(workdir)
-                } else {
-                    true
+                uhorse_protocol::FileCommand::Search { path, .. } => {
+                    self.validate_file_path(path, false)
                 }
-            }
-            _ => true, // 其他命令不涉及文件系统
+                uhorse_protocol::FileCommand::Write { path, .. }
+                | uhorse_protocol::FileCommand::Append { path, .. }
+                | uhorse_protocol::FileCommand::Delete { path, .. }
+                | uhorse_protocol::FileCommand::CreateDir { path, .. } => {
+                    self.validate_file_path(path, true)
+                }
+                uhorse_protocol::FileCommand::Copy { from, to, .. } => self
+                    .validate_file_path(from, false)
+                    .or_else(|| self.validate_file_path(to, true)),
+                uhorse_protocol::FileCommand::Move { from, to, .. } => self
+                    .validate_file_path(from, true)
+                    .or_else(|| self.validate_file_path(to, true)),
+            },
+            Command::Shell(shell_cmd) => self.validate_shell_workspace(shell_cmd),
+            Command::Code(code_cmd) => self.validate_code_workspace(code_cmd),
+            _ => None,
         }
+    }
+
+    fn validate_file_path(&self, path: &str, write: bool) -> Option<String> {
+        match self.workspace.can_access(path, write) {
+            Ok(true) => None,
+            Ok(false) => Some(format!("Operation outside workspace: {}", path)),
+            Err(error) => Some(error.to_string()),
+        }
+    }
+
+    fn validate_shell_workspace(&self, shell_cmd: &ShellCommand) -> Option<String> {
+        let cwd = shell_cmd
+            .cwd
+            .clone()
+            .unwrap_or_else(|| self.workspace.root().to_string_lossy().to_string());
+
+        match self.workspace.can_access(&cwd, false) {
+            Ok(true) => None,
+            Ok(false) => Some(format!("Shell working directory outside workspace: {}", cwd)),
+            Err(error) => Some(error.to_string()),
+        }
+    }
+
+    fn validate_code_workspace(&self, code_cmd: &CodeCommand) -> Option<String> {
+        let workdir = code_cmd
+            .workdir
+            .clone()
+            .unwrap_or_else(|| self.workspace.root().to_string_lossy().to_string());
+
+        match self.workspace.can_access(&workdir, false) {
+            Ok(true) => None,
+            Ok(false) => Some(format!("Code working directory outside workspace: {}", workdir)),
+            Err(error) => Some(error.to_string()),
+        }
+    }
+
+    fn check_git_safety(&self, command: &Command) -> Option<String> {
+        if !self.git_protection_enabled {
+            return None;
+        }
+
+        let Command::Shell(shell_cmd) = command else {
+            return None;
+        };
+
+        let normalized = std::iter::once(shell_cmd.command.as_str())
+            .chain(shell_cmd.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+
+        for pattern in DANGEROUS_GIT_PATTERNS {
+            if normalized.contains(pattern) {
+                return Some(format!("Dangerous git command is denied: {}", pattern));
+            }
+        }
+
+        None
     }
 
     /// 创建审批请求
@@ -577,7 +591,6 @@ impl PermissionManager {
         if let Some(request) = pending.get_mut(request_id) {
             let now = Utc::now();
 
-            // 检查是否过期
             if now > request.expires_at {
                 request.status = ApprovalStatus::Expired;
                 return Err(NodeError::Permission(
@@ -635,7 +648,6 @@ impl PermissionManager {
 
     /// 加载默认规则
     pub async fn load_default_rules(&self) {
-        // 规则 1: 允许读取工作空间内的文件
         self.add_rule(
             PermissionRule::new("default-read", "Allow reading files in workspace")
                 .with_resource(ResourcePattern::AllowAll)
@@ -645,32 +657,29 @@ impl PermissionManager {
         )
         .await;
 
-        // 规则 2: 写入需要审批
         self.add_rule(
-            PermissionRule::new("default-write", "Write operations require approval")
+            PermissionRule::new("default-write", "Allow writing files in workspace")
                 .with_resource(ResourcePattern::AllowAll)
                 .with_actions(vec![Action::Write])
-                .require_approval(true)
+                .require_approval(false)
                 .with_priority(2),
         )
         .await;
 
-        // 规则 3: 删除需要审批
         self.add_rule(
-            PermissionRule::new("default-delete", "Delete operations require approval")
+            PermissionRule::new("default-delete", "Allow deleting files in workspace")
                 .with_resource(ResourcePattern::AllowAll)
                 .with_actions(vec![Action::Delete])
-                .require_approval(true)
+                .require_approval(false)
                 .with_priority(3),
         )
         .await;
 
-        // 规则 4: 执行需要审批
         self.add_rule(
-            PermissionRule::new("default-execute", "Execute operations require approval")
+            PermissionRule::new("default-execute", "Allow execution in workspace")
                 .with_resource(ResourcePattern::AllowAll)
                 .with_actions(vec![Action::Execute])
-                .require_approval(true)
+                .require_approval(false)
                 .with_priority(4),
         )
         .await;
@@ -683,6 +692,7 @@ impl PermissionManager {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use uhorse_protocol::{CodeLanguage, FileCommand};
 
     fn create_test_context() -> TaskContext {
         TaskContext::new(
@@ -693,19 +703,110 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_permission_manager() {
+    async fn test_permission_manager_allows_workspace_file_read() {
         let temp = TempDir::new().unwrap();
-        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
-        let manager = PermissionManager::new(workspace);
+        let file = temp.path().join("test.txt");
+        std::fs::write(&file, "ok").unwrap();
 
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
         manager.load_default_rules().await;
 
         let context = create_test_context();
-        let command = Command::File(uhorse_protocol::FileCommand::Exists {
-            path: temp.path().to_string_lossy().to_string(),
+        let command = Command::File(FileCommand::Exists {
+            path: file.to_string_lossy().to_string(),
         });
 
         let result = manager.check(&command, &context).await;
         assert!(matches!(result, PermissionResult::Allowed));
+    }
+
+    #[tokio::test]
+    async fn test_shell_without_cwd_defaults_to_workspace_root() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
+        manager.load_default_rules().await;
+
+        let context = create_test_context();
+        let command = Command::Shell(ShellCommand::new("pwd"));
+
+        let result = manager.check(&command, &context).await;
+        assert!(matches!(result, PermissionResult::Allowed));
+    }
+
+    #[tokio::test]
+    async fn test_code_without_workdir_defaults_to_workspace_root() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
+        manager.load_default_rules().await;
+
+        let context = create_test_context();
+        let command = Command::Code(CodeCommand::new(CodeLanguage::Python, "print('ok')"));
+
+        let result = manager.check(&command, &context).await;
+        assert!(matches!(result, PermissionResult::Allowed));
+    }
+
+    #[tokio::test]
+    async fn test_workspace_outside_command_is_denied() {
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
+        manager.load_default_rules().await;
+
+        let context = create_test_context();
+        let command = Command::Shell(ShellCommand::new("pwd").with_cwd(
+            outside.path().to_string_lossy().to_string(),
+        ));
+
+        let result = manager.check(&command, &context).await;
+        assert!(matches!(result, PermissionResult::Denied(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dangerous_git_command_is_denied() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
+        manager.load_default_rules().await;
+
+        let context = create_test_context();
+        let command = Command::Shell(ShellCommand::new("git").with_args(vec![
+            "reset".to_string(),
+            "--hard".to_string(),
+        ]));
+
+        let result = manager.check(&command, &context).await;
+        match result {
+            PermissionResult::Denied(reason) => {
+                assert!(reason.contains("Dangerous git command"));
+            }
+            other => panic!("unexpected result: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_copy_destination_is_checked_as_write() {
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let source = temp.path().join("source.txt");
+        std::fs::write(&source, "ok").unwrap();
+
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
+        manager.load_default_rules().await;
+
+        let context = create_test_context();
+        let command = Command::File(FileCommand::Copy {
+            from: source.to_string_lossy().to_string(),
+            to: outside.path().join("target.txt").to_string_lossy().to_string(),
+            overwrite: false,
+        });
+
+        let result = manager.check(&command, &context).await;
+        assert!(matches!(result, PermissionResult::Denied(_)));
     }
 }

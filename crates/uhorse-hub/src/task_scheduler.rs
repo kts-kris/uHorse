@@ -564,6 +564,10 @@ impl TaskScheduler {
         None
     }
 
+    pub async fn get_completed_task(&self, task_id: &TaskId) -> Option<CompletedTask> {
+        self.completed_tasks.read().await.get(task_id).cloned()
+    }
+
     /// 获取统计信息
     pub async fn get_stats(&self) -> SchedulerStats {
         let pending = self.pending_tasks.read().await;
