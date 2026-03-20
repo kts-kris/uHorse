@@ -137,7 +137,7 @@ jobs:
           VERSION="${{ needs.resolve-version.outputs.version }}"
           ARCHIVE_NAME="uhorse-hub-${VERSION}-${{ matrix.target }}"
 
-          mkdir -p package
+          rm -rf package && mkdir -p package
           cp target/${{ matrix.target }}/release/uhorse-hub package/
           cp README.md package/ 2>/dev/null || true
           cp CHANGELOG.md package/ 2>/dev/null || true
@@ -152,7 +152,7 @@ jobs:
           VERSION="${{ needs.resolve-version.outputs.version }}"
           ARCHIVE_NAME="uhorse-node-${VERSION}-${{ matrix.target }}"
 
-          mkdir -p package
+          rm -rf package && mkdir -p package
           cp target/${{ matrix.target }}/release/uhorse-node package/
           cp README.md package/ 2>/dev/null || true
           cp CHANGELOG.md package/ 2>/dev/null || true
@@ -167,6 +167,7 @@ jobs:
           $VERSION = "${{ needs.resolve-version.outputs.version }}"
           $ARCHIVE_NAME = "uhorse-hub-${VERSION}-${{ matrix.target }}"
 
+          Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path package -Force
           Copy-Item target/${{ matrix.target }}/release/uhorse-hub.exe package/
           Copy-Item README.md package/ -ErrorAction SilentlyContinue
@@ -182,6 +183,7 @@ jobs:
           $VERSION = "${{ needs.resolve-version.outputs.version }}"
           $ARCHIVE_NAME = "uhorse-node-${VERSION}-${{ matrix.target }}"
 
+          Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path package -Force
           Copy-Item target/${{ matrix.target }}/release/uhorse-node.exe package/
           Copy-Item README.md package/ -ErrorAction SilentlyContinue
@@ -268,13 +270,20 @@ jobs:
             echo EOF
           } >> $GITHUB_OUTPUT
 
-      - name: Create tag (manual trigger)
+      - name: Create tag if missing (manual trigger)
         if: github.event_name == 'workflow_dispatch'
         run: |
+          TAG="${{ needs.resolve-version.outputs.tag }}"
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists, skip creating it."
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ needs.resolve-version.outputs.tag }}" -m "Release ${{ needs.resolve-version.outputs.version }}"
-          git push origin "${{ needs.resolve-version.outputs.tag }}"
+          git tag -a "${TAG}" -m "Release ${{ needs.resolve-version.outputs.version }}"
+          git push origin "${TAG}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
