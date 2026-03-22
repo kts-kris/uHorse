@@ -24,7 +24,7 @@
 //!     ├── {agent_id}/
 //!     │   └── sessions/
 //!     │       └── {session_key}/
-//!     │           └── state.jsonl
+//!     │           └── state.json
 //!     └── main/
 //!         └── sessions/
 //! ```
@@ -73,6 +73,7 @@ impl Default for AgentScopeConfig {
 /// Agent 作用域
 ///
 /// 管理 Agent 的独立 workspace、文件注入和会话存储。
+#[derive(Clone)]
 pub struct AgentScope {
     /// 配置
     config: AgentScopeConfig,
@@ -176,15 +177,21 @@ impl AgentScope {
             .join(format!("{}.md", today))
     }
 
+    /// 判断是否为主会话
+    fn is_main_session(&self, session_id: &SessionId) -> bool {
+        crate::session_key::SessionKey::parse(session_id.as_str()).is_ok()
+    }
+
     /// 读取文件内容（按优先级）
     ///
     /// 注入优先级：AGENTS.md > SOUL.md > MEMORY.md > memory/YYYY-MM-DD.md
     pub async fn get_injected_files(
         &self,
         session_id: &SessionId,
-        is_main_session: bool,
+        is_main_session: Option<bool>,
     ) -> AgentResult<HashMap<String, String>> {
         let mut files = HashMap::new();
+        let is_main_session = is_main_session.unwrap_or_else(|| self.is_main_session(session_id));
 
         // AGENTS.md - 总是注入
         if let Ok(content) = self.read_file("AGENTS.md").await {
@@ -236,10 +243,17 @@ impl AgentScope {
                 .map_err(|e| AgentError::Memory(format!("Failed to create memory dir: {}", e)))?;
         }
 
-        // 追加内容
-        tokio::fs::write(&today_file, content)
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&today_file)
             .await
-            .map_err(|e| AgentError::Memory(format!("Failed to write today memory: {}", e)))?;
+            .map_err(|e| AgentError::Memory(format!("Failed to open today memory: {}", e)))?;
+
+        use tokio::io::AsyncWriteExt;
+        file.write_all(content.as_bytes())
+            .await
+            .map_err(|e| AgentError::Memory(format!("Failed to append today memory: {}", e)))?;
 
         Ok(())
     }
@@ -255,8 +269,8 @@ impl AgentScope {
             .await
             .map_err(|e| AgentError::Memory(format!("Failed to create session dir: {}", e)))?;
 
-        let state_file = session_dir.join("state.jsonl");
-        let json = serde_json::to_string(state)
+        let state_file = session_dir.join("state.json");
+        let json = serde_json::to_string_pretty(state)
             .map_err(|e| AgentError::Memory(format!("Failed to serialize state: {}", e)))?;
 
         tokio::fs::write(&state_file, json)
@@ -268,12 +282,19 @@ impl AgentScope {
 
     /// 加载会话状态
     pub async fn load_session_state(&self, session_key: &str) -> AgentResult<Option<SessionState>> {
-        let state_file = self.session_dir(session_key).join("state.jsonl");
-        if !state_file.exists() {
-            return Ok(None);
-        }
+        let session_dir = self.session_dir(session_key);
+        let state_file = session_dir.join("state.json");
+        let legacy_state_file = session_dir.join("state.jsonl");
 
-        let content = tokio::fs::read_to_string(&state_file)
+        let state_path = if state_file.exists() {
+            state_file
+        } else if legacy_state_file.exists() {
+            legacy_state_file
+        } else {
+            return Ok(None);
+        };
+
+        let content = tokio::fs::read_to_string(&state_path)
             .await
             .map_err(|e| AgentError::Memory(format!("Failed to read state: {}", e)))?;
 
@@ -383,18 +404,105 @@ impl AgentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    fn create_scope() -> AgentScope {
+        let tempdir = tempdir().unwrap();
+        let workspace_dir = tempdir.into_path();
+
+        AgentScope::new(AgentScopeConfig {
+            agent_id: "test".to_string(),
+            workspace_dir,
+            display_name: Some("Test Agent".to_string()),
+            is_default: false,
+        })
+        .unwrap()
+    }
 
     #[tokio::test]
     async fn test_agent_scope_creation() {
-        let config = AgentScopeConfig {
-            agent_id: "test".to_string(),
-            workspace_dir: PathBuf::from("/tmp/test-uhorse-workspace"),
-            display_name: Some("Test Agent".to_string()),
-            is_default: false,
-        };
-
-        let scope = AgentScope::new(config).unwrap();
+        let scope = create_scope();
         assert_eq!(scope.config().agent_id, "test");
+    }
+
+    #[tokio::test]
+    async fn test_get_injected_files_only_includes_memory_for_main_session() {
+        let scope = create_scope();
+        scope.init_workspace().await.unwrap();
+
+        let memory_path = scope.workspace_dir().join("MEMORY.md");
+        tokio::fs::write(&memory_path, "main memory").await.unwrap();
+
+        let main_session = SessionId::from_string("dingtalk:user-1".to_string());
+        let child_session = SessionId::from_string("session-123".to_string());
+
+        let main_files = scope.get_injected_files(&main_session, None).await.unwrap();
+        assert_eq!(main_files.get("MEMORY.md").map(String::as_str), Some("main memory"));
+
+        let child_files = scope.get_injected_files(&child_session, None).await.unwrap();
+        assert!(!child_files.contains_key("MEMORY.md"));
+    }
+
+    #[tokio::test]
+    async fn test_append_to_today_memory_appends() {
+        let scope = create_scope();
+        scope.init_workspace().await.unwrap();
+
+        scope.append_to_today_memory("first\n").await.unwrap();
+        scope.append_to_today_memory("second\n").await.unwrap();
+
+        let content = tokio::fs::read_to_string(scope.today_memory_file())
+            .await
+            .unwrap();
+        assert_eq!(content, "first\nsecond\n");
+    }
+
+    #[tokio::test]
+    async fn test_session_state_round_trip_with_json_file() {
+        let scope = create_scope();
+        let mut state = SessionState::new("session-123".to_string());
+        state.metadata.insert("current_agent".to_string(), "main".to_string());
+        state.increment_messages();
+
+        scope
+            .save_session_state("dingtalk:user-1", &state)
+            .await
+            .unwrap();
+
+        let loaded = scope
+            .load_session_state("dingtalk:user-1")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(loaded.session_id, state.session_id);
+        assert_eq!(loaded.message_count, state.message_count);
+        assert_eq!(
+            loaded.metadata.get("current_agent").map(String::as_str),
+            Some("main")
+        );
+        assert!(scope.session_dir("dingtalk:user-1").join("state.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_load_session_state_supports_legacy_jsonl_file() {
+        let scope = create_scope();
+        let session_dir = scope.session_dir("dingtalk:user-legacy");
+        tokio::fs::create_dir_all(&session_dir).await.unwrap();
+
+        let state = SessionState::new("legacy-session".to_string());
+        let content = serde_json::to_string(&state).unwrap();
+        tokio::fs::write(session_dir.join("state.jsonl"), content)
+            .await
+            .unwrap();
+
+        let loaded = scope
+            .load_session_state("dingtalk:user-legacy")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(loaded.session_id, "legacy-session");
     }
 
     #[tokio::test]

@@ -36,10 +36,14 @@ members = [
     "crates/uhorse-integration",
     # uHorse 4.0 - Protocol (Hub-Node Communication)
     "crates/uhorse-protocol",
+    # uHorse 4.0 - Local Node Runtime
+    "crates/uhorse-node-runtime",
     # uHorse 4.0 - Local Node
     "crates/uhorse-node",
     # uHorse 4.0 - Cloud Hub
     "crates/uhorse-hub",
+    # uHorse 4.0 - Node Desktop MVP
+    "crates/uhorse-node-desktop",
 ]
 resolver = "2"
 

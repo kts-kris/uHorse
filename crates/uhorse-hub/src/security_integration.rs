@@ -224,6 +224,22 @@ impl SensitiveOperationApprover {
         Ok(request.status)
     }
 
+    /// 获取审批请求
+    pub async fn get_request(&self, request_id: &str) -> HubResult<Option<uhorse_security::ApprovalRequest>> {
+        self.approval_manager
+            .get_request(request_id)
+            .await
+            .map_err(|e| HubError::Permission(format!("Failed to get approval: {}", e)))
+    }
+
+    /// 列出待审批请求
+    pub async fn list_pending_requests(&self) -> HubResult<Vec<uhorse_security::ApprovalRequest>> {
+        self.approval_manager
+            .list_pending()
+            .await
+            .map_err(|e| HubError::Permission(format!("Failed to list approvals: {}", e)))
+    }
+
     /// 批准操作
     pub async fn approve(
         &self,

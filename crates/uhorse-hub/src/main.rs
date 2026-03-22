@@ -9,14 +9,17 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info, warn};
+use uhorse_security::ApprovalManager;
 
 use uhorse_channel::DingTalkChannel;
 use uhorse_config::{loader::create_default_loader, UHorseConfig};
 use uhorse_core::Channel;
 use uhorse_hub::{
     create_router,
-    web::{reply_dingtalk_error, reply_task_result, submit_dingtalk_task},
-    Hub, HubConfig, WebState,
+    web::{
+        init_default_agent_runtime, reply_dingtalk_error, reply_task_result, submit_dingtalk_task,
+    },
+    Hub, HubConfig, SecurityManager, WebState,
 };
 use uhorse_llm::{LLMClient, OpenAIClient};
 
@@ -90,7 +93,15 @@ async fn main() -> anyhow::Result<()> {
     let llm_client = init_llm_client(&runtime_config.app_config).await?;
 
     // 创建 Hub
-    let (hub, mut task_result_rx) = Hub::new(runtime_config.hub_config.clone());
+    let security_manager = runtime_config
+        .app_config
+        .security
+        .jwt_secret
+        .as_deref()
+        .map(create_security_manager)
+        .transpose()?;
+    let (hub, mut task_result_rx) =
+        Hub::new_with_security(runtime_config.hub_config.clone(), security_manager);
     let hub = Arc::new(hub);
 
     // 启动 Hub
@@ -104,7 +115,17 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 创建 Web 状态
-    let web_state = WebState::new(hub.clone(), dingtalk_channel.clone(), llm_client);
+    let agent_runtime = Arc::new(
+        init_default_agent_runtime(std::path::PathBuf::from(".uhorse-agent-runtime"))
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+    );
+    let web_state = WebState::new_with_runtime(
+        hub.clone(),
+        dingtalk_channel.clone(),
+        llm_client,
+        agent_runtime,
+    );
     let shared_web_state = Arc::new(web_state.clone());
     let result_reply_state = shared_web_state.clone();
 
@@ -123,7 +144,9 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 match incoming_rx.recv().await {
                     Ok(inbound) => {
-                        if let Err(error) = submit_dingtalk_task(&stream_submit_state, inbound.clone()).await {
+                        if let Err(error) =
+                            submit_dingtalk_task(&stream_submit_state, inbound.clone()).await
+                        {
                             error!("Failed to submit DingTalk stream task: {}", error);
                             if let Err(reply_error) = reply_dingtalk_error(
                                 &stream_submit_state,
@@ -137,7 +160,10 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("DingTalk stream receiver lagged, skipped {} messages", skipped);
+                        warn!(
+                            "DingTalk stream receiver lagged, skipped {} messages",
+                            skipped
+                        );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         warn!("DingTalk stream receiver closed");
@@ -171,6 +197,13 @@ async fn main() -> anyhow::Result<()> {
     info!("👋 Hub shutdown complete");
 
     Ok(())
+}
+
+fn create_security_manager(jwt_secret: &str) -> anyhow::Result<Arc<SecurityManager>> {
+    let approval_manager = Arc::new(ApprovalManager::new());
+    let manager = SecurityManager::new(jwt_secret, approval_manager)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok(Arc::new(manager))
 }
 
 /// 初始化日志
@@ -270,7 +303,12 @@ fn looks_like_unified_config(content: &str) -> bool {
 async fn init_dingtalk_channel(
     config: &UHorseConfig,
 ) -> anyhow::Result<Option<Arc<DingTalkChannel>>> {
-    if !config.channels.enabled.iter().any(|channel| channel == "dingtalk") {
+    if !config
+        .channels
+        .enabled
+        .iter()
+        .any(|channel| channel == "dingtalk")
+    {
         info!("📱 DingTalk channel is disabled in configuration");
         return Ok(None);
     }

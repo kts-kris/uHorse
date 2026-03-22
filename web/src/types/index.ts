@@ -1,118 +1,124 @@
-// Agent 相关类型
-export interface Agent {
-  id: string;
-  name: string;
-  description?: string;
-  model: string;
-  system_prompt?: string;
-  temperature: number;
-  max_tokens: number;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateAgentRequest {
-  name: string;
-  description?: string;
-  model: string;
-  system_prompt?: string;
-  temperature?: number;
-  max_tokens?: number;
-}
-
-export interface UpdateAgentRequest {
-  name?: string;
-  description?: string;
-  model?: string;
-  system_prompt?: string;
-  temperature?: number;
-  max_tokens?: number;
-  enabled?: boolean;
-}
-
-// Skill 相关类型
-export interface SkillParameter {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-  description?: string;
-  required: boolean;
-  default?: unknown;
-}
-
-export interface Skill {
-  id: string;
-  name: string;
-  description?: string;
-  version: string;
-  author?: string;
-  parameters: SkillParameter[];
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateSkillRequest {
-  name: string;
-  description?: string;
-  version?: string;
-  author?: string;
-  parameters?: SkillParameter[];
-  skill_content: string;
-}
-
-// Session 相关类型
-export type SessionStatus = 'active' | 'paused' | 'closed';
-export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
-
-export interface SessionMessage {
-  id: string;
-  session_id: string;
-  role: MessageRole;
-  content: string;
-  created_at: string;
-}
-
-export interface Session {
-  id: string;
+export interface AgentRuntimeSummary {
   agent_id: string;
-  channel_type: string;
-  status: SessionStatus;
+  name: string;
+  description: string;
+  workspace_dir: string;
+  is_default: boolean;
+  skill_names: string[];
+  active_session_count: number;
+}
+
+export interface AgentRuntimeDetail extends AgentRuntimeSummary {
+  system_prompt: string;
+}
+
+export interface SkillRuntimeSummary {
+  name: string;
+  description: string;
+  version: string;
+  enabled: boolean;
+  timeout_secs: number;
+  max_retries: number;
+  executable: string | null;
+  args: string[];
+  permissions: string[];
+  execution_mode: string;
+}
+
+export interface SkillRuntimeDetail extends SkillRuntimeSummary {
+  author: string | null;
+  env: Record<string, string>;
+}
+
+export interface SessionRuntimeSummary {
+  session_id: string;
+  agent_id: string | null;
+  conversation_id: string | null;
+  sender_user_id: string | null;
+  sender_staff_id: string | null;
+  last_task_id: string | null;
+  message_count: number;
   created_at: string;
+  last_active: string;
+}
+
+export interface SessionRuntimeDetail extends SessionRuntimeSummary {
+  metadata: Record<string, string>;
+}
+
+export interface SessionMessageRecord {
+  timestamp: string;
+  user_message: string;
+  assistant_message: string;
+}
+
+export interface NodeManagerStats {
+  total_nodes: number;
+  online_nodes: number;
+  offline_nodes: number;
+  busy_nodes: number;
+}
+
+export interface SchedulerStats {
+  pending_tasks: number;
+  running_tasks: number;
+  completed_tasks: number;
+  failed_tasks: number;
+}
+
+export interface HubStats {
+  hub_id: string;
+  uptime_secs: number;
+  nodes: NodeManagerStats;
+  scheduler: SchedulerStats;
   updated_at: string;
 }
 
-// 系统相关类型
-export interface SystemInfo {
+export interface NodeCapabilitiesInfo {
+  supported_commands: string[];
+  tags: string[];
+  max_concurrent_tasks: number;
+  available_tools: string[];
+}
+
+export interface WorkspaceRuntimeInfo {
   name: string;
-  version: string;
-  uptime_secs: number;
-  rust_version: string;
-  channels_count: number;
-  agents_count: number;
-  active_sessions: number;
+  path: string;
+  read_only: boolean;
+  allowed_patterns: string[];
+  denied_patterns: string[];
 }
 
-export interface SystemMetrics {
-  total_messages: number;
-  messages_today: number;
-  total_requests: number;
-  total_errors: number;
-  avg_response_time_ms: number;
-  memory_usage_bytes: number;
+export interface LoadInfo {
+  cpu_usage: number;
+  memory_usage: number;
+  task_count: number;
+  latency_ms: number | null;
 }
 
-// Channel 相关类型
-export interface ChannelStatus {
-  channel_type: string;
-  enabled: boolean;
-  running: boolean;
-  connected: boolean;
-  last_activity?: string;
-  error?: string;
+export interface NodeRuntimeInfo {
+  node_id: string;
+  name: string;
+  state: string;
+  capabilities: NodeCapabilitiesInfo;
+  workspace: WorkspaceRuntimeInfo;
+  tags: string[];
+  last_heartbeat: string;
+  load: LoadInfo;
+  registered_at: string;
+  current_tasks: number;
+  completed_tasks: number;
+  failed_tasks: number;
 }
 
-// Auth 相关类型
+export interface TaskRuntimeInfo {
+  task_id: string;
+  status: string;
+  command_type: string;
+  priority: string;
+  started_at: string | null;
+}
+
 export interface LoginRequest {
   username: string;
   password: string;
@@ -125,7 +131,6 @@ export interface TokenResponse {
   token_type: string;
 }
 
-// 文件相关类型
 export interface FileInfo {
   name: string;
   path: string;
@@ -140,7 +145,6 @@ export interface FileContent {
   encoding: string;
 }
 
-// 技能市场相关类型
 export interface MarketplaceSkill {
   id: string;
   name: string;

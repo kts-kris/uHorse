@@ -114,6 +114,11 @@ impl Agent {
         &self.config.workspace_dir
     }
 
+    /// 获取系统提示词
+    pub fn system_prompt(&self) -> &str {
+        &self.config.system_prompt
+    }
+
     /// 设置 Agent 作用域
     pub fn with_scope(mut self, scope: AgentScope) -> Self {
         self.scope = Some(Arc::new(scope));
@@ -134,7 +139,7 @@ impl Agent {
         memory: Arc<dyn MemoryStore>,
     ) -> AgentResult<AgentResponse>
     where
-        C: LLMClient + Send + Sync,
+        C: LLMClient + Send + Sync + ?Sized,
     {
         // 1. 从内存获取上下文
         let memory_context = memory.get_context(&session_id).await.unwrap_or_default();
@@ -142,7 +147,7 @@ impl Agent {
         // 2. 从 scope 获取注入的文件（如果有）
         let injected_context = if let Some(scope) = &self.scope {
             let files = scope
-                .get_injected_files(&session_id, true) // TODO: 判断是否是主会话
+                .get_injected_files(&session_id, None)
                 .await
                 .unwrap_or_default();
 
@@ -237,7 +242,7 @@ impl Agent {
     async fn execute_skills(
         &self,
         skill_names: &[String],
-        session_id: &SessionId,
+        _session_id: &SessionId,
         input: &str,
     ) -> AgentResult<String> {
         let mut results = Vec::new();
@@ -250,6 +255,115 @@ impl Agent {
         }
 
         Ok(results.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::FileMemory;
+    use tempfile::tempdir;
+
+    struct TestLLMClient {
+        response: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMClient for TestLLMClient {
+        async fn chat_completion(&self, _messages: Vec<ChatMessage>) -> anyhow::Result<String> {
+            Ok(self.response.clone())
+        }
+    }
+
+    fn create_agent_with_scope(workspace_dir: PathBuf) -> Agent {
+        let scope = AgentScope::new(crate::agent_scope::AgentScopeConfig {
+            agent_id: "main".to_string(),
+            workspace_dir: workspace_dir.clone(),
+            display_name: Some("Main Agent".to_string()),
+            is_default: true,
+        })
+        .unwrap();
+
+        Agent::builder()
+            .agent_id("main")
+            .name("Main Agent")
+            .workspace_dir(workspace_dir)
+            .system_prompt("You are a test agent")
+            .build()
+            .unwrap()
+            .with_scope(scope)
+    }
+
+    #[tokio::test]
+    async fn test_process_includes_memory_md_for_main_session_only() {
+        let workspace_dir = tempdir().unwrap().into_path();
+        let agent = create_agent_with_scope(workspace_dir.clone());
+        agent.scope().unwrap().init_workspace().await.unwrap();
+
+        tokio::fs::write(workspace_dir.join("MEMORY.md"), "main memory only")
+            .await
+            .unwrap();
+
+        let memory = Arc::new(FileMemory::new(workspace_dir));
+        let llm_client = Arc::new(TestLLMClient {
+            response: "ok".to_string(),
+        });
+
+        let main_session = SessionId::from_string("dingtalk:user-1".to_string());
+        agent
+            .process(
+                main_session.clone(),
+                "hello",
+                llm_client.clone(),
+                memory.clone(),
+            )
+            .await
+            .unwrap();
+
+        let main_context = memory.get_context(&main_session).await.unwrap();
+        assert!(main_context.contains("**Assistant:** ok"));
+
+        let child_session = SessionId::from_string("child-session-1".to_string());
+        let injected_files = agent
+            .scope()
+            .unwrap()
+            .get_injected_files(&child_session, None)
+            .await
+            .unwrap();
+        assert!(!injected_files.contains_key("MEMORY.md"));
+    }
+
+    #[tokio::test]
+    async fn test_process_appends_today_memory_entries() {
+        let workspace_dir = tempdir().unwrap().into_path();
+        let agent = create_agent_with_scope(workspace_dir.clone());
+        agent.scope().unwrap().init_workspace().await.unwrap();
+
+        let memory = Arc::new(FileMemory::new(workspace_dir));
+        let llm_client = Arc::new(TestLLMClient {
+            response: "done".to_string(),
+        });
+        let session_id = SessionId::from_string("dingtalk:user-1".to_string());
+
+        agent
+            .process(
+                session_id.clone(),
+                "first",
+                llm_client.clone(),
+                memory.clone(),
+            )
+            .await
+            .unwrap();
+        agent
+            .process(session_id, "second", llm_client, memory)
+            .await
+            .unwrap();
+
+        let today_memory = tokio::fs::read_to_string(agent.scope().unwrap().today_memory_file())
+            .await
+            .unwrap();
+        assert!(today_memory.contains("**User:** first"));
+        assert!(today_memory.contains("**User:** second"));
     }
 }
 

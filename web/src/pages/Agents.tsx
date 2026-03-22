@@ -1,279 +1,270 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Table,
+  Alert,
   Button,
-  Space,
-  Modal,
-  Form,
-  Input,
-  Switch,
-  InputNumber,
-  Tag,
-  message,
-  Popconfirm,
   Card,
+  Col,
+  Descriptions,
+  Drawer,
+  Row,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
 } from 'antd';
 import {
-  PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  PlayCircleOutlined,
-  PauseCircleOutlined,
+  AppstoreOutlined,
+  EyeOutlined,
+  MessageOutlined,
+  ReloadOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 
-import { Agent, CreateAgentRequest, UpdateAgentRequest } from '../types';
-import { agentsApi } from '../services/agents';
+import type { AgentRuntimeSummary } from '../types';
+import { agentService } from '../services/agents';
 
 const Agents: React.FC = () => {
-  const queryClient = useQueryClient();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
-  const [form] = Form.useForm();
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
-  // 获取 Agent 列表
-  const { data: agents, isLoading } = useQuery({
-    queryKey: ['agents'],
-    queryFn: agentsApi.listAgents,
+  const {
+    data: agents = [],
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['agents-runtime'],
+    queryFn: agentService.list,
   });
 
-  // 创建 Agent
-  const createMutation = useMutation({
-    mutationFn: agentsApi.createAgent,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      message.success('Agent 创建成功');
-      handleCloseModal();
-    },
-    onError: () => {
-      message.error('Agent 创建失败');
-    },
+  const {
+    data: agentDetail,
+    isLoading: isDetailLoading,
+    error: detailError,
+  } = useQuery({
+    queryKey: ['agent-runtime', selectedAgentId],
+    queryFn: () => agentService.get(selectedAgentId!),
+    enabled: selectedAgentId !== null,
   });
 
-  // 更新 Agent
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdateAgentRequest }) =>
-      agentsApi.updateAgent(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      message.success('Agent 更新成功');
-      handleCloseModal();
-    },
-    onError: () => {
-      message.error('Agent 更新失败');
-    },
-  });
+  const stats = useMemo(() => {
+    const uniqueSkills = new Set(agents.flatMap((agent) => agent.skill_names));
+    return {
+      totalAgents: agents.length,
+      defaultAgents: agents.filter((agent) => agent.is_default).length,
+      activeSessions: agents.reduce((sum, agent) => sum + agent.active_session_count, 0),
+      uniqueSkills: uniqueSkills.size,
+    };
+  }, [agents]);
 
-  // 删除 Agent
-  const deleteMutation = useMutation({
-    mutationFn: agentsApi.deleteAgent,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      message.success('Agent 删除成功');
-    },
-    onError: () => {
-      message.error('Agent 删除失败');
-    },
-  });
-
-  // 切换启用状态
-  const toggleMutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      agentsApi.updateAgent(id, { enabled }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      message.success('状态更新成功');
-    },
-  });
-
-  const handleOpenModal = (agent?: Agent) => {
-    if (agent) {
-      setEditingAgent(agent);
-      form.setFieldsValue(agent);
-    } else {
-      setEditingAgent(null);
-      form.resetFields();
-    }
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setEditingAgent(null);
-    form.resetFields();
-  };
-
-  const handleSubmit = async () => {
-    const values = await form.validateFields();
-    if (editingAgent) {
-      updateMutation.mutate({ id: editingAgent.id, data: values });
-    } else {
-      createMutation.mutate(values as CreateAgentRequest);
-    }
-  };
-
-  const columns: ColumnsType<Agent> = [
+  const columns: ColumnsType<AgentRuntimeSummary> = [
     {
-      title: '名称',
+      title: 'Agent',
       dataIndex: 'name',
       key: 'name',
-      width: 150,
+      width: 240,
+      render: (_, record) => (
+        <Space direction="vertical" size={4}>
+          <Space>
+            <Typography.Text strong>{record.name}</Typography.Text>
+            {record.is_default && <Tag color="gold">默认</Tag>}
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {record.agent_id}
+          </Typography.Text>
+        </Space>
+      ),
     },
     {
       title: '描述',
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
+      render: (value: string) => value || '-',
     },
     {
-      title: '模型',
-      dataIndex: 'model',
-      key: 'model',
-      width: 150,
-      render: (model) => <Tag color="blue">{model}</Tag>,
+      title: '已绑定 Skills',
+      dataIndex: 'skill_names',
+      key: 'skill_names',
+      width: 260,
+      render: (skillNames: string[]) =>
+        skillNames.length > 0 ? (
+          <Space size={[4, 4]} wrap>
+            {skillNames.map((skillName) => (
+              <Tag key={skillName} color="blue">
+                {skillName}
+              </Tag>
+            ))}
+          </Space>
+        ) : (
+          <Tag>无</Tag>
+        ),
     },
     {
-      title: '温度',
-      dataIndex: 'temperature',
-      key: 'temperature',
-      width: 80,
-      render: (temp) => temp?.toFixed(2),
+      title: '活跃 Session',
+      dataIndex: 'active_session_count',
+      key: 'active_session_count',
+      width: 120,
     },
     {
-      title: '状态',
-      dataIndex: 'enabled',
-      key: 'enabled',
-      width: 100,
-      render: (enabled, record) => (
-        <Switch
-          checked={enabled}
-          onChange={(checked) =>
-            toggleMutation.mutate({ id: record.id, enabled: checked })
-          }
-          checkedChildren={<PlayCircleOutlined />}
-          unCheckedChildren={<PauseCircleOutlined />}
-        />
+      title: 'Workspace',
+      dataIndex: 'workspace_dir',
+      key: 'workspace_dir',
+      ellipsis: true,
+      render: (value: string) => (
+        <Typography.Text code ellipsis={{ tooltip: value }}>
+          {value}
+        </Typography.Text>
       ),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      render: (time) => new Date(time).toLocaleString(),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 150,
+      width: 100,
       render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleOpenModal(record)}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定要删除此 Agent 吗？"
-            onConfirm={() => deleteMutation.mutate(record.id)}
-          >
-            <Button type="link" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
+        <Button
+          type="link"
+          icon={<EyeOutlined />}
+          onClick={() => setSelectedAgentId(record.agent_id)}
+        >
+          详情
+        </Button>
       ),
     },
   ];
 
   return (
-    <Card
-      title="Agent 管理"
-      extra={
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => handleOpenModal()}
-        >
-          创建 Agent
-        </Button>
-      }
-    >
-      <Table
-        columns={columns}
-        dataSource={agents}
-        rowKey="id"
-        loading={isLoading}
-        pagination={{
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-      />
+    <div>
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="加载 Agent 运行时失败"
+          description={error instanceof Error ? error.message : '未知错误'}
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
-      <Modal
-        title={editingAgent ? '编辑 Agent' : '创建 Agent'}
-        open={isModalOpen}
-        onOk={handleSubmit}
-        onCancel={handleCloseModal}
-        width={600}
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="name"
-            label="名称"
-            rules={[{ required: true, message: '请输入 Agent 名称' }]}
-          >
-            <Input placeholder="例如：客服助手" />
-          </Form.Item>
-
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={2} placeholder="Agent 的功能描述" />
-          </Form.Item>
-
-          <Form.Item
-            name="model"
-            label="模型"
-            rules={[{ required: true, message: '请选择模型' }]}
-            initialValue="gpt-4"
-          >
-            <Input placeholder="例如：gpt-4、claude-3-opus" />
-          </Form.Item>
-
-          <Form.Item name="system_prompt" label="系统提示词">
-            <Input.TextArea
-              rows={4}
-              placeholder="定义 Agent 的行为和角色..."
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="Agent 数量"
+              value={stats.totalAgents}
+              prefix={<RobotOutlined />}
             />
-          </Form.Item>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="默认 Agent"
+              value={stats.defaultAgents}
+              prefix={<AppstoreOutlined />}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="活跃 Session"
+              value={stats.activeSessions}
+              prefix={<MessageOutlined />}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="Skill 种类"
+              value={stats.uniqueSkills}
+              prefix={<AppstoreOutlined />}
+            />
+          </Card>
+        </Col>
+      </Row>
 
-          <Form.Item label="参数设置">
-            <Space>
-              <Form.Item
-                name="temperature"
-                label="温度"
-                initialValue={0.7}
-                noStyle
+      <Card
+        title="Agent 运行时"
+        extra={
+          <Button icon={<ReloadOutlined />} loading={isFetching} onClick={() => void refetch()}>
+            刷新
+          </Button>
+        }
+      >
+        <Table
+          rowKey="agent_id"
+          columns={columns}
+          dataSource={agents}
+          loading={isLoading}
+          pagination={{ showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        />
+      </Card>
+
+      <Drawer
+        title={agentDetail ? `Agent 详情：${agentDetail.name}` : 'Agent 详情'}
+        width={720}
+        open={selectedAgentId !== null}
+        onClose={() => setSelectedAgentId(null)}
+      >
+        {detailError && (
+          <Alert
+            type="error"
+            showIcon
+            message="加载 Agent 详情失败"
+            description={detailError instanceof Error ? detailError.message : '未知错误'}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
+        {agentDetail && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="Agent ID">{agentDetail.agent_id}</Descriptions.Item>
+              <Descriptions.Item label="名称">{agentDetail.name}</Descriptions.Item>
+              <Descriptions.Item label="描述">
+                {agentDetail.description || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="默认 Agent">
+                {agentDetail.is_default ? <Tag color="gold">是</Tag> : <Tag>否</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="活跃 Session 数">
+                {agentDetail.active_session_count}
+              </Descriptions.Item>
+              <Descriptions.Item label="Workspace">
+                <Typography.Text code copyable>
+                  {agentDetail.workspace_dir}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="已绑定 Skills">
+                {agentDetail.skill_names.length > 0 ? (
+                  <Space size={[4, 4]} wrap>
+                    {agentDetail.skill_names.map((skillName) => (
+                      <Tag key={skillName} color="blue">
+                        {skillName}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  '-'
+                )}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Card size="small" title="System Prompt" loading={isDetailLoading}>
+              <Typography.Paragraph
+                style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
               >
-                <InputNumber min={0} max={2} step={0.1} />
-              </Form.Item>
-              <Form.Item
-                name="max_tokens"
-                label="最大 Token"
-                initialValue={4096}
-                noStyle
-              >
-                <InputNumber min={100} max={128000} step={100} />
-              </Form.Item>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-    </Card>
+                {agentDetail.system_prompt || '-'}
+              </Typography.Paragraph>
+            </Card>
+          </Space>
+        )}
+      </Drawer>
+    </div>
   );
 };
 

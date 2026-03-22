@@ -8,13 +8,13 @@ use uhorse_hub::{
         HubFieldEncryptor, HubTlsConfig, NodeAuthenticator, SecurityManager,
         SensitiveOperationApprover,
     },
-    Hub, HubConfig,
+    Hub, HubConfig, MessageRouter, NodeManager, TaskScheduler,
 };
 use uhorse_protocol::{
-    Command, NodeCapabilities, NodeId, Priority, SessionId, ShellCommand, TaskContext, UserId,
-    WorkspaceInfo,
+    Command, MessageId, NodeCapabilities, NodeId, NodeToHub, Priority, SessionId, ShellCommand,
+    TaskContext, TaskId, UserId, WorkspaceInfo,
 };
-use uhorse_security::{ApprovalLevel, ApprovalManager, EncryptionKey};
+use uhorse_security::{ApprovalLevel, ApprovalManager, ApprovalStatus, EncryptionKey};
 
 /// 创建测试用的工作空间信息
 fn create_test_workspace(name: &str, path: &str) -> WorkspaceInfo {
@@ -34,6 +34,12 @@ fn create_test_context(user: &str, session: &str) -> TaskContext {
         SessionId::from_string(session),
         "security-test-channel",
     )
+}
+
+fn create_test_message_router() -> MessageRouter {
+    let node_manager = Arc::new(NodeManager::new(10, 30));
+    let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 60);
+    MessageRouter::new(node_manager, Arc::new(task_scheduler))
 }
 
 // ============================================================================
@@ -256,6 +262,67 @@ async fn test_approval_reject() {
     // 验证状态已更新
     let status = approver.get_approval_status(&request_id).await.unwrap();
     assert_eq!(status, uhorse_security::ApprovalStatus::Rejected);
+}
+
+#[tokio::test]
+async fn test_message_router_creates_hub_approval_from_node_request() {
+    let approval_manager = Arc::new(ApprovalManager::new());
+    let security_manager = SecurityManager::new("jwt-secret", approval_manager.clone()).unwrap();
+    let router = create_test_message_router();
+    let node_id = NodeId::from_string("test-node");
+    let task_id = TaskId::from_string("task-123");
+    let request_id = "approval-req-123".to_string();
+
+    router
+        .route_node_message(
+            &node_id,
+            NodeToHub::ApprovalRequest {
+                message_id: MessageId::new(),
+                request_id: request_id.clone(),
+                task_id: task_id.clone(),
+                command: Command::Shell(ShellCommand::new("rm -rf /tmp/test")),
+                context: create_test_context("test-user", "test-session"),
+                reason: "dangerous command".to_string(),
+                timestamp: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
+            },
+            Some(&security_manager),
+        )
+        .await
+        .unwrap();
+
+    let pending = approval_manager.list_pending().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, ApprovalStatus::Pending);
+    assert_eq!(pending[0].action, "system_command");
+    assert_eq!(pending[0].requested_by, node_id.as_str());
+    assert_eq!(pending[0].metadata.get("request_id"), Some(&serde_json::json!(request_id)));
+    assert_eq!(pending[0].metadata.get("task_id"), Some(&serde_json::json!(task_id.as_str())));
+}
+
+#[tokio::test]
+async fn test_message_router_rejects_approval_request_without_security_manager() {
+    let router = create_test_message_router();
+    let node_id = NodeId::from_string("test-node");
+
+    let result = router
+        .route_node_message(
+            &node_id,
+            NodeToHub::ApprovalRequest {
+                message_id: MessageId::new(),
+                request_id: "approval-req-456".to_string(),
+                task_id: TaskId::from_string("task-456"),
+                command: Command::Shell(ShellCommand::new("rm -rf /tmp/test")),
+                context: create_test_context("test-user", "test-session"),
+                reason: "dangerous command".to_string(),
+                timestamp: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
+            },
+            None,
+        )
+        .await;
+
+    assert!(matches!(result, Err(uhorse_hub::HubError::Permission(_))));
 }
 
 /// 测试幂等性检查

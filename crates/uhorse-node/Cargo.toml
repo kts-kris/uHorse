@@ -10,6 +10,7 @@ name = "uhorse-node"
 path = "src/main.rs"
 
 [dependencies]
+uhorse-node-runtime = { path = "../uhorse-node-runtime" }
 uhorse-protocol = { path = "../uhorse-protocol" }
 uhorse-core = { path = "../uhorse-core" }
 

@@ -1,634 +1,381 @@
 # uHorse API 使用指南
 
+本文档只描述 **当前仓库已经实现并用于 v4.0 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
+
 ## 目录
 
-- [API 概述](#api-概述)
-- [认证方式](#认证方式)
+- [范围](#范围)
+- [通用响应格式](#通用响应格式)
 - [健康检查](#健康检查)
-- [WebSocket API](#websocket-api)
-- [HTTP REST API](#http-rest-api)
-- [工具调用](#工具调用)
-- [错误处理](#错误处理)
-- [使用示例](#使用示例)
+- [Node 接入与鉴权](#node-接入与鉴权)
+- [任务 API](#任务-api)
+- [审批 API](#审批-api)
+- [DingTalk 兼容回调](#dingtalk-兼容回调)
+- [手工联调顺序](#手工联调顺序)
+- [相关文档](#相关文档)
 
 ---
 
-## API 概述
+## 范围
 
-uHorse 提供两种 API 接口：
+当前 Hub 运行时实际暴露并与 Hub-Node 主链相关的接口主要是：
 
-1. **WebSocket API** - 实时双向通信
-2. **HTTP REST API** - 标准 HTTP 请求
+- `GET /api/health`
+- `GET /ws`
+- `GET /api/stats`
+- `GET /api/nodes`
+- `GET /api/nodes/:node_id`
+- `POST /api/nodes/:node_id/permissions`
+- `GET /api/tasks`
+- `POST /api/tasks`
+- `GET /api/tasks/:task_id`
+- `POST /api/tasks/:task_id/cancel`
+- `GET /api/approvals`
+- `GET /api/approvals/:request_id`
+- `POST /api/approvals/:request_id/approve`
+- `POST /api/approvals/:request_id/reject`
+- `POST /api/node-auth/token`
+- `GET/POST /api/v1/channels/dingtalk/webhook`
 
-### 基础信息
-
-- **Base URL**: `http://localhost:8080`
-- **API 版本**: v1
-- **数据格式**: JSON
-- **字符编码**: UTF-8
+> 注意：本文档不再把旧版 `/health/live`、`/health/ready`、`/api/v1/auth/*`、`/api/v1/messages` 当作当前主线 API。
 
 ---
 
-## 认证方式
+## 通用响应格式
 
-### JWT Token 认证
+除 `GET /api/health` 外，当前 Hub Web API 统一使用如下包装结构：
 
-```bash
-# 1. 获取访问令牌
-curl -X POST http://localhost:8080/api/v1/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{
-    "device_id": "device_123",
-    "pairing_code": "123456"
-  }'
-
-# 响应
+```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
-  "expires_in": 86400,
-  "token_type": "Bearer"
+  "success": true,
+  "data": {},
+  "error": null
 }
-
-# 2. 使用令牌访问 API
-curl http://localhost:8080/api/v1/sessions \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
-### API Key 认证（可选）
+失败时：
 
-```bash
-curl http://localhost:8080/api/v1/sessions \
-  -H "X-API-Key: your_api_key_here"
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "error message"
+}
+```
+
+### `GET /api/health` 的特殊返回
+
+健康检查接口直接返回 JSON，不包在 `ApiResponse<T>` 中：
+
+```json
+{
+  "status": "healthy",
+  "version": "4.0.0-alpha.1"
+}
 ```
 
 ---
 
 ## 健康检查
 
-### 存活性检查
+### `GET /api/health`
+
+用于确认 Hub HTTP 服务已经启动。
 
 ```bash
-curl http://localhost:8080/health/live
+curl http://127.0.0.1:8765/api/health
 ```
 
-**响应:**
+成功响应：
+
 ```json
 {
   "status": "healthy",
-  "version": "0.1.0"
-}
-```
-
-### 就绪性检查
-
-```bash
-curl http://localhost:8080/health/ready
-```
-
-**响应:**
-```json
-{
-  "status": "ready",
-  "version": "0.1.0",
-  "checks": {
-    "database": "ok",
-    "redis": "ok"
-  }
+  "version": "4.0.0-alpha.1"
 }
 ```
 
 ---
 
-## WebSocket API
+## Node 接入与鉴权
 
-### 连接 WebSocket
+### 1. 签发 Node JWT：`POST /api/node-auth/token`
 
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-// 监听连接打开
-ws.onopen = () => {
-  console.log('WebSocket connected');
-
-  // 发送握手
-  ws.send(JSON.stringify({
-    type: 'handshake',
-    data: {
-      version: '1.0',
-      capabilities: ['tools', 'channels']
-    }
-  }));
-};
-
-// 监听消息
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  console.log('Received:', message);
-
-  // 处理不同类型的消息
-  switch(message.type) {
-    case 'handshake_response':
-      console.log('Handshake successful');
-      break;
-    case 'event':
-      handleEvent(message.data);
-      break;
-    case 'response':
-      handleResponse(message.data);
-      break;
-    case 'error':
-      console.error('Error:', message.data);
-      break;
-  }
-};
-
-// 监听错误
-ws.onerror = (error) => {
-  console.error('WebSocket error:', error);
-};
-
-// 监听关闭
-ws.onclose = () => {
-  console.log('WebSocket disconnected');
-};
-```
-
-### 握手协议
-
-**请求:**
-```json
-{
-  "type": "handshake",
-  "data": {
-    "version": "1.0",
-    "capabilities": ["tools", "channels"],
-    "client_info": {
-      "name": "uHorse Client",
-      "version": "1.0.0"
-    }
-  }
-}
-```
-
-**响应:**
-```json
-{
-  "type": "handshake_response",
-  "data": {
-    "server_info": {
-      "name": "uHorse",
-      "version": "0.1.0"
-    },
-    "features": {
-      "tools": true,
-      "channels": true,
-      "sessions": true
-    },
-    "heartbeat_interval": 30
-  }
-}
-```
-
-### 发送消息
-
-```javascript
-// 发送文本消息
-ws.send(JSON.stringify({
-  type: 'message',
-  data: {
-    session_id: 'session_123',
-    content: {
-      type: 'text',
-      text': 'Hello, uHorse!'
-    },
-    role: 'user'
-  }
-}));
-```
-
-### 工具调用
-
-```javascript
-// 调用计算器工具
-ws.send(JSON.stringify({
-  type: 'tool_call',
-  data: {
-    session_id: 'session_123',
-    tool_id: 'calculator',
-    parameters: {
-      expression: '2 + 2'
-    }
-  }
-}));
-```
-
----
-
-## HTTP REST API
-
-### 1. 会话管理
-
-#### 创建会话
+当 Hub 使用 **统一配置** 启动，且 `[security].jwt_secret` 已配置时，可以通过该接口为 Node 签发 token。
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/sessions \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+curl -X POST http://127.0.0.1:8765/api/node-auth/token \
   -H "Content-Type: application/json" \
   -d '{
-    "isolation": "moderate",
-    "metadata": {
-      "user_id": "user_123"
-    }
+    "node_id": "office-node-01",
+    "credentials": "bootstrap-secret"
   }'
 ```
 
-**响应:**
+成功响应：
+
 ```json
 {
-  "session_id": "session_abc123",
-  "status": "active",
-  "created_at": "2026-03-02T12:00:00Z",
-  "isolation": "moderate"
-}
-```
-
-#### 获取会话列表
-
-```bash
-curl http://localhost:8080/api/v1/sessions \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**响应:**
-```json
-{
-  "sessions": [
-    {
-      "session_id": "session_abc123",
-      "status": "active",
-      "created_at": "2026-03-02T12:00:00Z",
-      "message_count": 15
-    }
-  ],
-  "total": 1,
-  "page": 1,
-  "page_size": 20
-}
-```
-
-#### 获取会话详情
-
-```bash
-curl http://localhost:8080/api/v1/sessions/session_abc123 \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-#### 删除会话
-
-```bash
-curl -X DELETE http://localhost:8080/api/v1/sessions/session_abc123 \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-### 2. 消息管理
-
-#### 发送消息
-
-```bash
-curl -X POST http://localhost:8080/api/v1/sessions/session_abc123/messages \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": {
-      "type": "text",
-      "text": "帮我计算 2 + 2"
-    },
-    "role": "user"
-  }'
-```
-
-**响应:**
-```json
-{
-  "message_id": "msg_456",
-  "session_id": "session_abc123",
-  "role": "assistant",
-  "content": {
-    "type": "text",
-    "text": "2 + 2 = 4"
+  "success": true,
+  "data": {
+    "node_id": "office-node-01",
+    "access_token": "...",
+    "refresh_token": "...",
+    "expires_at": "2026-03-23T12:00:00+00:00"
   },
-  "created_at": "2026-03-02T12:05:00Z"
+  "error": null
 }
 ```
 
-#### 获取消息历史
+注意：
 
-```bash
-curl http://localhost:8080/api/v1/sessions/session_abc123/messages \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -G -d "limit=50" \
-  -d "before=msg_456"
+- 如果 Hub 没有启用 `SecurityManager`，该接口会返回 `503`。
+- 当前实现里，`credentials` 只要求是**非空字符串**，适合本地引导和受控环境。
+- Node 注册时会校验 `access_token` 里的 `node_id` 是否与注册的 `node_id` 一致。
+
+### 2. Node WebSocket 连接：`GET /ws`
+
+Node 通过 `node.toml` 中的 `connection.hub_url` 连接 WebSocket，例如：
+
+```toml
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+auth_token = "<access_token>"
 ```
 
-### 3. 工具调用
+当前主线已验证：
 
-#### 执行工具
+- Node 注册
+- 心跳
+- 任务下发
+- 审批响应回传
+- Hub 重启后的 Node 自动重连与重新注册
+
+### 3. 查询节点：`GET /api/nodes`
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/tools/execute \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+curl http://127.0.0.1:8765/api/nodes
+```
+
+用于确认在线节点列表是否已经出现。
+
+### 4. 查询单个节点：`GET /api/nodes/:node_id`
+
+```bash
+curl http://127.0.0.1:8765/api/nodes/office-node-01
+```
+
+### 5. 更新节点权限：`POST /api/nodes/:node_id/permissions`
+
+该接口会把权限规则下发给在线节点。
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/nodes/office-node-01/permissions \
   -H "Content-Type: application/json" \
   -d '{
-    "tool": "calculator",
-    "parameters": {
-      "expression": "10 * 5"
-    }
-  }'
-```
-
-**响应:**
-```json
-{
-  "tool": "calculator",
-  "call_id": "call_789",
-  "status": "success",
-  "result": 50,
-  "duration_ms": 5
-}
-```
-
-#### 获取可用工具列表
-
-```bash
-curl http://localhost:8080/api/v1/tools \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**响应:**
-```json
-{
-  "tools": [
-    {
-      "id": "calculator",
-      "name": "计算器",
-      "description": "执行数学计算",
-      "parameters": {
-        "expression": {
-          "type": "string",
-          "description": "数学表达式",
-          "required": true
-        }
+    "rules": [
+      {
+        "id": "approval-shell",
+        "name": "Require shell approval",
+        "resource": {
+          "type": "command_type",
+          "types": ["shell"]
+        },
+        "actions": ["execute"],
+        "require_approval": true,
+        "priority": 100,
+        "enabled": true
       }
-    },
-    {
-      "id": "http",
-      "name": "HTTP 请求",
-      "description": "发送 HTTP 请求"
-    }
-  ]
-}
-```
-
-### 4. 通道管理
-
-#### 发送消息到通道
-
-```bash
-curl -X POST http://localhost:8080/api/v1/channels/telegram/send \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "chat_id": "123456789",
-    "text": "Hello from uHorse!",
-    "parse_mode": "Markdown"
-  }'
-```
-
-#### 获取通道状态
-
-```bash
-curl http://localhost:8080/api/v1/channels/status \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**响应:**
-```json
-{
-  "channels": {
-    "telegram": {
-      "connected": true,
-      "webhook": "active"
-    },
-    "slack": {
-      "connected": false,
-      "error": "Bot token not configured"
-    }
-  }
-}
-```
-
----
-
-## 工具调用
-
-### 内置工具
-
-#### 1. 计算器
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tools/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "calculator",
-    "parameters": {
-      "expression": "2 * (3 + 4)"
-    }
-  }'
-```
-
-**结果:** `14`
-
-#### 2. HTTP 请求
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tools/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "http",
-    "parameters": {
-      "url": "https://api.github.com",
-      "method": "GET"
-    }
-  }'
-```
-
-#### 3. 搜索
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tools/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "search",
-    "parameters": {
-      "query": "Rust programming"
-    }
-  }'
-```
-
-#### 4. 日期时间
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tools/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "datetime",
-    "parameters": {
-      "action": "current"
-    }
+    ]
   }'
 ```
 
 ---
 
-## 错误处理
+## 任务 API
 
-### 错误响应格式
+### 1. 提交任务：`POST /api/tasks`
+
+请求体字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `command` | object | 当前支持 `file`、`shell` 等协议命令 |
+| `user_id` | string | 用户标识 |
+| `session_id` | string | 会话标识 |
+| `channel` | string | 渠道，例如 `api`、`dingtalk` |
+| `intent` | string? | 可选，业务意图 |
+| `env` | object | 可选，环境变量 |
+| `priority` | string | 可选，默认 `normal` |
+| `workspace_hint` | string? | 可选，工作区匹配提示 |
+| `required_tags` | string[] | 可选，节点标签过滤 |
+
+文件存在性任务示例：
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": {
+      "type": "file",
+      "action": "exists",
+      "path": "/tmp/demo.txt"
+    },
+    "user_id": "api-user",
+    "session_id": "api-session",
+    "channel": "api",
+    "priority": "high",
+    "required_tags": []
+  }'
+```
+
+成功响应：
 
 ```json
 {
-  "error": {
-    "code": "INVALID_TOKEN",
-    "message": "Invalid or expired token",
-    "details": {
-      "hint": "Try refreshing your access token"
-    }
-  }
+  "success": true,
+  "data": {
+    "task_id": "task-0"
+  },
+  "error": null
 }
 ```
 
-### 错误码
-
-| 错误码 | 说明 |
-|--------|------|
-| `INVALID_TOKEN` | 令牌无效或过期 |
-| `INSUFFICIENT_PERMISSIONS` | 权限不足 |
-| `SESSION_NOT_FOUND` | 会话不存在 |
-| `TOOL_NOT_FOUND` | 工具不存在 |
-| `INVALID_PARAMETERS` | 参数无效 |
-| `RATE_LIMIT_EXCEEDED` | 超出速率限制 |
-
----
-
-## 使用示例
-
-### Python 示例
-
-```python
-import requests
-import websocket
-import json
-
-BASE_URL = "http://localhost:8080"
-TOKEN = "your_access_token"
-
-def create_session():
-    """创建会话"""
-    response = requests.post(
-        f"{BASE_URL}/api/v1/sessions",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        json={"isolation": "moderate"}
-    )
-    return response.json()["session_id"]
-
-def send_message(session_id, text):
-    """发送消息"""
-    response = requests.post(
-        f"{BASE_URL}/api/v1/sessions/{session_id}/messages",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        json={
-            "content": {"type": "text", "text": text},
-            "role": "user"
-        }
-    )
-    return response.json()
-
-# 使用示例
-session_id = create_session()
-result = send_message(session_id, "你好")
-print(result["content"]["text"])
-```
-
-### JavaScript 示例
-
-```javascript
-const BASE_URL = 'http://localhost:8080';
-const TOKEN = 'your_access_token';
-
-async function createSession() {
-  const response = await fetch(`${BASE_URL}/api/v1/sessions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ isolation: 'moderate' })
-  });
-  return await response.json();
-}
-
-async function sendMessage(sessionId, text) {
-  const response = await fetch(
-    `${BASE_URL}/api/v1/sessions/${sessionId}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        content: { type: 'text', text },
-        role: 'user'
-      })
-    }
-  );
-  return await response.json();
-}
-
-// 使用示例
-(async () => {
-  const session = await createSession();
-  const result = await sendMessage(session.session_id, 'Hello');
-  console.log(result.content.text);
-})();
-```
-
-### cURL 示例
+### 2. 查询任务状态：`GET /api/tasks/:task_id`
 
 ```bash
-# 设置 token
-export TOKEN="your_access_token"
-
-# 创建会话
-SESSION=$(curl -s -X POST http://localhost:8080/api/v1/sessions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"isolation":"moderate"}' | jq -r '.session_id')
-
-# 发送消息
-curl -X POST http://localhost:8080/api/v1/sessions/$SESSION/messages \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": {"type": "text", "text": "Hello"},
-    "role": "user"
-  }' | jq '.'
+curl http://127.0.0.1:8765/api/tasks/task-0
 ```
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "task_id": "task-0",
+    "status": "Running",
+    "command_type": "file",
+    "priority": "high",
+    "started_at": "2026-03-23T12:00:00+00:00"
+  },
+  "error": null
+}
+```
+
+说明：
+
+- `status` 可能是 `Queued`、`Running`、`Completed`、`Failed`。
+- 当前实现已经保证 `command_type` 与 `priority` 返回**真实任务元数据**，不再写死为默认值。
+- `command_type` 来自调度器里的真实命令类型，例如 `file`、`shell`。
+
+### 3. 取消任务：`POST /api/tasks/:task_id/cancel`
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/tasks/task-0/cancel
+```
+
+### 4. 列出任务：`GET /api/tasks`
+
+```bash
+curl http://127.0.0.1:8765/api/tasks
+```
+
+注意：当前实现里的 `GET /api/tasks` 仍是**占位实现**，会返回空列表；如果要查询真实任务状态，请直接使用 `GET /api/tasks/:task_id`。
 
 ---
 
-## 下一步
+## 审批 API
 
-- [配置指南](CONFIG.md)
-- [通道集成指南](CHANNELS.md)
-- [部署指南](deployments/DEPLOYMENT.md)
+以下接口要求 Hub 已启用 `SecurityManager`；否则会返回 `503`。
+
+### 1. 列出待审批：`GET /api/approvals`
+
+```bash
+curl http://127.0.0.1:8765/api/approvals
+```
+
+返回值 `data` 是 `ApprovalRequest[]`。关键字段包括：
+
+- `id`
+- `action`
+- `requested_by`
+- `status`
+- `created_at`
+- `expires_at`
+- `metadata`
+
+### 2. 获取单个审批：`GET /api/approvals/:request_id`
+
+```bash
+curl http://127.0.0.1:8765/api/approvals/<request_id>
+```
+
+### 3. 批准审批：`POST /api/approvals/:request_id/approve`
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/approvals/<request_id>/approve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "responder": "admin",
+    "reason": "允许执行"
+  }'
+```
+
+### 4. 拒绝审批：`POST /api/approvals/:request_id/reject`
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/approvals/<request_id>/reject \
+  -H "Content-Type: application/json" \
+  -d '{
+    "responder": "admin",
+    "reason": "拒绝高风险命令"
+  }'
+```
+
+当前主线已验证的闭环是：
+
+1. Node 根据本地权限规则触发审批请求。
+2. Hub 通过 `/api/approvals` 暴露待审批项。
+3. 调用 `/approve` 或 `/reject` 后，Hub 会向对应 Node 下发 `ApprovalResponse`。
+4. Node 收到审批结果后继续执行或终止任务。
+5. 最终再通过 `TaskResult` 回传结果。
+
+---
+
+## DingTalk 兼容回调
+
+当前仍保留以下兼容路由：
+
+- `GET /api/v1/channels/dingtalk/webhook`
+- `POST /api/v1/channels/dingtalk/webhook`
+
+它们主要用于兼容或辅助测试；当前推荐叙事仍是 **DingTalk Stream 模式 + Hub 任务链路**。
+
+---
+
+## 手工联调顺序
+
+推荐用下面这条顺序做一次完整回归：
+
+1. 用统一配置启动 Hub，并确保 `[security].jwt_secret` 已设置。
+2. 调用 `POST /api/node-auth/token` 给稳定 `node_id` 签发 token。
+3. 把 `access_token` 写入 `node.toml` 的 `connection.auth_token`。
+4. 启动 Node，检查 `GET /api/nodes`。
+5. 调用 `POST /api/tasks` 提交文件任务，检查 `GET /api/tasks/:task_id`。
+6. 配置 shell 命令需要审批，提交 shell 任务。
+7. 通过 `GET /api/approvals` 找到待审批项，再调用 `/approve` 或 `/reject`。
+8. 再次检查 `GET /api/tasks/:task_id`，确认状态进入 `Completed` 或 `Failed`。
+9. 保持 Node 存活，重启 Hub，确认 Node 自动重连并重新出现在 `GET /api/nodes`。
+10. 重连后再次提交任务，确认链路恢复正常。
+
+---
+
+## 相关文档
+
+- [README.md](README.md)：项目总览
+- [LOCAL_SETUP.md](LOCAL_SETUP.md)：本地双进程联调
+- [CONFIG.md](CONFIG.md)：统一配置与 Node 配置
+- [TESTING.md](TESTING.md)：测试与回归命令
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：部署路径
+- [docs/architecture/v4.0-architecture.md](docs/architecture/v4.0-architecture.md)：架构说明

@@ -2,14 +2,32 @@ import axios from 'axios';
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
 // API 响应类型
+export type ApiError =
+  | string
+  | {
+      code?: string;
+      message?: string;
+      details?: unknown;
+    };
+
 export interface ApiResponse<T> {
   success: boolean;
-  data: T;
-  error?: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
+  data: T | null;
+  error?: ApiError;
+}
+
+export function getApiErrorMessage(error: ApiError | undefined, fallback: string): string {
+  if (!error) return fallback;
+  if (typeof error === 'string') return error || fallback;
+  return error.message || fallback;
+}
+
+export function unwrapApiResponse<T>(response: ApiResponse<T>, fallback: string): T {
+  if (response.success && response.data !== null) {
+    return response.data;
+  }
+
+  throw new Error(getApiErrorMessage(response.error, fallback));
 }
 
 // 分页响应
@@ -54,7 +72,7 @@ client.interceptors.response.use(
             '/api/v1/auth/refresh',
             { refresh_token: refreshToken }
           );
-          if (response.data.success) {
+          if (response.data.success && response.data.data !== null) {
             const { access_token, refresh_token } = response.data.data;
             localStorage.setItem('access_token', access_token);
             localStorage.setItem('refresh_token', refresh_token);

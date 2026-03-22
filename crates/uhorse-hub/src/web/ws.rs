@@ -17,20 +17,16 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use uhorse_protocol::{HubToNode, MessageCodec, MessageId, NodeToHub};
 
-use crate::{Hub, WebState};
+use crate::{Hub, HubError, WebState};
 
 /// WebSocket 升级处理器
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<WebState>>,
-) -> Response {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state.hub.clone()))
 }
 
 /// 处理 WebSocket 连接
 async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
-    let (ws_sender, mut receiver) = socket.split();
-    let sender = Arc::new(Mutex::new(ws_sender));
+    let (mut ws_sender, mut receiver) = socket.split();
 
     // 等待节点注册消息
     let registration = match wait_for_registration(&mut receiver).await {
@@ -42,6 +38,18 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
     };
 
     let node_id = registration.node_id.clone();
+    if let Err(error) = authenticate_registration(&hub, &registration).await {
+        warn!("Rejected node {} during registration: {}", node_id, error);
+        let _ = ws_sender
+            .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                code: axum::extract::ws::close_code::POLICY,
+                reason: error.to_string().into(),
+            })))
+            .await;
+        return;
+    }
+
+    let sender = Arc::new(Mutex::new(ws_sender));
     info!("Node {} connected via WebSocket", node_id);
 
     // 创建消息通道
@@ -108,7 +116,10 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
             match msg {
                 Ok(Message::Binary(data)) => match MessageCodec::decode_node_to_hub(&data) {
                     Ok(node_msg) => {
-                        if let Err(e) = hub_clone.handle_node_message(&node_id_clone, node_msg).await {
+                        if let Err(e) = hub_clone
+                            .handle_node_message(&node_id_clone, node_msg)
+                            .await
+                        {
                             error!("Failed to handle node message: {}", e);
                         }
                     }
@@ -116,20 +127,19 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
                         warn!("Failed to decode node message: {}", e);
                     }
                 },
-                Ok(Message::Text(text)) => {
-                    match serde_json::from_str::<NodeToHub>(&text) {
-                        Ok(node_msg) => {
-                            if let Err(e) =
-                                hub_clone.handle_node_message(&node_id_clone, node_msg).await
-                            {
-                                error!("Failed to handle node message: {}", e);
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to parse node message: {}", e);
+                Ok(Message::Text(text)) => match serde_json::from_str::<NodeToHub>(&text) {
+                    Ok(node_msg) => {
+                        if let Err(e) = hub_clone
+                            .handle_node_message(&node_id_clone, node_msg)
+                            .await
+                        {
+                            error!("Failed to handle node message: {}", e);
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!("Failed to parse node message: {}", e);
+                    }
+                },
                 Ok(Message::Ping(data)) => {
                     debug!("Received ping from node {}", node_id_clone);
                     let mut sender_guard = sender.lock().await;
@@ -166,6 +176,31 @@ struct Registration {
     name: String,
     capabilities: uhorse_protocol::NodeCapabilities,
     workspace: uhorse_protocol::WorkspaceInfo,
+    auth_token: String,
+}
+
+async fn authenticate_registration(hub: &Hub, registration: &Registration) -> Result<(), HubError> {
+    let Some(security_manager) = hub.security_manager() else {
+        return Ok(());
+    };
+
+    if registration.auth_token.is_empty() {
+        return Err(HubError::Permission("Missing auth token".to_string()));
+    }
+
+    let authenticated_node_id = security_manager
+        .node_authenticator()
+        .verify_token(&registration.auth_token)
+        .await?;
+
+    if authenticated_node_id != registration.node_id {
+        return Err(HubError::Permission(format!(
+            "Token node_id {} does not match registration node_id {}",
+            authenticated_node_id, registration.node_id
+        )));
+    }
+
+    Ok(())
 }
 
 /// 等待节点注册
@@ -176,68 +211,71 @@ async fn wait_for_registration(
     let timeout = Duration::from_secs(30);
 
     match tokio::time::timeout(timeout, receiver.next()).await {
-        Ok(Some(Ok(Message::Binary(data)))) => {
-            match MessageCodec::decode_node_to_hub(&data) {
-                Ok(NodeToHub::Register {
+        Ok(Some(Ok(Message::Binary(data)))) => match MessageCodec::decode_node_to_hub(&data) {
+            Ok(NodeToHub::Register {
+                node_id,
+                name,
+                capabilities,
+                workspace,
+                auth_token,
+                ..
+            }) => {
+                debug!("Node registration: {} ({})", name, node_id);
+                Some(Registration {
                     node_id,
                     name,
                     capabilities,
                     workspace,
-                    ..
-                }) => {
-                    debug!("Node registration: {} ({})", name, node_id);
-                    Some(Registration {
-                        node_id,
-                        name,
-                        capabilities,
-                        workspace,
-                    })
-                }
-                Ok(other) => {
-                    warn!(
-                        "Expected Register message, got: {:?}",
-                        std::mem::discriminant(&other)
-                    );
-                    None
-                }
-                Err(e) => {
-                    error!("Failed to decode registration message: {}", e);
-                    None
-                }
+                    auth_token,
+                })
             }
-        }
-        Ok(Some(Ok(Message::Text(text)))) => {
-            match serde_json::from_str::<NodeToHub>(&text) {
-                Ok(NodeToHub::Register {
+            Ok(other) => {
+                warn!(
+                    "Expected Register message, got: {:?}",
+                    std::mem::discriminant(&other)
+                );
+                None
+            }
+            Err(e) => {
+                error!("Failed to decode registration message: {}", e);
+                None
+            }
+        },
+        Ok(Some(Ok(Message::Text(text)))) => match serde_json::from_str::<NodeToHub>(&text) {
+            Ok(NodeToHub::Register {
+                node_id,
+                name,
+                capabilities,
+                workspace,
+                auth_token,
+                ..
+            }) => {
+                debug!("Node registration: {} ({})", name, node_id);
+                Some(Registration {
                     node_id,
                     name,
                     capabilities,
                     workspace,
-                    ..
-                }) => {
-                    debug!("Node registration: {} ({})", name, node_id);
-                    Some(Registration {
-                        node_id,
-                        name,
-                        capabilities,
-                        workspace,
-                    })
-                }
-                Ok(other) => {
-                    warn!(
-                        "Expected Register message, got: {:?}",
-                        std::mem::discriminant(&other)
-                    );
-                    None
-                }
-                Err(e) => {
-                    error!("Failed to parse registration message: {}", e);
-                    None
-                }
+                    auth_token,
+                })
             }
-        }
+            Ok(other) => {
+                warn!(
+                    "Expected Register message, got: {:?}",
+                    std::mem::discriminant(&other)
+                );
+                None
+            }
+            Err(e) => {
+                error!("Failed to parse registration message: {}", e);
+                None
+            }
+        },
         Ok(Some(Ok(other))) => {
-            warn!("Expected Text/Binary message for registration, got: {:?}", other);
+            warn!(
+                "Expected Text/Binary message for registration, got: {:?}",
+                other
+            );
             None
         }
         Ok(Some(Err(e))) => {

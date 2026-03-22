@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <em>Hub schedules work, Node executes locally, and DingTalk Stream provides the enterprise message entrypoint.</em>
+  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results.</em>
 </p>
 
 <p align="center">
@@ -35,30 +35,30 @@
 
 ## Overview
 
-The current mainline of this repository is the **v4.0 Hub-Node architecture**:
+The current mainline is the **v4.0 Hub-Node architecture**:
 
-- `uhorse-hub`: cloud-side control plane for node access, task scheduling, Web API, DingTalk intake, and result replies.
-- `uhorse-node`: local execution node that runs commands inside a controlled workspace and reports results back.
-- `uhorse-protocol`: message protocol between Hub and Node.
-- `uhorse-channel`: the current Hub runtime is wired for **DingTalk Stream mode**.
-- `uhorse-config`: shared configuration model used by Hub for DingTalk / LLM / base service settings.
+- `uhorse-hub`: cloud-side control plane for Node access, task scheduling, Web API, approval endpoints, and DingTalk Stream intake.
+- `uhorse-node`: local execution node binary.
+- `uhorse-node-runtime`: the real Node runtime implementation, including reconnect, workspace protection, permissions, approval requests, and task execution.
+- `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
+- `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
-These docs are now aligned to what is actually implemented in the repository. They no longer describe the old monolithic `uhorse` runtime, old health endpoints, or old `OPENCLAW_*` variables as the primary path.
+These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline.
 
 ## Current Status
 
 | Capability | Status | Notes |
 |------------|--------|-------|
-| Local Hub startup | ✅ | `uhorse-hub` serves `/api/health`, `/api/nodes`, and `/ws` |
-| Local Node startup | ✅ | `uhorse-node` loads `node.toml` and connects to Hub |
-| Hub → Node dispatch | ✅ | task submission triggers scheduling |
+| Local Hub startup | ✅ | actual health endpoint is `GET /api/health` |
+| Local Node startup | ✅ | `uhorse-node` loads `node.toml` and connects to `ws://.../ws` |
+| Node JWT bootstrap | ✅ | `POST /api/node-auth/token` issues tokens when `[security].jwt_secret` is configured |
+| Hub → Node dispatch | ✅ | `POST /api/tasks` submits work into the scheduler |
 | Node → Hub result return | ✅ | Node sends full `NodeToHub::TaskResult` |
-| Local roundtrip verification | ✅ | covered by `test_local_hub_node_roundtrip_file_exists` |
-| DingTalk Stream integration | ✅ | Stream mode is the intended path; no public webhook is required for message intake |
-| DingTalk natural-language planning | ✅ | Hub uses an LLM to plan natural-language requests into locally validated `FileCommand` / `ShellCommand` values |
-| DingTalk natural-language result summary | ✅ | Hub summarizes `CompletedTask` results with an LLM and falls back to structured text when summarization fails |
-| Node workspace protection and git automation | ✅ | Node stays inside the workspace by default, blocks dangerous git commands, and auto-stages newly created files |
-| Real DingTalk tenant verification | ✅ | the message intake and original-conversation reply path have been validated with a real enterprise tenant |
+| Approval loop | ✅ | `ApprovalRequest -> /api/approvals -> ApprovalResponse -> TaskResult` |
+| Node reconnect after Hub restart | ✅ | Node reconnects and re-registers automatically |
+| Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` covers a real Hub + Node + WebSocket roundtrip |
+| Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
+| DingTalk Stream integration | ✅ | Stream mode is the recommended path; webhook routes remain for compatibility only |
 
 ## Quick Start
 
@@ -67,7 +67,6 @@ These docs are now aligned to what is actually implemented in the repository. Th
 ```bash
 git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
-
 cargo build --release -p uhorse-hub -p uhorse-node
 ```
 
@@ -76,16 +75,16 @@ Build outputs:
 - `target/release/uhorse-hub`
 - `target/release/uhorse-node`
 
-### 2. Generate default config files
+### 2. Generate default configs
 
 ```bash
 ./target/release/uhorse-hub init --output hub.toml
 ./target/release/uhorse-node init --output node.toml
 ```
 
-If you only want the smallest local roundtrip setup, use the minimal configs below.
+### 3. Smallest local roundtrip
 
-### 3. Minimal local roundtrip config
+If you only want the smallest Hub ↔ Node loop first, use a minimal config.
 
 `hub.toml`:
 
@@ -104,58 +103,92 @@ max_retries = 3
 ```toml
 name = "local-node"
 workspace_path = "."
+require_git_repo = false
 
 [connection]
 hub_url = "ws://127.0.0.1:8765/ws"
-reconnect_interval_secs = 5
-heartbeat_interval_secs = 30
-connect_timeout_secs = 10
-max_reconnect_attempts = 10
-auth_token = ""
 ```
 
-### 4. Start Hub and Node
-
-Terminal 1:
+Start both processes:
 
 ```bash
 ./target/release/uhorse-hub --config hub.toml --log-level info
-```
-
-Terminal 2:
-
-```bash
 ./target/release/uhorse-node --config node.toml --log-level info
 ```
 
-### 5. Verify connectivity
+Verify:
 
 ```bash
 curl http://127.0.0.1:8765/api/health
 curl http://127.0.0.1:8765/api/nodes
 ```
 
-If `/api/nodes` returns an online node list, Hub and Node are connected.
+### 4. Enable auth and approvals
 
-### 6. Run the real local roundtrip integration test
+To match the current authenticated Hub-Node mainline, run Hub from unified config and set `[security].jwt_secret`:
 
-```bash
-cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
+```toml
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[security]
+jwt_secret = "replace-with-random-secret"
+token_expiry = 86400
+refresh_token_expiry = 2592000
+pairing_expiry = 300
+approval_enabled = true
+pairing_enabled = true
 ```
 
-This test starts a real Hub, a real WebSocket server, and a real Node, then verifies a file command is dispatched to the Node and returned back to the Hub.
+Then issue a token for a stable `node_id`:
 
-## DingTalk Stream Mode
+```bash
+curl -X POST http://127.0.0.1:8765/api/node-auth/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "node_id": "office-node-01",
+    "credentials": "bootstrap-secret"
+  }'
+```
 
-The current `uhorse-hub` runtime already wires DingTalk into the main execution flow:
+Put the returned `access_token` into `node.toml`:
 
-- Recommended mode: **Stream mode**
-- Benefit: no public IP or public webhook is required for inbound message delivery
-- Hub first uses an LLM to plan natural-language requests into locally validated `FileCommand` / `ShellCommand` values
-- Local validation keeps paths inside the workspace and rejects dangerous git commands
-- Hub prefers LLM-generated result summaries before replying to the original DingTalk conversation, and falls back to structured text if summarization fails
+```toml
+name = "office-node-01"
+node_id = "office-node-01"
+workspace_path = "."
+require_git_repo = false
 
-To enable DingTalk, use a unified config file. See [CONFIG-en.md](CONFIG-en.md) and [CHANNELS-en.md](CHANNELS-en.md).
+[connection]
+hub_url = "ws://127.0.0.1:8765/ws"
+auth_token = "<access_token>"
+```
+
+### 5. Submit a minimal task
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": {
+      "type": "file",
+      "action": "exists",
+      "path": "/tmp/demo.txt"
+    },
+    "user_id": "api-user",
+    "session_id": "api-session",
+    "channel": "api"
+  }'
+```
+
+Query real task status with:
+
+```bash
+curl http://127.0.0.1:8765/api/tasks/<task_id>
+```
+
+> Note: `GET /api/tasks` is still a placeholder in the current implementation. Use `GET /api/tasks/:task_id` for real status.
 
 ## Architecture
 
@@ -165,52 +198,62 @@ To enable DingTalk, use a unified config file. See [CONFIG-en.md](CONFIG-en.md) 
 │  • Web API: /api/health /api/nodes /api/*   │
 │  • WebSocket: /ws                            │
 │  • Task Scheduler                            │
-│  • DingTalk Stream / result reply            │
+│  • Approval API                              │
+│  • DingTalk Stream                           │
 └──────────────────────────────────────────────┘
                       │
                       │ WebSocket
                       ▼
 ┌──────────────────────────────────────────────┐
-│                 uhorse-node                  │
-│  • Workspace                                 │
-│  • Permission Manager                        │
-│  • Command Executor                          │
-│  • TaskResult return                         │
+│             uhorse-node-runtime              │
+│  • Connection loop / reconnect               │
+│  • Workspace protection                      │
+│  • Permission manager                        │
+│  • Command executor                          │
+│  • TaskResult / ApprovalRequest              │
 └──────────────────────────────────────────────┘
+                      │
+                      ▼
+               ┌───────────────┐
+               │   workspace   │
+               └───────────────┘
 ```
 
 ### Primary source entrypoints
 
 - Hub startup and unified config loading: `crates/uhorse-hub/src/main.rs`
-- Hub Web API and DingTalk routing: `crates/uhorse-hub/src/web/mod.rs`
-- Hub scheduling core: `crates/uhorse-hub/src/hub.rs`
-- Node startup entrypoint: `crates/uhorse-node/src/main.rs`
-- Node execution and result return: `crates/uhorse-node/src/node.rs`
-- Local roundtrip test: `crates/uhorse-hub/tests/integration_test.rs`
+- Hub Web API: `crates/uhorse-hub/src/web/mod.rs`
+- Hub WebSocket auth and registration: `crates/uhorse-hub/src/web/ws.rs`
+- Hub scheduler: `crates/uhorse-hub/src/task_scheduler.rs`
+- Node CLI entrypoint: `crates/uhorse-node/src/main.rs`
+- Node runtime: `crates/uhorse-node-runtime/src/node.rs`
+- Node connection loop: `crates/uhorse-node-runtime/src/connection.rs`
+- Local integration tests: `crates/uhorse-hub/tests/integration_test.rs`
 
 ## Documentation Index
 
 | Document | Description |
 |----------|-------------|
-| [INSTALL-en.md](INSTALL-en.md) | installation and binary build |
-| [LOCAL_SETUP.md](LOCAL_SETUP.md) | local Hub-Node development and startup |
-| [CONFIG-en.md](CONFIG-en.md) | actual config structure and examples |
+| [API-en.md](API-en.md) | current implemented Hub-Node API surface |
+| [LOCAL_SETUP.md](LOCAL_SETUP.md) | local dual-process setup, JWT bootstrap, approval, and reconnect regression |
+| [CONFIG-en.md](CONFIG-en.md) | unified config, legacy HubConfig, NodeConfig, and permission rules |
 | [CHANNELS-en.md](CHANNELS-en.md) | current channel status, focused on DingTalk Stream |
-| [TESTING.md](TESTING.md) | build, test, and local roundtrip verification |
+| [TESTING.md](TESTING.md) | package tests, workspace tests, and manual regression order |
 | [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4.0 Hub-Node deployment guide |
-| [deployments/DEPLOYMENT.md](deployments/DEPLOYMENT.md) | deployment overview and migration notes |
+| [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4.0 architecture details |
 
 ## Workspace Layout
 
 ```text
 crates/
-├── uhorse-hub/        # cloud hub
-├── uhorse-node/       # local node
-├── uhorse-protocol/   # Hub-Node protocol
-├── uhorse-channel/    # channel implementations (current Hub runtime focuses on DingTalk)
-├── uhorse-config/     # unified configuration
-├── uhorse-llm/        # LLM client
-└── ...                # other 3.x / 4.0 related modules
+├── uhorse-hub/           # cloud hub
+├── uhorse-node/          # Node CLI binary entrypoint
+├── uhorse-node-runtime/  # actual Node runtime
+├── uhorse-protocol/      # Hub-Node protocol
+├── uhorse-channel/       # channel implementations
+├── uhorse-config/        # unified config model
+├── uhorse-llm/           # LLM client
+└── ...
 ```
 
 ## License

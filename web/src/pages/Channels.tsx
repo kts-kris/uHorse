@@ -1,444 +1,219 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
-  Card,
-  Row,
-  Col,
-  Statistic,
-  Switch,
-  Button,
-  Tag,
-  Space,
-  Modal,
-  Form,
-  Input,
-  Select,
-  message,
-  Descriptions,
-  Badge,
   Alert,
+  Card,
+  Col,
+  Descriptions,
+  Empty,
+  List,
+  Row,
+  Space,
   Spin,
+  Statistic,
+  Tag,
+  Typography,
 } from 'antd';
 import {
   ApiOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
-  ReloadOutlined,
-  SettingOutlined,
-  TestTubeOutlined,
+  ClockCircleOutlined,
+  DisconnectOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { ChannelStatus } from '../types';
-
-// 模拟 API
-const channelsApi = {
-  listChannels: async (): Promise<ChannelStatus[]> => {
-    const response = await fetch('/api/v1/channels');
-    if (!response.ok) throw new Error('Failed to fetch channels');
-    return response.json();
-  },
-  getChannelStatus: async (channelType: string): Promise<ChannelStatus> => {
-    const response = await fetch(`/api/v1/channels/${channelType}`);
-    if (!response.ok) throw new Error('Failed to fetch channel status');
-    return response.json();
-  },
-  enableChannel: async (channelType: string): Promise<void> => {
-    const response = await fetch(`/api/v1/channels/${channelType}/enable`, {
-      method: 'POST',
-    });
-    if (!response.ok) throw new Error('Failed to enable channel');
-  },
-  disableChannel: async (channelType: string): Promise<void> => {
-    const response = await fetch(`/api/v1/channels/${channelType}/disable`, {
-      method: 'POST',
-    });
-    if (!response.ok) throw new Error('Failed to disable channel');
-  },
-  testChannel: async (channelType: string): Promise<{ success: boolean; message: string }> => {
-    const response = await fetch(`/api/v1/channels/${channelType}/test`, {
-      method: 'POST',
-    });
-    if (!response.ok) throw new Error('Failed to test channel');
-    return response.json();
-  },
-};
-
-// 通道配置
-const CHANNEL_CONFIGS: Record<
-  string,
-  { name: string; icon: string; description: string }
-> = {
-  telegram: {
-    name: 'Telegram',
-    icon: '📱',
-    description: 'Telegram Bot API 消息通道',
-  },
-  dingtalk: {
-    name: '钉钉',
-    icon: '🔔',
-    description: '钉钉企业内部应用机器人',
-  },
-  feishu: {
-    name: '飞书',
-    icon: '🚀',
-    description: '飞书自建应用消息推送',
-  },
-  wecom: {
-    name: '企业微信',
-    icon: '💬',
-    description: '企业微信应用消息通道',
-  },
-  slack: {
-    name: 'Slack',
-    icon: '💼',
-    description: 'Slack App 与 Slash Commands',
-  },
-  discord: {
-    name: 'Discord',
-    icon: '🎮',
-    description: 'Discord Bot 与 Gateway',
-  },
-  whatsapp: {
-    name: 'WhatsApp',
-    icon: '📲',
-    description: 'WhatsApp Business API',
-  },
-};
+import { systemService } from '../services/system';
 
 const Channels: React.FC = () => {
-  const queryClient = useQueryClient();
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [isTestOpen, setIsTestOpen] = useState(false);
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
-  const [form] = Form.useForm();
-
-  // 获取通道列表
-  const { data: channels, isLoading } = useQuery({
-    queryKey: ['channels'],
-    queryFn: channelsApi.listChannels,
-    refetchInterval: 30000, // 30秒刷新一次
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: statsError,
+  } = useQuery({
+    queryKey: ['hub-stats'],
+    queryFn: systemService.getStats,
+    refetchInterval: 5000,
   });
 
-  // 启用通道
-  const enableMutation = useMutation({
-    mutationFn: channelsApi.enableChannel,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['channels'] });
-      message.success('通道已启用');
-    },
-    onError: () => message.error('启用失败'),
+  const {
+    data: nodes = [],
+    isLoading: nodesLoading,
+    error: nodesError,
+  } = useQuery({
+    queryKey: ['runtime-nodes'],
+    queryFn: systemService.getNodes,
+    refetchInterval: 5000,
   });
 
-  // 禁用通道
-  const disableMutation = useMutation({
-    mutationFn: channelsApi.disableChannel,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['channels'] });
-      message.success('通道已禁用');
-    },
-    onError: () => message.error('禁用失败'),
-  });
+  const loading = statsLoading || nodesLoading;
 
-  // 测试通道
-  const testMutation = useMutation({
-    mutationFn: channelsApi.testChannel,
-    onSuccess: (result) => {
-      setTestResult(result);
-      if (result.success) {
-        message.success('通道测试成功');
-      } else {
-        message.error('通道测试失败');
-      }
-    },
-    onError: () => {
-      setTestResult({ success: false, message: '测试请求失败' });
-      message.error('测试失败');
-    },
-  });
+  const channelStats = useMemo(() => {
+    const onlineNodes = nodes.filter((node) => node.state.toLowerCase() === 'online').length;
+    const busyNodes = nodes.filter((node) => node.state.toLowerCase() === 'busy').length;
+    const taskNodes = nodes.filter((node) => node.current_tasks > 0).length;
 
-  const handleToggle = (channelType: string, enabled: boolean) => {
-    if (enabled) {
-      enableMutation.mutate(channelType);
-    } else {
-      disableMutation.mutate(channelType);
-    }
-  };
-
-  const handleOpenConfig = (channelType: string) => {
-    setSelectedChannel(channelType);
-    // 加载通道配置
-    form.setFieldsValue({
-      // 这里应该从 API 获取实际配置
-    });
-    setIsConfigOpen(true);
-  };
-
-  const handleOpenTest = (channelType: string) => {
-    setSelectedChannel(channelType);
-    setTestResult(null);
-    setIsTestOpen(true);
-  };
-
-  const handleTest = () => {
-    if (selectedChannel) {
-      testMutation.mutate(selectedChannel);
-    }
-  };
-
-  const renderChannelCard = (status: ChannelStatus) => {
-    const config = CHANNEL_CONFIGS[status.channel_type] || {
-      name: status.channel_type,
-      icon: '🔌',
-      description: '未知通道类型',
+    return {
+      onlineNodes,
+      busyNodes,
+      taskNodes,
+      totalNodes: stats?.nodes.total_nodes || nodes.length,
     };
+  }, [nodes, stats]);
 
+  if (loading && !stats) {
     return (
-      <Col key={status.channel_type} xs={24} sm={12} md={8} lg={6}>
-        <Card
-          hoverable
-          actions={[
-            <Switch
-              key="toggle"
-              checked={status.enabled}
-              onChange={(checked) => handleToggle(status.channel_type, checked)}
-              loading={
-                enableMutation.isPending || disableMutation.isPending
-              }
-            />,
-            <Button
-              key="config"
-              type="text"
-              icon={<SettingOutlined />}
-              onClick={() => handleOpenConfig(status.channel_type)}
-            >
-              配置
-            </Button>,
-            <Button
-              key="test"
-              type="text"
-              icon={<TestTubeOutlined />}
-              onClick={() => handleOpenTest(status.channel_type)}
-            >
-              测试
-            </Button>,
-          ]}
-        >
-          <Card.Meta
-            avatar={
-              <span style={{ fontSize: 32 }}>{config.icon}</span>
-            }
-            title={
-              <Space>
-                {config.name}
-                {status.running ? (
-                  <Badge status="success" />
-                ) : (
-                  <Badge status="default" />
-                )}
-              </Space>
-            }
-            description={config.description}
-          />
-          <div style={{ marginTop: 16 }}>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <div>
-                <span style={{ color: '#999' }}>状态: </span>
-                {status.connected ? (
-                  <Tag color="green" icon={<CheckCircleOutlined />}>
-                    已连接
-                  </Tag>
-                ) : (
-                  <Tag color="default" icon={<CloseCircleOutlined />}>
-                    未连接
-                  </Tag>
-                )}
-              </div>
-              {status.last_activity && (
-                <div>
-                  <span style={{ color: '#999' }}>最后活动: </span>
-                  <span style={{ fontSize: 12 }}>
-                    {new Date(status.last_activity).toLocaleString()}
-                  </span>
-                </div>
-              )}
-              {status.error && (
-                <Alert
-                  message={status.error}
-                  type="error"
-                  showIcon
-                  style={{ marginTop: 8 }}
-                />
-              )}
-            </Space>
-          </div>
-        </Card>
-      </Col>
+      <div style={{ textAlign: 'center', padding: 48 }}>
+        <Spin size="large" />
+      </div>
     );
-  };
-
-  // 统计数据
-  const stats = {
-    total: channels?.length || 0,
-    enabled: channels?.filter((c) => c.enabled).length || 0,
-    connected: channels?.filter((c) => c.connected).length || 0,
-  };
+  }
 
   return (
-    <div>
-      {/* 统计卡片 */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={8}>
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert
+        type="info"
+        showIcon
+        message="当前控制面暂无独立的通道启停 / 测试 API。"
+        description="此页展示 Hub 已接入的消息入口与节点侧运行状态；DingTalk webhook 已接入，文件 / shell 执行仍通过在线节点承载。"
+      />
+
+      {statsError && (
+        <Alert
+          type="error"
+          showIcon
+          message="加载 Hub 统计失败"
+          description={statsError instanceof Error ? statsError.message : '未知错误'}
+        />
+      )}
+
+      {nodesError && (
+        <Alert
+          type="error"
+          showIcon
+          message="加载节点状态失败"
+          description={nodesError instanceof Error ? nodesError.message : '未知错误'}
+        />
+      )}
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic
-              title="通道总数"
-              value={stats.total}
-              prefix={<ApiOutlined />}
-            />
+            <Statistic title="接入入口" value={1} prefix={<ApiOutlined />} suffix="个" />
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic
-              title="已启用"
-              value={stats.enabled}
-              valueStyle={{ color: '#3f8600' }}
-              prefix={<CheckCircleOutlined />}
-            />
+            <Statistic title="在线节点" value={channelStats.onlineNodes} prefix={<CheckCircleOutlined />} />
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic
-              title="已连接"
-              value={stats.connected}
-              valueStyle={{ color: '#1890ff' }}
-              prefix={<ApiOutlined />}
-            />
+            <Statistic title="忙碌节点" value={channelStats.busyNodes} prefix={<ClockCircleOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="承载任务节点" value={channelStats.taskNodes} prefix={<DisconnectOutlined />} />
           </Card>
         </Col>
       </Row>
 
-      {/* 通道列表 */}
-      <Card
-        title="通道管理"
-        extra={
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['channels'] })}
-          >
-            刷新
-          </Button>
-        }
-      >
-        {isLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin size="large" />
-          </div>
-        ) : (
-          <Row gutter={[16, 16]}>
-            {channels?.map(renderChannelCard)}
-          </Row>
-        )}
+      <Card title="消息入口">
+        <List
+          dataSource={[
+            {
+              key: 'dingtalk-webhook',
+              name: 'DingTalk Webhook',
+              status: '已接入',
+              description: 'Hub 提供 /api/v1/channels/dingtalk/webhook 入站接口，用于接收钉钉回调。',
+            },
+          ]}
+          renderItem={(item) => (
+            <List.Item key={item.key}>
+              <Descriptions size="small" column={1} style={{ width: '100%' }}>
+                <Descriptions.Item label="名称">
+                  <Space>
+                    <Typography.Text strong>{item.name}</Typography.Text>
+                    <Tag color="green">{item.status}</Tag>
+                  </Space>
+                </Descriptions.Item>
+                <Descriptions.Item label="说明">{item.description}</Descriptions.Item>
+              </Descriptions>
+            </List.Item>
+          )}
+        />
       </Card>
 
-      {/* 配置 Modal */}
-      <Modal
-        title={`${CHANNEL_CONFIGS[selectedChannel || '']?.name || selectedChannel} 配置`}
-        open={isConfigOpen}
-        onCancel={() => setIsConfigOpen(false)}
-        onOk={() => form.submit()}
-        width={600}
-      >
-        <Form form={form} layout="vertical">
-          {selectedChannel === 'telegram' && (
-            <>
-              <Form.Item
-                name="bot_token"
-                label="Bot Token"
-                rules={[{ required: true }]}
-              >
-                <Input.Password placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz" />
-              </Form.Item>
-              <Form.Item name="webhook_url" label="Webhook URL">
-                <Input placeholder="https://your-domain.com/api/webhooks/telegram" />
-              </Form.Item>
-            </>
-          )}
-          {selectedChannel === 'dingtalk' && (
-            <>
-              <Form.Item
-                name="app_key"
-                label="AppKey"
-                rules={[{ required: true }]}
-              >
-                <Input placeholder="钉钉应用的 AppKey" />
-              </Form.Item>
-              <Form.Item
-                name="app_secret"
-                label="AppSecret"
-                rules={[{ required: true }]}
-              >
-                <Input.Password placeholder="钉钉应用的 AppSecret" />
-              </Form.Item>
-            </>
-          )}
-          {selectedChannel === 'feishu' && (
-            <>
-              <Form.Item
-                name="app_id"
-                label="App ID"
-                rules={[{ required: true }]}
-              >
-                <Input placeholder="飞书应用的 App ID" />
-              </Form.Item>
-              <Form.Item
-                name="app_secret"
-                label="App Secret"
-                rules={[{ required: true }]}
-              >
-                <Input.Password placeholder="飞书应用的 App Secret" />
-              </Form.Item>
-            </>
-          )}
-        </Form>
-      </Modal>
-
-      {/* 测试 Modal */}
-      <Modal
-        title={`测试 ${CHANNEL_CONFIGS[selectedChannel || '']?.name || selectedChannel} 通道`}
-        open={isTestOpen}
-        onCancel={() => setIsTestOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setIsTestOpen(false)}>
-            关闭
-          </Button>,
-          <Button
-            key="test"
-            type="primary"
-            loading={testMutation.isPending}
-            onClick={handleTest}
-          >
-            发送测试消息
-          </Button>,
-        ]}
-      >
-        {testResult && (
-          <Alert
-            message={testResult.success ? '测试成功' : '测试失败'}
-            description={testResult.message}
-            type={testResult.success ? 'success' : 'error'}
-            showIcon
-            style={{ marginBottom: 16 }}
+      <Card title="节点侧承载状态">
+        {nodes.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已注册节点" />
+        ) : (
+          <List
+            dataSource={nodes}
+            renderItem={(node) => (
+              <List.Item key={node.node_id}>
+                <Row gutter={[16, 16]} style={{ width: '100%' }}>
+                  <Col xs={24} md={8}>
+                    <Space direction="vertical" size={4}>
+                      <Space>
+                        <Typography.Text strong>{node.name}</Typography.Text>
+                        <Tag color={nodeStateColor(node.state)}>{node.state}</Tag>
+                      </Space>
+                      <Typography.Text code>{node.node_id}</Typography.Text>
+                      <Typography.Text type="secondary">{node.workspace.path}</Typography.Text>
+                    </Space>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Descriptions size="small" column={1}>
+                      <Descriptions.Item label="当前任务">{node.current_tasks}</Descriptions.Item>
+                      <Descriptions.Item label="已完成">{node.completed_tasks}</Descriptions.Item>
+                      <Descriptions.Item label="失败">{node.failed_tasks}</Descriptions.Item>
+                    </Descriptions>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Descriptions size="small" column={1}>
+                      <Descriptions.Item label="支持命令">
+                        <Space size={[4, 4]} wrap>
+                          {node.capabilities.supported_commands.map((command) => (
+                            <Tag key={command}>{command}</Tag>
+                          ))}
+                        </Space>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="最后心跳">
+                        {formatDateTime(node.last_heartbeat)}
+                      </Descriptions.Item>
+                    </Descriptions>
+                  </Col>
+                </Row>
+              </List.Item>
+            )}
           />
         )}
-        <p>点击下方按钮发送测试消息到配置的通道。</p>
-      </Modal>
-    </div>
+      </Card>
+    </Space>
   );
 };
+
+function formatDateTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return value;
+  }
+  return new Date(timestamp).toLocaleString();
+}
+
+function nodeStateColor(state: string): string {
+  switch (state.toLowerCase()) {
+    case 'online':
+      return 'green';
+    case 'busy':
+      return 'orange';
+    case 'offline':
+      return 'default';
+    case 'maintenance':
+      return 'purple';
+    default:
+      return 'blue';
+  }
+}
 
 export default Channels;

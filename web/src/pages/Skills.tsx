@@ -1,405 +1,264 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Table,
+  Alert,
   Button,
-  Space,
-  Modal,
-  Form,
-  Input,
-  Switch,
-  Tag,
-  message,
-  Popconfirm,
   Card,
-  Tabs,
+  Col,
   Descriptions,
-  Collapse,
+  Drawer,
+  Row,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
 } from 'antd';
 import {
-  PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  PlayCircleOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
   CodeOutlined,
   InfoCircleOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
 
-import { Skill, CreateSkillRequest, SkillParameter } from '../types';
-
-// 模拟 API（实际应从 services 导入）
-const skillsApi = {
-  listSkills: async (): Promise<Skill[]> => {
-    const response = await fetch('/api/v1/skills');
-    if (!response.ok) throw new Error('Failed to fetch skills');
-    return response.json();
-  },
-  createSkill: async (data: CreateSkillRequest): Promise<Skill> => {
-    const response = await fetch('/api/v1/skills', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) throw new Error('Failed to create skill');
-    return response.json();
-  },
-  updateSkill: async (id: string, data: Partial<Skill>): Promise<Skill> => {
-    const response = await fetch(`/api/v1/skills/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) throw new Error('Failed to update skill');
-    return response.json();
-  },
-  deleteSkill: async (id: string): Promise<void> => {
-    const response = await fetch(`/api/v1/skills/${id}`, { method: 'DELETE' });
-    if (!response.ok) throw new Error('Failed to delete skill');
-  },
-};
+import type { SkillRuntimeSummary } from '../types';
+import { skillService } from '../services/agents';
 
 const Skills: React.FC = () => {
-  const queryClient = useQueryClient();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
-  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
-  const [form] = Form.useForm();
+  const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
 
-  // 获取技能列表
-  const { data: skills, isLoading } = useQuery({
-    queryKey: ['skills'],
-    queryFn: skillsApi.listSkills,
+  const {
+    data: skills = [],
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['skills-runtime'],
+    queryFn: skillService.list,
   });
 
-  // 创建技能
-  const createMutation = useMutation({
-    mutationFn: skillsApi.createSkill,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['skills'] });
-      message.success('技能创建成功');
-      handleCloseModal();
-    },
-    onError: () => message.error('技能创建失败'),
+  const {
+    data: skillDetail,
+    isLoading: isDetailLoading,
+    error: detailError,
+  } = useQuery({
+    queryKey: ['skill-runtime', selectedSkillName],
+    queryFn: () => skillService.get(selectedSkillName!),
+    enabled: selectedSkillName !== null,
   });
 
-  // 更新技能
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Skill> }) =>
-      skillsApi.updateSkill(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['skills'] });
-      message.success('技能更新成功');
-      handleCloseModal();
-    },
-    onError: () => message.error('技能更新失败'),
-  });
-
-  // 删除技能
-  const deleteMutation = useMutation({
-    mutationFn: skillsApi.deleteSkill,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['skills'] });
-      message.success('技能删除成功');
-    },
-    onError: () => message.error('技能删除失败'),
-  });
-
-  // 切换启用状态
-  const toggleMutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      skillsApi.updateSkill(id, { enabled }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['skills'] });
-      message.success('状态更新成功');
-    },
-  });
-
-  const handleOpenModal = (skill?: Skill) => {
-    if (skill) {
-      setEditingSkill(skill);
-      form.setFieldsValue({
-        ...skill,
-        skill_content: JSON.stringify(skill.parameters, null, 2),
-      });
-    } else {
-      setEditingSkill(null);
-      form.resetFields();
-    }
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setEditingSkill(null);
-    form.resetFields();
-  };
-
-  const handleViewDetail = (skill: Skill) => {
-    setSelectedSkill(skill);
-    setIsDetailOpen(true);
-  };
-
-  const handleSubmit = async () => {
-    const values = await form.validateFields();
-    const skillData: CreateSkillRequest = {
-      name: values.name,
-      description: values.description,
-      version: values.version || '1.0.0',
-      author: values.author,
-      skill_content: values.skill_content,
+  const stats = useMemo(() => {
+    const totalTimeout = skills.reduce((sum, skill) => sum + skill.timeout_secs, 0);
+    return {
+      total: skills.length,
+      enabled: skills.filter((skill) => skill.enabled).length,
+      processMode: skills.filter((skill) => skill.execution_mode === 'process').length,
+      avgTimeout: skills.length === 0 ? 0 : Math.round(totalTimeout / skills.length),
     };
-    if (editingSkill) {
-      updateMutation.mutate({ id: editingSkill.id, data: skillData });
-    } else {
-      createMutation.mutate(skillData);
-    }
-  };
+  }, [skills]);
 
-  const renderParameterType = (type: string) => {
-    const colors: Record<string, string> = {
-      string: 'blue',
-      number: 'green',
-      boolean: 'orange',
-      object: 'purple',
-      array: 'cyan',
-    };
-    return <Tag color={colors[type] || 'default'}>{type}</Tag>;
-  };
-
-  const columns: ColumnsType<Skill> = [
+  const columns: ColumnsType<SkillRuntimeSummary> = [
     {
-      title: '名称',
+      title: 'Skill',
       dataIndex: 'name',
       key: 'name',
-      width: 150,
-      render: (name) => <Tag color="geekblue">{name}</Tag>,
+      width: 220,
+      render: (_, record) => (
+        <Space direction="vertical" size={4}>
+          <Space>
+            <Typography.Text strong>{record.name}</Typography.Text>
+            {record.enabled ? <Tag color="green">启用</Tag> : <Tag>禁用</Tag>}
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {record.version}
+          </Typography.Text>
+        </Space>
+      ),
     },
     {
       title: '描述',
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
+      render: (value: string) => value || '-',
     },
     {
-      title: '版本',
-      dataIndex: 'version',
-      key: 'version',
-      width: 100,
-      render: (v) => <Tag>{v}</Tag>,
-    },
-    {
-      title: '作者',
-      dataIndex: 'author',
-      key: 'author',
+      title: '执行方式',
+      dataIndex: 'execution_mode',
+      key: 'execution_mode',
       width: 120,
+      render: (value: string) => <Tag color={value === 'process' ? 'blue' : 'default'}>{value}</Tag>,
     },
     {
-      title: '参数数量',
-      dataIndex: 'parameters',
-      key: 'parameters',
+      title: '超时',
+      dataIndex: 'timeout_secs',
+      key: 'timeout_secs',
       width: 100,
-      render: (params: SkillParameter[]) => params?.length || 0,
+      render: (value: number) => `${value}s`,
     },
     {
-      title: '状态',
-      dataIndex: 'enabled',
-      key: 'enabled',
-      width: 100,
-      render: (enabled, record) => (
-        <Switch
-          checked={enabled}
-          onChange={(checked) =>
-            toggleMutation.mutate({ id: record.id, enabled: checked })
-          }
-          checkedChildren={<PlayCircleOutlined />}
-          unCheckedChildren={<PlayCircleOutlined />}
-        />
-      ),
+      title: '权限',
+      dataIndex: 'permissions',
+      key: 'permissions',
+      width: 220,
+      render: (permissions: string[]) =>
+        permissions.length > 0 ? (
+          <Space size={[4, 4]} wrap>
+            {permissions.map((permission) => (
+              <Tag key={permission}>{permission}</Tag>
+            ))}
+          </Space>
+        ) : (
+          <Tag>无</Tag>
+        ),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 100,
       render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<InfoCircleOutlined />}
-            onClick={() => handleViewDetail(record)}
-          >
-            详情
-          </Button>
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleOpenModal(record)}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定要删除此技能吗？"
-            onConfirm={() => deleteMutation.mutate(record.id)}
-          >
-            <Button type="link" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
+        <Button
+          type="link"
+          icon={<InfoCircleOutlined />}
+          onClick={() => setSelectedSkillName(record.name)}
+        >
+          详情
+        </Button>
       ),
     },
   ];
 
   return (
-    <Card
-      title="技能管理"
-      extra={
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => handleOpenModal()}
-        >
-          创建技能
-        </Button>
-      }
-    >
-      <Table
-        columns={columns}
-        dataSource={skills}
-        rowKey="id"
-        loading={isLoading}
-        pagination={{
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-      />
+    <div>
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="加载 Skill 运行时失败"
+          description={error instanceof Error ? error.message : '未知错误'}
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
-      {/* 创建/编辑 Modal */}
-      <Modal
-        title={editingSkill ? '编辑技能' : '创建技能'}
-        open={isModalOpen}
-        onOk={handleSubmit}
-        onCancel={handleCloseModal}
-        width={700}
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="Skill 总数" value={stats.total} prefix={<CodeOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="已启用" value={stats.enabled} prefix={<CheckCircleOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="Process 模式" value={stats.processMode} prefix={<CodeOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="平均超时" value={stats.avgTimeout} suffix="s" prefix={<ClockCircleOutlined />} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Card
+        title="Skill 运行时"
+        extra={
+          <Button icon={<ReloadOutlined />} loading={isFetching} onClick={() => void refetch()}>
+            刷新
+          </Button>
+        }
       >
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="name"
-            label="技能名称"
-            rules={[{ required: true, message: '请输入技能名称' }]}
-          >
-            <Input placeholder="例如：weather_query" />
-          </Form.Item>
+        <Table
+          rowKey="name"
+          columns={columns}
+          dataSource={skills}
+          loading={isLoading}
+          pagination={{ showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+        />
+      </Card>
 
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={2} placeholder="技能的功能描述" />
-          </Form.Item>
-
-          <Space>
-            <Form.Item
-              name="version"
-              label="版本"
-              initialValue="1.0.0"
-              rules={[{ required: true }]}
-            >
-              <Input placeholder="1.0.0" />
-            </Form.Item>
-            <Form.Item name="author" label="作者">
-              <Input placeholder="作者名称" />
-            </Form.Item>
-          </Space>
-
-          <Form.Item
-            name="skill_content"
-            label="技能内容"
-            rules={[{ required: true, message: '请输入技能内容' }]}
-          >
-            <Input.TextArea
-              rows={10}
-              placeholder="技能的 YAML/JSON 定义内容..."
-              style={{ fontFamily: 'monospace' }}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 详情 Modal */}
-      <Modal
-        title="技能详情"
-        open={isDetailOpen}
-        onCancel={() => setIsDetailOpen(false)}
-        footer={null}
-        width={700}
+      <Drawer
+        title={skillDetail ? `Skill 详情：${skillDetail.name}` : 'Skill 详情'}
+        width={760}
+        open={selectedSkillName !== null}
+        onClose={() => setSelectedSkillName(null)}
       >
-        {selectedSkill && (
-          <Tabs
-            items={[
-              {
-                key: 'info',
-                label: '基本信息',
-                children: (
-                  <Descriptions column={2} bordered>
-                    <Descriptions.Item label="名称">
-                      {selectedSkill.name}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="版本">
-                      {selectedSkill.version}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="作者">
-                      {selectedSkill.author || '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="状态">
-                      <Tag color={selectedSkill.enabled ? 'green' : 'default'}>
-                        {selectedSkill.enabled ? '已启用' : '已禁用'}
-                      </Tag>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="描述" span={2}>
-                      {selectedSkill.description || '-'}
-                    </Descriptions.Item>
-                  </Descriptions>
-                ),
-              },
-              {
-                key: 'params',
-                label: '参数定义',
-                children: (
-                  <Collapse
-                    items={(selectedSkill.parameters || []).map((param, idx) => ({
-                      key: idx,
-                      label: (
-                        <Space>
-                          <Tag>{param.name}</Tag>
-                          {renderParameterType(param.type)}
-                          {param.required && <Tag color="red">必填</Tag>}
-                        </Space>
-                      ),
-                      children: (
-                        <Descriptions column={1} size="small">
-                          <Descriptions.Item label="类型">
-                            {param.type}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="描述">
-                            {param.description || '-'}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="默认值">
-                            {param.default !== undefined
-                              ? JSON.stringify(param.default)
-                              : '-'}
-                          </Descriptions.Item>
-                        </Descriptions>
-                      ),
-                    }))}
-                  />
-                ),
-              },
-            ]}
+        {detailError && (
+          <Alert
+            type="error"
+            showIcon
+            message="加载 Skill 详情失败"
+            description={detailError instanceof Error ? detailError.message : '未知错误'}
+            style={{ marginBottom: 16 }}
           />
         )}
-      </Modal>
-    </Card>
+
+        {skillDetail && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="名称">{skillDetail.name}</Descriptions.Item>
+              <Descriptions.Item label="描述">
+                {skillDetail.description || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="版本">{skillDetail.version}</Descriptions.Item>
+              <Descriptions.Item label="作者">{skillDetail.author || '-'}</Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {skillDetail.enabled ? <Tag color="green">已启用</Tag> : <Tag>已禁用</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="执行方式">
+                <Tag color={skillDetail.execution_mode === 'process' ? 'blue' : 'default'}>
+                  {skillDetail.execution_mode}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="超时">{skillDetail.timeout_secs}s</Descriptions.Item>
+              <Descriptions.Item label="最大重试次数">
+                {skillDetail.max_retries}
+              </Descriptions.Item>
+              <Descriptions.Item label="可执行文件">
+                {skillDetail.executable ? (
+                  <Typography.Text code copyable>
+                    {skillDetail.executable}
+                  </Typography.Text>
+                ) : (
+                  '-'
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="权限">
+                {skillDetail.permissions.length > 0 ? (
+                  <Space size={[4, 4]} wrap>
+                    {skillDetail.permissions.map((permission) => (
+                      <Tag key={permission}>{permission}</Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  '-'
+                )}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Card size="small" title="命令参数" loading={isDetailLoading}>
+              <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                {skillDetail.args.length > 0 ? JSON.stringify(skillDetail.args, null, 2) : '[]'}
+              </Typography.Paragraph>
+            </Card>
+
+            <Card size="small" title="环境变量" loading={isDetailLoading}>
+              <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                {Object.keys(skillDetail.env).length > 0
+                  ? JSON.stringify(skillDetail.env, null, 2)
+                  : '{}'}
+              </Typography.Paragraph>
+            </Card>
+          </Space>
+        )}
+      </Drawer>
+    </div>
   );
 };
 

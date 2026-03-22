@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use tempfile::tempdir;
 use tokio::time::timeout;
-use uhorse_hub::{create_router, Hub, HubConfig, WebState};
-use uhorse_node::{ConnectionConfig, Node, NodeConfig};
+use uhorse_hub::{create_router, Hub, HubConfig, NodeAuthenticator, WebState};
+use uhorse_node_runtime::{ConnectionConfig, Node, NodeConfig};
 use uhorse_protocol::{
     Command, CommandOutput, FileCommand, NodeCapabilities, NodeId, Priority, SessionId,
     ShellCommand, TaskContext, UserId, WorkspaceInfo,
@@ -298,6 +298,77 @@ async fn test_node_disconnect() {
 }
 
 #[tokio::test]
+async fn test_local_hub_rejects_node_with_mismatched_auth_token() {
+    let workspace = tempdir().unwrap();
+
+    let hub_config = HubConfig {
+        hub_id: "roundtrip-auth-reject-hub".to_string(),
+        bind_address: "127.0.0.1".to_string(),
+        port: 18764,
+        heartbeat_timeout_secs: 10,
+        task_timeout_secs: 30,
+        ..Default::default()
+    };
+
+    let jwt_secret = "roundtrip-test-secret-12345";
+    let authenticator = NodeAuthenticator::with_secret(jwt_secret).unwrap();
+    let token_node_id = NodeId::from_string("token-node");
+    let auth_info = authenticator
+        .authenticate_node(&token_node_id, "roundtrip-credentials")
+        .await
+        .unwrap();
+
+    let security_manager = Arc::new(
+        uhorse_hub::SecurityManager::new(
+            jwt_secret,
+            Arc::new(uhorse_security::ApprovalManager::new()),
+        )
+        .unwrap(),
+    );
+    let (hub, _task_result_rx) = Hub::new_with_security(hub_config.clone(), Some(security_manager));
+    let hub = Arc::new(hub);
+    hub.start().await.unwrap();
+
+    let web_state = WebState::new(hub.clone(), None, None);
+    let app = create_router(web_state);
+    let listener =
+        tokio::net::TcpListener::bind((hub_config.bind_address.as_str(), hub_config.port))
+            .await
+            .unwrap();
+
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut node = Node::new(NodeConfig {
+        node_id: Some(NodeId::from_string("registered-node")),
+        name: "roundtrip-node".to_string(),
+        workspace_path: workspace.path().to_string_lossy().to_string(),
+        connection: ConnectionConfig {
+            hub_url: format!("ws://127.0.0.1:{}/ws", hub_config.port),
+            reconnect_interval_secs: 1,
+            heartbeat_interval_secs: 1,
+            connect_timeout_secs: 5,
+            max_reconnect_attempts: 1,
+            auth_token: Some(auth_info.access_token.clone()),
+        },
+        require_git_repo: false,
+        ..Default::default()
+    })
+    .unwrap();
+
+    node.start().await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert!(hub.get_online_nodes().await.is_empty());
+
+    node.stop().await.unwrap();
+    server.abort();
+    let _ = server.await;
+    hub.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn test_local_hub_node_roundtrip_file_exists() {
     let workspace = tempdir().unwrap();
     let existing_file = workspace.path().join("roundtrip.txt");
@@ -312,21 +383,39 @@ async fn test_local_hub_node_roundtrip_file_exists() {
         ..Default::default()
     };
 
-    let (hub, mut task_result_rx) = Hub::new(hub_config.clone());
+    let jwt_secret = "roundtrip-test-secret-12345";
+    let authenticator = NodeAuthenticator::with_secret(jwt_secret).unwrap();
+    let node_id = NodeId::from_string("roundtrip-authenticated-node");
+    let auth_info = authenticator
+        .authenticate_node(&node_id, "roundtrip-credentials")
+        .await
+        .unwrap();
+
+    let security_manager = Arc::new(
+        uhorse_hub::SecurityManager::new(
+            jwt_secret,
+            Arc::new(uhorse_security::ApprovalManager::new()),
+        )
+        .unwrap(),
+    );
+    let (hub, mut task_result_rx) =
+        Hub::new_with_security(hub_config.clone(), Some(security_manager));
     let hub = Arc::new(hub);
     hub.start().await.unwrap();
 
     let web_state = WebState::new(hub.clone(), None, None);
     let app = create_router(web_state);
-    let listener = tokio::net::TcpListener::bind((hub_config.bind_address.as_str(), hub_config.port))
-        .await
-        .unwrap();
+    let listener =
+        tokio::net::TcpListener::bind((hub_config.bind_address.as_str(), hub_config.port))
+            .await
+            .unwrap();
 
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
     let mut node = Node::new(NodeConfig {
+        node_id: Some(node_id.clone()),
         name: "roundtrip-node".to_string(),
         workspace_path: workspace.path().to_string_lossy().to_string(),
         connection: ConnectionConfig {
@@ -335,7 +424,7 @@ async fn test_local_hub_node_roundtrip_file_exists() {
             heartbeat_interval_secs: 1,
             connect_timeout_secs: 5,
             max_reconnect_attempts: 1,
-            auth_token: None,
+            auth_token: Some(auth_info.access_token.clone()),
         },
         require_git_repo: false,
         ..Default::default()
@@ -378,7 +467,10 @@ async fn test_local_hub_node_roundtrip_file_exists() {
     assert!(result.result.success);
     match &result.result.output {
         CommandOutput::Json { content } => {
-            assert_eq!(content.get("exists").and_then(|value| value.as_bool()), Some(true));
+            assert_eq!(
+                content.get("exists").and_then(|value| value.as_bool()),
+                Some(true)
+            );
         }
         other => panic!("unexpected output: {:?}", other),
     }

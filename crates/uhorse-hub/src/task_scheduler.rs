@@ -10,8 +10,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 use uhorse_protocol::{
-    Command, CommandResult, ExecutionError, HubToNode, MessageId, NodeCapabilities, NodeId,
-    Priority, TaskContext, TaskId, TaskStatus,
+    Command, CommandResult, CommandType, ExecutionError, HubToNode, MessageId,
+    NodeCapabilities, NodeId, Priority, TaskContext, TaskId, TaskStatus,
 };
 
 use crate::error::{HubError, HubResult};
@@ -51,6 +51,8 @@ pub struct RunningTask {
     pub command: Command,
     /// 上下文
     pub context: TaskContext,
+    /// 优先级
+    pub priority: Priority,
     /// 执行节点 ID
     pub node_id: NodeId,
     /// 开始时间
@@ -70,6 +72,8 @@ pub struct CompletedTask {
     pub command: Command,
     /// 上下文
     pub context: TaskContext,
+    /// 优先级
+    pub priority: Priority,
     /// 执行节点 ID
     pub node_id: NodeId,
     /// 开始时间
@@ -109,6 +113,10 @@ pub struct TaskStatusInfo {
     pub task_id: TaskId,
     /// 状态
     pub status: TaskStatus,
+    /// 命令类型
+    pub command_type: Option<CommandType>,
+    /// 优先级
+    pub priority: Option<Priority>,
     /// 执行节点 ID
     pub node_id: Option<NodeId>,
     /// 开始时间
@@ -341,6 +349,7 @@ impl TaskScheduler {
                         task_id: task.task_id.clone(),
                         command: task.command,
                         context: task.context,
+                        priority: task.priority,
                         node_id: node.node_id.clone(),
                         started_at: Utc::now(),
                         timeout_at: Utc::now()
@@ -393,6 +402,7 @@ impl TaskScheduler {
                 task_id: task_id.clone(),
                 command: running.command,
                 context: running.context,
+                priority: running.priority,
                 node_id: node_id.clone(),
                 started_at: running.started_at,
                 completed_at: Utc::now(),
@@ -481,6 +491,7 @@ impl TaskScheduler {
                     task_id: task_id.clone(),
                     command: running.command,
                     context: running.context,
+                    priority: running.priority,
                     node_id: running.node_id.clone(),
                     started_at: running.started_at,
                     completed_at: now,
@@ -517,6 +528,8 @@ impl TaskScheduler {
                 return Some(TaskStatusInfo {
                     task_id: task_id.clone(),
                     status: TaskStatus::Running,
+                    command_type: Some(running.command.command_type()),
+                    priority: Some(running.priority),
                     node_id: Some(running.node_id.clone()),
                     started_at: Some(running.started_at),
                     completed_at: None,
@@ -536,6 +549,8 @@ impl TaskScheduler {
                     } else {
                         TaskStatus::Failed
                     },
+                    command_type: Some(completed.command.command_type()),
+                    priority: Some(completed.priority),
                     node_id: Some(completed.node_id.clone()),
                     started_at: Some(completed.started_at),
                     completed_at: Some(completed.completed_at),
@@ -552,6 +567,8 @@ impl TaskScheduler {
                     return Some(TaskStatusInfo {
                         task_id: task_id.clone(),
                         status: TaskStatus::Queued,
+                        command_type: Some(task.command.command_type()),
+                        priority: Some(task.priority),
                         node_id: None,
                         started_at: None,
                         completed_at: None,

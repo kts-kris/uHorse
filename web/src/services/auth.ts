@@ -1,4 +1,5 @@
 import client from './api';
+import { getApiErrorMessage } from './api';
 import type { ApiResponse } from './api';
 import type { LoginRequest, TokenResponse } from '../types';
 
@@ -6,12 +7,12 @@ export const authService = {
   // 登录
   async login(credentials: LoginRequest): Promise<TokenResponse> {
     const response = await client.post<ApiResponse<TokenResponse>>('/api/v1/auth/login', credentials);
-    if (response.data.success) {
+    if (response.data.success && response.data.data !== null) {
       localStorage.setItem('access_token', response.data.data.access_token);
       localStorage.setItem('refresh_token', response.data.data.refresh_token);
       return response.data.data;
     }
-    throw new Error(response.data.error?.message || '登录失败');
+    throw new Error(getApiErrorMessage(response.data.error, '登录失败'));
   },
 
   // 登出
@@ -37,12 +38,12 @@ export const authService = {
     const response = await client.post<ApiResponse<TokenResponse>>('/api/v1/auth/refresh', {
       refresh_token: refreshToken,
     });
-    if (response.data.success) {
+    if (response.data.success && response.data.data !== null) {
       localStorage.setItem('access_token', response.data.data.access_token);
       localStorage.setItem('refresh_token', response.data.data.refresh_token);
       return response.data.data;
     }
-    throw new Error(response.data.error?.message || 'Token 刷新失败');
+    throw new Error(getApiErrorMessage(response.data.error, 'Token 刷新失败'));
   },
 
   // 检查是否已登录

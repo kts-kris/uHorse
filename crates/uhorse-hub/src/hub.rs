@@ -5,6 +5,7 @@
 use crate::error::{HubError, HubResult};
 use crate::message_router::MessageRouter;
 use crate::node_manager::{NodeManager, NodeManagerStats};
+use crate::security_integration::SecurityManager;
 use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskStatusInfo};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,8 @@ pub struct Hub {
     task_scheduler: Arc<TaskScheduler>,
     /// 消息路由器
     message_router: Arc<MessageRouter>,
+    /// 安全管理器
+    security_manager: Option<Arc<SecurityManager>>,
     /// 关闭信号
     shutdown_tx: broadcast::Sender<()>,
 }
@@ -90,6 +93,14 @@ pub struct Hub {
 impl Hub {
     /// 创建新的 Hub
     pub fn new(config: HubConfig) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
+        Self::new_with_security(config, None)
+    }
+
+    /// 创建带安全配置的 Hub
+    pub fn new_with_security(
+        config: HubConfig,
+        security_manager: Option<Arc<SecurityManager>>,
+    ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
         let node_manager = Arc::new(NodeManager::new(
             config.max_nodes,
             config.heartbeat_timeout_secs,
@@ -116,6 +127,7 @@ impl Hub {
                 node_manager,
                 task_scheduler,
                 message_router,
+                security_manager,
                 shutdown_tx,
             },
             task_result_rx,
@@ -210,7 +222,7 @@ impl Hub {
         );
 
         self.message_router
-            .route_node_message(node_id, message)
+            .route_node_message(node_id, message, self.security_manager.as_deref())
             .await?;
 
         if should_dispatch {
@@ -319,6 +331,11 @@ impl Hub {
     /// 获取消息路由器（供内部使用）
     pub fn message_router(&self) -> Arc<MessageRouter> {
         self.message_router.clone()
+    }
+
+    /// 获取安全管理器
+    pub fn security_manager(&self) -> Option<Arc<SecurityManager>> {
+        self.security_manager.clone()
     }
 }
 

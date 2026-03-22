@@ -70,6 +70,12 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Build Node Desktop Web
+        run: |
+          cd apps/node-desktop-web
+          npm install
+          npm run build
+
   # ==================== 代码检查 ====================
   lint:
     name: Lint

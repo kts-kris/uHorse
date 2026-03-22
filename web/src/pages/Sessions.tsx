@@ -1,339 +1,366 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Table,
+  Alert,
   Button,
-  Space,
-  Modal,
-  Tag,
-  message,
-  Popconfirm,
   Card,
+  Col,
   Descriptions,
-  Timeline,
-  Input,
-  Select,
-  Badge,
   Drawer,
+  Empty,
+  Input,
   List,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
 } from 'antd';
 import {
   EyeOutlined,
-  DeleteOutlined,
   MessageOutlined,
-  CloseCircleOutlined,
+  ReloadOutlined,
+  RobotOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
 
-import { Session, SessionMessage, SessionStatus } from '../types';
-
-// 模拟 API
-const sessionsApi = {
-  listSessions: async (params?: {
-    agent_id?: string;
-    status?: SessionStatus;
-  }): Promise<Session[]> => {
-    const query = new URLSearchParams();
-    if (params?.agent_id) query.set('agent_id', params.agent_id);
-    if (params?.status) query.set('status', params.status);
-    const response = await fetch(`/api/v1/sessions?${query}`);
-    if (!response.ok) throw new Error('Failed to fetch sessions');
-    return response.json();
-  },
-  getSession: async (id: string): Promise<Session> => {
-    const response = await fetch(`/api/v1/sessions/${id}`);
-    if (!response.ok) throw new Error('Failed to fetch session');
-    return response.json();
-  },
-  getSessionMessages: async (id: string): Promise<SessionMessage[]> => {
-    const response = await fetch(`/api/v1/sessions/${id}/messages`);
-    if (!response.ok) throw new Error('Failed to fetch messages');
-    return response.json();
-  },
-  deleteSession: async (id: string): Promise<void> => {
-    const response = await fetch(`/api/v1/sessions/${id}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) throw new Error('Failed to delete session');
-  },
-};
+import type { SessionRuntimeSummary } from '../types';
+import { sessionService } from '../services/agents';
 
 const Sessions: React.FC = () => {
-  const queryClient = useQueryClient();
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isMessagesOpen, setIsMessagesOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [searchParams, setSearchParams] = useState<{
-    agent_id?: string;
-    status?: SessionStatus;
-  }>({});
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [keyword, setKeyword] = useState('');
+  const [agentFilter, setAgentFilter] = useState<string | undefined>(undefined);
 
-  // 获取会话列表
-  const { data: sessions, isLoading } = useQuery({
-    queryKey: ['sessions', searchParams],
-    queryFn: () => sessionsApi.listSessions(searchParams),
+  const {
+    data: sessions = [],
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['sessions-runtime'],
+    queryFn: sessionService.list,
   });
 
-  // 获取消息历史
-  const { data: messages, isLoading: isLoadingMessages } = useQuery({
-    queryKey: ['session-messages', selectedSession?.id],
-    queryFn: () =>
-      selectedSession ? sessionsApi.getSessionMessages(selectedSession.id) : [],
-    enabled: !!selectedSession && isMessagesOpen,
+  const {
+    data: sessionDetail,
+    isLoading: isDetailLoading,
+    error: detailError,
+  } = useQuery({
+    queryKey: ['session-runtime', selectedSessionId],
+    queryFn: () => sessionService.get(selectedSessionId!),
+    enabled: selectedSessionId !== null,
   });
 
-  // 删除会话
-  const deleteMutation = useMutation({
-    mutationFn: sessionsApi.deleteSession,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      message.success('会话删除成功');
-    },
-    onError: () => message.error('会话删除失败'),
+  const {
+    data: messages = [],
+    isLoading: isMessagesLoading,
+    error: messagesError,
+  } = useQuery({
+    queryKey: ['session-runtime-messages', selectedSessionId],
+    queryFn: () => sessionService.getMessages(selectedSessionId!),
+    enabled: selectedSessionId !== null,
   });
 
-  const handleViewDetail = async (session: Session) => {
-    setSelectedSession(session);
-    setIsDetailOpen(true);
-  };
+  const filteredSessions = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return [...sessions]
+      .filter((session) => {
+        if (agentFilter && session.agent_id !== agentFilter) {
+          return false;
+        }
 
-  const handleViewMessages = (session: Session) => {
-    setSelectedSession(session);
-    setIsMessagesOpen(true);
-  };
+        if (!normalizedKeyword) {
+          return true;
+        }
 
-  const renderStatus = (status: SessionStatus) => {
-    const config: Record<
-      SessionStatus,
-      { color: string; text: string; status: 'success' | 'processing' | 'default' | 'error' }
-    > = {
-      active: { color: 'green', text: '活跃', status: 'success' },
-      paused: { color: 'orange', text: '暂停', status: 'processing' },
-      closed: { color: 'default', text: '已关闭', status: 'default' },
+        return [
+          session.session_id,
+          session.agent_id,
+          session.conversation_id,
+          session.sender_user_id,
+          session.sender_staff_id,
+        ]
+          .filter(Boolean)
+          .some((value) => value!.toLowerCase().includes(normalizedKeyword));
+      })
+      .sort(
+        (left, right) =>
+          new Date(right.last_active).getTime() - new Date(left.last_active).getTime()
+      );
+  }, [agentFilter, keyword, sessions]);
+
+  const agentOptions = useMemo(
+    () =>
+      Array.from(new Set(sessions.map((session) => session.agent_id).filter(Boolean))).map(
+        (agentId) => ({ label: agentId!, value: agentId! })
+      ),
+    [sessions]
+  );
+
+  const stats = useMemo(() => {
+    return {
+      totalSessions: sessions.length,
+      filteredSessions: filteredSessions.length,
+      totalMessages: filteredSessions.reduce((sum, session) => sum + session.message_count, 0),
+      boundAgents: new Set(filteredSessions.map((session) => session.agent_id).filter(Boolean)).size,
     };
-    const { color, text, status } = config[status];
-    return <Badge status={status} text={<Tag color={color}>{text}</Tag>} />;
-  };
+  }, [filteredSessions, sessions]);
 
-  const renderChannelType = (type: string) => {
-    const colors: Record<string, string> = {
-      telegram: 'blue',
-      dingtalk: 'cyan',
-      feishu: 'geekblue',
-      wecom: 'green',
-      slack: 'purple',
-      discord: 'magenta',
-      whatsapp: 'lime',
-    };
-    return <Tag color={colors[type] || 'default'}>{type.toUpperCase()}</Tag>;
-  };
-
-  const columns: ColumnsType<Session> = [
+  const columns: ColumnsType<SessionRuntimeSummary> = [
     {
-      title: '会话 ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 280,
-      render: (id) => (
-        <code style={{ fontSize: 12, color: '#666' }}>
-          {id.substring(0, 8)}...
-        </code>
+      title: 'Session',
+      dataIndex: 'session_id',
+      key: 'session_id',
+      width: 260,
+      render: (value: string) => (
+        <Typography.Text code ellipsis={{ tooltip: value }}>
+          {value}
+        </Typography.Text>
       ),
     },
     {
       title: 'Agent',
       dataIndex: 'agent_id',
       key: 'agent_id',
+      width: 160,
+      render: (value: string | null) => (value ? <Tag color="blue">{value}</Tag> : <Tag>未绑定</Tag>),
+    },
+    {
+      title: 'Conversation',
+      dataIndex: 'conversation_id',
+      key: 'conversation_id',
+      ellipsis: true,
+      render: (value: string | null) => value || '-',
+    },
+    {
+      title: '消息数',
+      dataIndex: 'message_count',
+      key: 'message_count',
+      width: 90,
+    },
+    {
+      title: '最近活跃',
+      dataIndex: 'last_active',
+      key: 'last_active',
       width: 200,
-      render: (agentId) => (
-        <Tag color="blue">{agentId.substring(0, 12)}...</Tag>
-      ),
-    },
-    {
-      title: '通道',
-      dataIndex: 'channel_type',
-      key: 'channel_type',
-      width: 120,
-      render: renderChannelType,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 100,
-      render: renderStatus,
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      render: (time) => dayjs(time).format('YYYY-MM-DD HH:mm:ss'),
-    },
-    {
-      title: '更新时间',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      width: 180,
-      render: (time) => dayjs(time).format('YYYY-MM-DD HH:mm:ss'),
+      render: (value: string) => formatDateTime(value),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 100,
       render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewDetail(record)}
-          >
-            详情
-          </Button>
-          <Button
-            type="link"
-            icon={<MessageOutlined />}
-            onClick={() => handleViewMessages(record)}
-          >
-            消息
-          </Button>
-          <Popconfirm
-            title="确定要删除此会话吗？"
-            onConfirm={() => deleteMutation.mutate(record.id)}
-          >
-            <Button type="link" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
+        <Button
+          type="link"
+          icon={<EyeOutlined />}
+          onClick={() => setSelectedSessionId(record.session_id)}
+        >
+          详情
+        </Button>
       ),
     },
   ];
 
   return (
-    <Card title="会话管理">
-      {/* 搜索过滤 */}
-      <Space style={{ marginBottom: 16 }}>
-        <Input
-          placeholder="Agent ID"
-          value={searchParams.agent_id}
-          onChange={(e) =>
-            setSearchParams({ ...searchParams, agent_id: e.target.value })
-          }
-          style={{ width: 200 }}
-          prefix={<SearchOutlined />}
-          allowClear
+    <div>
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="加载 Session 运行时失败"
+          description={error instanceof Error ? error.message : '未知错误'}
+          style={{ marginBottom: 16 }}
         />
-        <Select
-          placeholder="状态筛选"
-          value={searchParams.status}
-          onChange={(status) => setSearchParams({ ...searchParams, status })}
-          style={{ width: 120 }}
-          allowClear
-          options={[
-            { label: '活跃', value: 'active' },
-            { label: '暂停', value: 'paused' },
-            { label: '已关闭', value: 'closed' },
-          ]}
+      )}
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="Session 总数" value={stats.totalSessions} prefix={<MessageOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="筛选结果" value={stats.filteredSessions} prefix={<SearchOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="消息总数" value={stats.totalMessages} prefix={<MessageOutlined />} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic title="关联 Agent 数" value={stats.boundAgents} prefix={<RobotOutlined />} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Card
+        title="Session 运行时"
+        extra={
+          <Button icon={<ReloadOutlined />} loading={isFetching} onClick={() => void refetch()}>
+            刷新
+          </Button>
+        }
+      >
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Input
+            placeholder="搜索 Session / Agent / Conversation"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            prefix={<SearchOutlined />}
+            allowClear
+            style={{ width: 320 }}
+          />
+          <Select
+            allowClear
+            placeholder="按 Agent 筛选"
+            value={agentFilter}
+            onChange={(value) => setAgentFilter(value)}
+            options={agentOptions}
+            style={{ width: 220 }}
+          />
+        </Space>
+
+        <Table
+          rowKey="session_id"
+          columns={columns}
+          dataSource={filteredSessions}
+          loading={isLoading}
+          pagination={{ showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
         />
-      </Space>
+      </Card>
 
-      <Table
-        columns={columns}
-        dataSource={sessions}
-        rowKey="id"
-        loading={isLoading}
-        pagination={{
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-      />
-
-      {/* 会话详情 Drawer */}
       <Drawer
-        title="会话详情"
-        open={isDetailOpen}
-        onClose={() => setIsDetailOpen(false)}
-        width={500}
+        title={selectedSessionId ? `Session 详情：${selectedSessionId}` : 'Session 详情'}
+        width={800}
+        open={selectedSessionId !== null}
+        onClose={() => setSelectedSessionId(null)}
       >
-        {selectedSession && (
-          <Descriptions column={1} bordered>
-            <Descriptions.Item label="会话 ID">
-              <code>{selectedSession.id}</code>
-            </Descriptions.Item>
-            <Descriptions.Item label="Agent ID">
-              <code>{selectedSession.agent_id}</code>
-            </Descriptions.Item>
-            <Descriptions.Item label="通道类型">
-              {renderChannelType(selectedSession.channel_type)}
-            </Descriptions.Item>
-            <Descriptions.Item label="状态">
-              {renderStatus(selectedSession.status)}
-            </Descriptions.Item>
-            <Descriptions.Item label="创建时间">
-              {dayjs(selectedSession.created_at).format('YYYY-MM-DD HH:mm:ss')}
-            </Descriptions.Item>
-            <Descriptions.Item label="更新时间">
-              {dayjs(selectedSession.updated_at).format('YYYY-MM-DD HH:mm:ss')}
-            </Descriptions.Item>
-          </Descriptions>
-        )}
-      </Drawer>
-
-      {/* 消息历史 Drawer */}
-      <Drawer
-        title="消息历史"
-        open={isMessagesOpen}
-        onClose={() => setIsMessagesOpen(false)}
-        width={600}
-      >
-        {isLoadingMessages ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
-        ) : (
-          <List
-            dataSource={messages}
-            renderItem={(msg) => (
-              <List.Item>
-                <div style={{ width: '100%' }}>
-                  <Space style={{ marginBottom: 8 }}>
-                    <Tag
-                      color={
-                        msg.role === 'user'
-                          ? 'blue'
-                          : msg.role === 'assistant'
-                          ? 'green'
-                          : msg.role === 'system'
-                          ? 'purple'
-                          : 'orange'
-                      }
-                    >
-                      {msg.role}
-                    </Tag>
-                    <span style={{ color: '#999', fontSize: 12 }}>
-                      {dayjs(msg.created_at).format('HH:mm:ss')}
-                    </span>
-                  </Space>
-                  <div
-                    style={{
-                      padding: '8px 12px',
-                      background: '#f5f5f5',
-                      borderRadius: 8,
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {msg.content}
-                  </div>
-                </div>
-              </List.Item>
-            )}
+        {detailError && (
+          <Alert
+            type="error"
+            showIcon
+            message="加载 Session 详情失败"
+            description={detailError instanceof Error ? detailError.message : '未知错误'}
+            style={{ marginBottom: 16 }}
           />
         )}
+
+        {messagesError && (
+          <Alert
+            type="error"
+            showIcon
+            message="加载 Session 消息失败"
+            description={messagesError instanceof Error ? messagesError.message : '未知错误'}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
+        {sessionDetail && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="Session ID">
+                <Typography.Text code copyable>
+                  {sessionDetail.session_id}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="Agent">
+                {sessionDetail.agent_id ? <Tag color="blue">{sessionDetail.agent_id}</Tag> : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Conversation ID">
+                {sessionDetail.conversation_id || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="发送者 User ID">
+                {sessionDetail.sender_user_id || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="发送者 Staff ID">
+                {sessionDetail.sender_staff_id || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="最近 Task ID">
+                {sessionDetail.last_task_id || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="消息数">
+                {sessionDetail.message_count}
+              </Descriptions.Item>
+              <Descriptions.Item label="创建时间">
+                {formatDateTime(sessionDetail.created_at)}
+              </Descriptions.Item>
+              <Descriptions.Item label="最近活跃">
+                {formatDateTime(sessionDetail.last_active)}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Card size="small" title="Session Metadata" loading={isDetailLoading}>
+              {Object.keys(sessionDetail.metadata).length > 0 ? (
+                <Descriptions bordered column={1} size="small">
+                  {Object.entries(sessionDetail.metadata).map(([key, value]) => (
+                    <Descriptions.Item key={key} label={key}>
+                      <Typography.Text style={{ whiteSpace: 'pre-wrap' }}>
+                        {value}
+                      </Typography.Text>
+                    </Descriptions.Item>
+                  ))}
+                </Descriptions>
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无元数据" />
+              )}
+            </Card>
+
+            <Card size="small" title="消息历史" loading={isMessagesLoading}>
+              {messages.length > 0 ? (
+                <List
+                  dataSource={messages}
+                  renderItem={(item) => (
+                    <List.Item key={`${item.timestamp}-${item.user_message.slice(0, 16)}`}>
+                      <Card size="small" style={{ width: '100%' }}>
+                        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                          <Tag color="geekblue">{item.timestamp}</Tag>
+                          <div>
+                            <Typography.Text strong>用户</Typography.Text>
+                            <div style={messageBlockStyle}>{item.user_message}</div>
+                          </div>
+                          <div>
+                            <Typography.Text strong>助手</Typography.Text>
+                            <div style={messageBlockStyle}>{item.assistant_message}</div>
+                          </div>
+                        </Space>
+                      </Card>
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无消息记录" />
+              )}
+            </Card>
+          </Space>
+        )}
       </Drawer>
-    </Card>
+    </div>
   );
 };
+
+const messageBlockStyle: React.CSSProperties = {
+  marginTop: 8,
+  padding: '10px 12px',
+  borderRadius: 8,
+  background: '#fafafa',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+};
+
+function formatDateTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return value;
+  }
+  return new Date(timestamp).toLocaleString();
+}
 
 export default Sessions;

@@ -53,23 +53,21 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-pub mod connection;
-pub mod error;
-pub mod executor;
-pub mod node;
-pub mod permission;
-pub mod status;
+pub use uhorse_node_runtime::connection;
+pub use uhorse_node_runtime::error;
+pub use uhorse_node_runtime::executor;
+pub use uhorse_node_runtime::node;
+pub use uhorse_node_runtime::permission;
+pub use uhorse_node_runtime::status;
 pub mod tools;
-pub mod workspace;
+pub use uhorse_node_runtime::workspace;
 
-pub use connection::{ConnectionConfig, ConnectionState, HubConnection};
-pub use error::{NodeError, NodeResult};
-pub use executor::{CommandExecutor, ExecutionContext};
-pub use node::{Node, NodeConfig};
-pub use permission::{PermissionManager, PermissionResult, PermissionRule};
-pub use status::{Metrics, StatusReporter};
+pub use uhorse_node_runtime::{
+    CommandExecutor, ConnectionConfig, ConnectionState, ExecutionContext, HubConnection, Metrics,
+    Node, NodeConfig, NodeError, NodeResult, PermissionManager, PermissionResult, PermissionRule,
+    StatusReporter, Workspace, WorkspaceConfig,
+};
 pub use tools::{BrowserExecutor, DatabaseExecutor, SkillExecutor};
-pub use workspace::{Workspace, WorkspaceConfig};
 
 /// 节点版本
 pub const NODE_VERSION: &str = env!("CARGO_PKG_VERSION");

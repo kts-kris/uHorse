@@ -29,27 +29,27 @@ const MainLayout: React.FC = () => {
     {
       key: '/agents',
       icon: <RobotOutlined />,
-      label: 'Agent 管理',
+      label: 'Agent 运行时',
     },
     {
       key: '/skills',
       icon: <ToolOutlined />,
-      label: '技能管理',
+      label: '技能运行时',
     },
     {
       key: '/sessions',
       icon: <MessageOutlined />,
-      label: 'Session 管理',
+      label: 'Session 运行时',
     },
     {
       key: '/channels',
       icon: <ApiOutlined />,
-      label: '通道管理',
+      label: '通道概览',
     },
     {
       key: '/settings',
       icon: <SettingOutlined />,
-      label: '系统设置',
+      label: '系统运行时',
     },
   ];
 

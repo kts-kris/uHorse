@@ -7,9 +7,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uhorse_protocol::{CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub, TaskId};
+use uhorse_security::ApprovalLevel;
 
 use crate::error::{HubError, HubResult};
 use crate::node_manager::NodeManager;
+use crate::security_integration::SecurityManager;
 use crate::task_scheduler::TaskScheduler;
 use tokio::sync::mpsc;
 
@@ -57,7 +59,12 @@ impl MessageRouter {
     }
 
     /// 处理来自节点的消息
-    pub async fn route_node_message(&self, node_id: &NodeId, message: NodeToHub) -> HubResult<()> {
+    pub async fn route_node_message(
+        &self,
+        node_id: &NodeId,
+        message: NodeToHub,
+        security_manager: Option<&SecurityManager>,
+    ) -> HubResult<()> {
         match message {
             NodeToHub::Heartbeat { status, load, .. } => {
                 debug!("Received heartbeat from node {}", node_id);
@@ -124,14 +131,67 @@ impl MessageRouter {
                 request_id,
                 task_id,
                 command,
+                context,
                 reason,
+                timestamp,
+                expires_at,
                 ..
             } => {
                 info!(
                     "Approval request {} from node {} for task {} command: {}",
                     request_id, node_id, task_id, reason
                 );
-                // TODO: 集成 uhorse-security 的审批流程
+
+                let security_manager = security_manager.ok_or_else(|| {
+                    HubError::Permission(
+                        "Approval request requires security manager".to_string(),
+                    )
+                })?;
+
+                let operation = Self::approval_operation_for_command(&command);
+                let ttl_seconds = Self::approval_request_ttl_seconds(timestamp, expires_at);
+                if security_manager
+                    .operation_approver()
+                    .check_idempotency(&request_id, ttl_seconds)
+                    .await?
+                {
+                    debug!(
+                        "Approval request {} from node {} already processed",
+                        request_id, node_id
+                    );
+                    return Ok(());
+                }
+
+                let metadata = serde_json::json!({
+                    "request_id": request_id,
+                    "task_id": task_id.as_str(),
+                    "node_id": node_id.as_str(),
+                    "command_type": format!("{:?}", command.command_type()).to_lowercase(),
+                    "command": command,
+                    "context": context,
+                    "reason": reason,
+                    "requested_at": timestamp,
+                    "expires_at": expires_at,
+                });
+
+                let approval_id = security_manager
+                    .operation_approver()
+                    .request_approval(node_id, operation, ApprovalLevel::Single, metadata)
+                    .await?;
+
+                security_manager
+                    .operation_approver()
+                    .store_idempotency_response(
+                        &request_id,
+                        &serde_json::json!({ "approval_id": approval_id }),
+                        ttl_seconds,
+                    )
+                    .await?;
+
+                info!(
+                    "Approval request {} from node {} stored as hub approval {}",
+                    request_id, node_id, approval_id
+                );
             }
 
             NodeToHub::Unregister {
@@ -151,6 +211,30 @@ impl MessageRouter {
         }
 
         Ok(())
+    }
+
+    fn approval_operation_for_command(command: &uhorse_protocol::Command) -> &'static str {
+        match command.command_type() {
+            uhorse_protocol::CommandType::File => "file_delete",
+            uhorse_protocol::CommandType::Shell => "system_command",
+            uhorse_protocol::CommandType::Api
+            | uhorse_protocol::CommandType::Browser
+            | uhorse_protocol::CommandType::Database => "network_access",
+            uhorse_protocol::CommandType::Code | uhorse_protocol::CommandType::Skill => {
+                "config_change"
+            }
+        }
+    }
+
+    fn approval_request_ttl_seconds(
+        requested_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> u64 {
+        expires_at
+            .signed_duration_since(requested_at)
+            .to_std()
+            .map(|duration| duration.as_secs().max(1))
+            .unwrap_or(1)
     }
 
     /// 向节点发送消息

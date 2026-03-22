@@ -84,6 +84,7 @@ pub struct DingTalkInboundMessage {
     pub conversation_type: Option<String>,
     pub sender_user_id: Option<String>,
     pub sender_staff_id: Option<String>,
+    pub sender_corp_id: Option<String>,
     pub session_webhook: Option<String>,
     pub session_webhook_expired_time: Option<i64>,
     pub robot_code: Option<String>,
@@ -381,6 +382,7 @@ impl DingTalkChannel {
             conversation_type: event.conversation_type.clone(),
             sender_user_id: event.sender_id.clone(),
             sender_staff_id: event.sender_staff_id.clone(),
+            sender_corp_id: event.sender_corp_id.clone(),
             session_webhook: event.session_webhook.clone(),
             session_webhook_expired_time: event.session_webhook_expired_time,
             robot_code: event.robot_code.clone(),
@@ -1095,11 +1097,15 @@ mod tests {
             sender_id: Some("user_456".to_string()),
             sender_nick: None,
             sender_corp_id: None,
+            sender_staff_id: None,
             msg_type: Some("text".to_string()),
             text: Some(TextContent {
                 content: Some("Hello".to_string()),
             }),
             content: None,
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: None,
             create_time: Some(1234567890),
         };
 

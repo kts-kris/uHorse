@@ -145,6 +145,28 @@ pub enum HubToNode {
         skill_name: String,
     },
 
+    /// 审批响应
+    ApprovalResponse {
+        /// 消息 ID
+        #[serde(default = "MessageId::new")]
+        message_id: MessageId,
+
+        /// 审批请求 ID
+        request_id: String,
+
+        /// 是否批准
+        approved: bool,
+
+        /// 响应人
+        responder: String,
+
+        /// 响应备注
+        reason: Option<String>,
+
+        /// 响应时间
+        responded_at: DateTime<Utc>,
+    },
+
     /// 断开连接通知
     Disconnect {
         /// 消息 ID
@@ -170,6 +192,7 @@ impl HubToNode {
             Self::PermissionUpdate { message_id, .. } => message_id,
             Self::SkillDeploy { message_id, .. } => message_id,
             Self::SkillRemove { message_id, .. } => message_id,
+            Self::ApprovalResponse { message_id, .. } => message_id,
             Self::Disconnect { message_id, .. } => message_id,
         }
     }
@@ -184,6 +207,7 @@ impl HubToNode {
             Self::PermissionUpdate { .. } => "permission_update",
             Self::SkillDeploy { .. } => "skill_deploy",
             Self::SkillRemove { .. } => "skill_remove",
+            Self::ApprovalResponse { .. } => "approval_response",
             Self::Disconnect { .. } => "disconnect",
         }
     }
@@ -663,6 +687,24 @@ mod tests {
         let decoded = MessageCodec::decode_hub_to_node(&encoded).unwrap();
 
         assert_eq!(msg.message_type(), decoded.message_type());
+    }
+
+    #[test]
+    fn test_hub_to_node_approval_response_serialization() {
+        let msg = HubToNode::ApprovalResponse {
+            message_id: MessageId::new(),
+            request_id: "approval-123".to_string(),
+            approved: true,
+            responder: "admin".to_string(),
+            reason: Some("approved".to_string()),
+            responded_at: Utc::now(),
+        };
+
+        let encoded = MessageCodec::encode_hub_to_node(&msg).unwrap();
+        let decoded = MessageCodec::decode_hub_to_node(&encoded).unwrap();
+
+        assert_eq!(msg.message_type(), decoded.message_type());
+        assert_eq!(msg.message_id(), decoded.message_id());
     }
 
     #[test]

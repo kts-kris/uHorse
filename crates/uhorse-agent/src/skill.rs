@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// 技能清单（SKILL.md）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,8 +31,10 @@ pub struct SkillManifest {
     /// 作者
     pub author: Option<String>,
     /// 参数定义
+    #[serde(default)]
     pub parameters: Vec<SkillParameter>,
     /// 所需权限
+    #[serde(default)]
     pub permissions: Vec<String>,
 }
 
@@ -62,6 +65,15 @@ pub struct SkillConfig {
     /// 最大重试次数
     #[serde(default = "default_max_retries")]
     pub max_retries: usize,
+    /// 执行命令
+    #[serde(default)]
+    pub executable: Option<String>,
+    /// 命令参数
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// 环境变量
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 impl Default for SkillConfig {
@@ -70,6 +82,9 @@ impl Default for SkillConfig {
             enabled: false,
             timeout: default_timeout(),
             max_retries: default_max_retries(),
+            executable: None,
+            args: Vec::new(),
+            env: HashMap::new(),
         }
     }
 }
@@ -211,11 +226,21 @@ impl SkillRegistry {
             SkillConfig::default()
         };
 
-        // 创建执行器（这里简化，实际需要动态加载）
-        let executor = Arc::new(DummySkillExecutor {
-            name: manifest.name.clone(),
-            description: manifest.description.clone(),
-        });
+        let executor: Arc<dyn SkillExecutor> = if let Some(executable) = config.executable.clone() {
+            Arc::new(ProcessSkillExecutor {
+                name: manifest.name.clone(),
+                description: manifest.description.clone(),
+                executable,
+                args: config.args.clone(),
+                env: config.env.clone(),
+                timeout: Duration::from_secs(config.timeout),
+            })
+        } else {
+            Arc::new(DummySkillExecutor {
+                name: manifest.name.clone(),
+                description: manifest.description.clone(),
+            })
+        };
 
         Ok(Skill::new(manifest, config, executor))
     }
@@ -267,13 +292,127 @@ impl SkillExecutor for DummySkillExecutor {
     }
 }
 
+#[derive(Clone)]
+struct ProcessSkillExecutor {
+    name: String,
+    description: String,
+    executable: String,
+    args: Vec<String>,
+    env: HashMap<String, String>,
+    timeout: Duration,
+}
+
+#[async_trait::async_trait]
+impl SkillExecutor for ProcessSkillExecutor {
+    async fn execute(&self, input: &str) -> AgentResult<String> {
+        let mut command = tokio::process::Command::new(&self.executable);
+        command.args(&self.args);
+        command.env("SKILL_INPUT", input);
+        command.env("SKILL_NAME", &self.name);
+        for (key, value) in &self.env {
+            command.env(key, value);
+        }
+
+        let output = tokio::time::timeout(self.timeout, command.output())
+            .await
+            .map_err(|_| AgentError::SkillExecution {
+                skill: self.name.clone(),
+                error: format!("timed out after {}s", self.timeout.as_secs()),
+            })?
+            .map_err(|error| AgentError::SkillExecution {
+                skill: self.name.clone(),
+                error: error.to_string(),
+            })?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        if !output.status.success() {
+            let error = if stderr.is_empty() {
+                format!("process exited with status {}", output.status)
+            } else {
+                stderr
+            };
+            return Err(AgentError::SkillExecution {
+                skill: self.name.clone(),
+                error,
+            });
+        }
+
+        if !stderr.is_empty() {
+            return Err(AgentError::SkillExecution {
+                skill: self.name.clone(),
+                error: stderr,
+            });
+        }
+
+        if stdout.is_empty() {
+            return Ok(String::new());
+        }
+
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            return Ok(serde_json::to_string_pretty(&json).unwrap_or(stdout));
+        }
+
+        Ok(stdout)
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[tokio::test]
     async fn test_skill_registry() {
         let mut registry = SkillRegistry::new();
         assert_eq!(registry.list_names().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_load_from_dir_uses_process_executor() {
+        let tempdir = tempdir().unwrap();
+        let skill_dir = tempdir.path().join("echo-skill");
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        tokio::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: echo
+version: 1.0.0
+description: echo skill
+author: test
+parameters: []
+permissions: []
+---
+"#,
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            skill_dir.join("skill.toml"),
+            r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
+"#,
+        )
+        .await
+        .unwrap();
+
+        let mut registry = SkillRegistry::new();
+        let count = registry.load_from_dir(tempdir.path().to_path_buf()).await.unwrap();
+        assert_eq!(count, 1);
+
+        let skill = registry.get("echo").unwrap();
+        let output = skill.execute("hello").await.unwrap();
+        assert_eq!(output, "hello");
     }
 }
