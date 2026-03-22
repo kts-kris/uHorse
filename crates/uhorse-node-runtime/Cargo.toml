@@ -48,7 +48,7 @@ reqwest = { workspace = true }
 
 # Database drivers (optional features) - use workspace sqlx version
 sqlx = { workspace = true, optional = true }
-redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "1.1", features = ["tokio-comp", "connection-manager"], optional = true }
 mongodb = { version = "2.8", optional = true }
 
 # Browser automation (optional)
