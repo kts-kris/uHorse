@@ -34,3 +34,6 @@ config.toml
 
 # Temporary files
 *.tmp
+
+# Local runtime artifacts
+.uhorse-agent-runtime/
