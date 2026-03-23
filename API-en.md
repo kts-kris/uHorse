@@ -70,7 +70,7 @@ The health endpoint returns plain JSON instead of `ApiResponse<T>`:
 ```json
 {
   "status": "healthy",
-  "version": "4.0.0-alpha.1"
+  "version": "4.0.0-alpha.3"
 }
 ```
 
@@ -91,7 +91,7 @@ Successful response:
 ```json
 {
   "status": "healthy",
-  "version": "4.0.0-alpha.1"
+  "version": "4.0.0-alpha.3"
 }
 ```
 

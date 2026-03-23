@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0--alpha.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0--alpha.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-alpha-yellow" alt="Status">

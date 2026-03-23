@@ -70,7 +70,7 @@
 ```json
 {
   "status": "healthy",
-  "version": "4.0.0-alpha.1"
+  "version": "4.0.0-alpha.3"
 }
 ```
 
@@ -91,7 +91,7 @@ curl http://127.0.0.1:8765/api/health
 ```json
 {
   "status": "healthy",
-  "version": "4.0.0-alpha.1"
+  "version": "4.0.0-alpha.3"
 }
 ```
 
