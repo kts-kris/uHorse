@@ -541,7 +541,10 @@ impl PermissionManager {
 
         match self.workspace.can_access(&cwd, false) {
             Ok(true) => None,
-            Ok(false) => Some(format!("Shell working directory outside workspace: {}", cwd)),
+            Ok(false) => Some(format!(
+                "Shell working directory outside workspace: {}",
+                cwd
+            )),
             Err(error) => Some(error.to_string()),
         }
     }
@@ -554,7 +557,10 @@ impl PermissionManager {
 
         match self.workspace.can_access(&workdir, false) {
             Ok(true) => None,
-            Ok(false) => Some(format!("Code working directory outside workspace: {}", workdir)),
+            Ok(false) => Some(format!(
+                "Code working directory outside workspace: {}",
+                workdir
+            )),
             Err(error) => Some(error.to_string()),
         }
     }
@@ -792,9 +798,9 @@ mod tests {
         manager.load_default_rules().await;
 
         let context = create_test_context();
-        let command = Command::Shell(ShellCommand::new("pwd").with_cwd(
-            outside.path().to_string_lossy().to_string(),
-        ));
+        let command = Command::Shell(
+            ShellCommand::new("pwd").with_cwd(outside.path().to_string_lossy().to_string()),
+        );
 
         let result = manager.check(&command, &context).await;
         assert!(matches!(result, PermissionResult::Denied(_)));
@@ -808,10 +814,9 @@ mod tests {
         manager.load_default_rules().await;
 
         let context = create_test_context();
-        let command = Command::Shell(ShellCommand::new("git").with_args(vec![
-            "reset".to_string(),
-            "--hard".to_string(),
-        ]));
+        let command = Command::Shell(
+            ShellCommand::new("git").with_args(vec!["reset".to_string(), "--hard".to_string()]),
+        );
 
         let result = manager.check(&command, &context).await;
         match result {
@@ -836,7 +841,11 @@ mod tests {
         let context = create_test_context();
         let command = Command::File(FileCommand::Copy {
             from: source.to_string_lossy().to_string(),
-            to: outside.path().join("target.txt").to_string_lossy().to_string(),
+            to: outside
+                .path()
+                .join("target.txt")
+                .to_string_lossy()
+                .to_string(),
             overwrite: false,
         });
 

@@ -494,7 +494,9 @@ impl DingTalkChannel {
     async fn connect_stream(
         &self,
     ) -> Result<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         ChannelError,
     > {
         let response = self
@@ -531,9 +533,9 @@ impl DingTalkChannel {
         url.query_pairs_mut()
             .append_pair("ticket", &connection.ticket);
 
-        let (ws_stream, _) = connect_async(url.as_str())
-            .await
-            .map_err(|e| ChannelError::ConnectionError(format!("WebSocket connect error: {}", e)))?;
+        let (ws_stream, _) = connect_async(url.as_str()).await.map_err(|e| {
+            ChannelError::ConnectionError(format!("WebSocket connect error: {}", e))
+        })?;
 
         Ok(ws_stream)
     }
@@ -559,21 +561,21 @@ impl DingTalkChannel {
                 }
                 Some(Ok(WsMessage::Binary(data))) => {
                     let text = String::from_utf8(data.to_vec()).map_err(|e| {
-                        ChannelError::InvalidResponse(format!("Invalid binary stream payload: {}", e))
+                        ChannelError::InvalidResponse(format!(
+                            "Invalid binary stream payload: {}",
+                            e
+                        ))
                     })?;
-                    if self
-                        .handle_stream_text_frame(&mut ws_sender, &text)
-                        .await?
+                    if self.handle_stream_text_frame(&mut ws_sender, &text).await?
                         == StreamAction::Reconnect
                     {
                         break;
                     }
                 }
                 Some(Ok(WsMessage::Ping(data))) => {
-                    ws_sender
-                        .send(WsMessage::Pong(data))
-                        .await
-                        .map_err(|e| ChannelError::ConnectionError(format!("Pong send error: {}", e)))?;
+                    ws_sender.send(WsMessage::Pong(data)).await.map_err(|e| {
+                        ChannelError::ConnectionError(format!("Pong send error: {}", e))
+                    })?;
                 }
                 Some(Ok(WsMessage::Pong(_))) => {}
                 Some(Ok(WsMessage::Close(frame))) => {
@@ -645,7 +647,8 @@ impl DingTalkChannel {
                     }
                     Err(error) => {
                         warn!("Failed to process DingTalk callback: {}", error);
-                        if let Some(ack) = Self::build_callback_error_ack(&frame, &error.to_string())?
+                        if let Some(ack) =
+                            Self::build_callback_error_ack(&frame, &error.to_string())?
                         {
                             Self::send_ws_text(ws_sender, ack).await?;
                         }
@@ -666,7 +669,10 @@ impl DingTalkChannel {
                 Ok(StreamAction::Continue)
             }
             other => {
-                warn!("Ignoring unsupported DingTalk stream packet type: {}", other);
+                warn!(
+                    "Ignoring unsupported DingTalk stream packet type: {}",
+                    other
+                );
                 Ok(StreamAction::Continue)
             }
         }
@@ -827,7 +833,10 @@ impl DingTalkChannel {
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
             error!("DingTalk session webhook error: {}", error_text);
-            return Err(ChannelError::SendFailed(format!("API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -863,7 +872,10 @@ impl DingTalkChannel {
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
             error!("DingTalk API error: {}", error_text);
-            return Err(ChannelError::SendFailed(format!("API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -904,7 +916,10 @@ impl DingTalkChannel {
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!("API error: {}", error_text)));
+            return Err(ChannelError::SendFailed(format!(
+                "API error: {}",
+                error_text
+            )));
         }
 
         Ok(())
@@ -956,7 +971,10 @@ impl DingTalkChannel {
 
                 if !response.status().is_success() {
                     let error_text = response.text().await.unwrap_or_default();
-                    return Err(ChannelError::SendFailed(format!("API error: {}", error_text)));
+                    return Err(ChannelError::SendFailed(format!(
+                        "API error: {}",
+                        error_text
+                    )));
                 }
             }
             _ => {

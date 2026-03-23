@@ -10,8 +10,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 use uhorse_protocol::{
-    Command, CommandResult, CommandType, ExecutionError, HubToNode, MessageId,
-    NodeCapabilities, NodeId, Priority, TaskContext, TaskId, TaskStatus,
+    Command, CommandResult, CommandType, ExecutionError, HubToNode, MessageId, NodeCapabilities,
+    NodeId, Priority, TaskContext, TaskId, TaskStatus,
 };
 
 use crate::error::{HubError, HubResult};
@@ -314,7 +314,8 @@ impl TaskScheduler {
                             command: task_ref.command.clone(),
                             priority: task_ref.priority,
                             deadline: Some(
-                                Utc::now() + chrono::Duration::seconds(self.task_timeout_secs as i64),
+                                Utc::now()
+                                    + chrono::Duration::seconds(self.task_timeout_secs as i64),
                             ),
                             context: uhorse_protocol::TaskContext {
                                 user_id: task_ref.context.user_id.clone(),
@@ -554,7 +555,11 @@ impl TaskScheduler {
                     node_id: Some(completed.node_id.clone()),
                     started_at: Some(completed.started_at),
                     completed_at: Some(completed.completed_at),
-                    error: completed.result.error.as_ref().map(|error| error.message.clone()),
+                    error: completed
+                        .result
+                        .error
+                        .as_ref()
+                        .map(|error| error.message.clone()),
                 });
             }
         }

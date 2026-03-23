@@ -225,7 +225,10 @@ impl SensitiveOperationApprover {
     }
 
     /// 获取审批请求
-    pub async fn get_request(&self, request_id: &str) -> HubResult<Option<uhorse_security::ApprovalRequest>> {
+    pub async fn get_request(
+        &self,
+        request_id: &str,
+    ) -> HubResult<Option<uhorse_security::ApprovalRequest>> {
         self.approval_manager
             .get_request(request_id)
             .await

@@ -437,9 +437,15 @@ mod tests {
         let child_session = SessionId::from_string("session-123".to_string());
 
         let main_files = scope.get_injected_files(&main_session, None).await.unwrap();
-        assert_eq!(main_files.get("MEMORY.md").map(String::as_str), Some("main memory"));
+        assert_eq!(
+            main_files.get("MEMORY.md").map(String::as_str),
+            Some("main memory")
+        );
 
-        let child_files = scope.get_injected_files(&child_session, None).await.unwrap();
+        let child_files = scope
+            .get_injected_files(&child_session, None)
+            .await
+            .unwrap();
         assert!(!child_files.contains_key("MEMORY.md"));
     }
 
@@ -461,7 +467,9 @@ mod tests {
     async fn test_session_state_round_trip_with_json_file() {
         let scope = create_scope();
         let mut state = SessionState::new("session-123".to_string());
-        state.metadata.insert("current_agent".to_string(), "main".to_string());
+        state
+            .metadata
+            .insert("current_agent".to_string(), "main".to_string());
         state.increment_messages();
 
         scope
@@ -481,7 +489,10 @@ mod tests {
             loaded.metadata.get("current_agent").map(String::as_str),
             Some("main")
         );
-        assert!(scope.session_dir("dingtalk:user-1").join("state.json").exists());
+        assert!(scope
+            .session_dir("dingtalk:user-1")
+            .join("state.json")
+            .exists());
     }
 
     #[tokio::test]

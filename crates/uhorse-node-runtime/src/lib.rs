@@ -21,8 +21,8 @@ pub use node::{Node, NodeConfig};
 pub use permission::{PermissionManager, PermissionResult, PermissionRule};
 pub use status::{Metrics, StatusReporter};
 pub use versioning::{
-    CheckpointRecord, DiffTarget, FileChangeKind, RestorePreview, RestoreResult,
-    VersionManager, VersionStatusEntry, WorkspaceDiff, WorkspaceVersionStatus,
+    CheckpointRecord, DiffTarget, FileChangeKind, RestorePreview, RestoreResult, VersionManager,
+    VersionStatusEntry, WorkspaceDiff, WorkspaceVersionStatus,
 };
 pub use workspace::{Workspace, WorkspaceConfig};
 

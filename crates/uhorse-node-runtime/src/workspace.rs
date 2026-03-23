@@ -396,7 +396,10 @@ impl Workspace {
         };
 
         let mut normalized = ancestor.canonicalize().map_err(|e| {
-            NodeError::Workspace(format!("Failed to canonicalize ancestor {:?}: {}", ancestor, e))
+            NodeError::Workspace(format!(
+                "Failed to canonicalize ancestor {:?}: {}",
+                ancestor, e
+            ))
         })?;
 
         let remainder = path.strip_prefix(&ancestor).map_err(|_| {

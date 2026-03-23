@@ -3,6 +3,7 @@
 //! 管理与云端中枢的 WebSocket 连接
 
 use crate::error::{NodeError, NodeResult};
+use crate::status::HeartbeatSnapshot;
 use chrono::{DateTime, Utc};
 use futures::{Sink, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,6 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tracing::{debug, error, info, warn};
-use crate::status::HeartbeatSnapshot;
 use uhorse_protocol::{HubToNode, MessageCodec, NodeId, NodeToHub};
 
 /// 连接配置
@@ -333,7 +333,9 @@ impl HubConnection {
 
         Self::send_node_message(&mut ws_sender, &register_msg)
             .await
-            .map_err(|e| NodeError::Connection(format!("Failed to send register message: {}", e)))?;
+            .map_err(|e| {
+                NodeError::Connection(format!("Failed to send register message: {}", e))
+            })?;
 
         // 更新状态
         *state.write().await = ConnectionState::Authenticated {

@@ -33,7 +33,10 @@ use uhorse_protocol::{
 };
 use uhorse_security::ApprovalRequest;
 
-use crate::{task_scheduler::{CompletedTask, TaskResult}, Hub, HubStats};
+use crate::{
+    task_scheduler::{CompletedTask, TaskResult},
+    Hub, HubStats,
+};
 pub use ws::ws_handler;
 
 /// DingTalk 回传路由
@@ -228,7 +231,9 @@ fn default_agent_runtime() -> WebAgentRuntime {
     }
 }
 
-pub async fn init_default_agent_runtime(base_dir: PathBuf) -> Result<WebAgentRuntime, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn init_default_agent_runtime(
+    base_dir: PathBuf,
+) -> Result<WebAgentRuntime, Box<dyn std::error::Error + Send + Sync>> {
     let mut agent_manager = AgentManager::new(base_dir.clone())?;
     let workspace_dir = base_dir.join("workspace");
     let scope = AgentScope::new(AgentScopeConfig {
@@ -287,7 +292,13 @@ fn agent_scope_for(state: &WebState, agent_id: &str) -> Option<Arc<AgentScope>> 
         .agent_manager
         .get_scope(agent_id)
         .cloned()
-        .or_else(|| state.agent_runtime.agent_manager.get_default_scope().cloned())
+        .or_else(|| {
+            state
+                .agent_runtime
+                .agent_manager
+                .get_default_scope()
+                .cloned()
+        })
 }
 
 fn build_dingtalk_session_key(
@@ -358,7 +369,10 @@ async fn collect_agent_planning_context(
         .await
         .unwrap_or_default();
     if !memory_context.is_empty() {
-        sections.push(format!("--- Session Memory Context ---\n{}", memory_context));
+        sections.push(format!(
+            "--- Session Memory Context ---\n{}",
+            memory_context
+        ));
     }
 
     sections.join("\n\n")
@@ -466,7 +480,10 @@ async fn persist_direct_reply_memory(
 
     if let Ok(Some(mut session_state)) = scope.load_session_state(session_id.as_str()).await {
         session_state.touch();
-        if let Err(error) = scope.save_session_state(session_id.as_str(), &session_state).await {
+        if let Err(error) = scope
+            .save_session_state(session_id.as_str(), &session_state)
+            .await
+        {
             warn!(
                 "Failed to update direct reply session state for {}: {}",
                 session_key, error
@@ -485,7 +502,8 @@ async fn persist_task_result_memory(
         return;
     }
 
-    let session_id = CoreSessionId::from_string(completed_task.context.session_id.as_str().to_string());
+    let session_id =
+        CoreSessionId::from_string(completed_task.context.session_id.as_str().to_string());
     if let Err(error) = state
         .agent_runtime
         .memory_store
@@ -523,10 +541,14 @@ async fn persist_task_result_memory(
 
     if let Ok(Some(mut session_state)) = scope.load_session_state(session_id.as_str()).await {
         session_state.touch();
-        session_state
-            .metadata
-            .insert("last_task_id".to_string(), completed_task.task_id.to_string());
-        if let Err(error) = scope.save_session_state(session_id.as_str(), &session_state).await {
+        session_state.metadata.insert(
+            "last_task_id".to_string(),
+            completed_task.task_id.to_string(),
+        );
+        if let Err(error) = scope
+            .save_session_state(session_id.as_str(), &session_state)
+            .await
+        {
             warn!(
                 "Failed to update session state for {}: {}",
                 completed_task.task_id, error
@@ -776,12 +798,18 @@ pub fn create_router(state: WebState) -> Router {
         .route("/ws", get(ws_handler))
         // DingTalk 回调路由
         .route("/api/v1/channels/dingtalk/webhook", post(dingtalk_webhook))
-        .route("/api/v1/channels/dingtalk/webhook", get(dingtalk_webhook_verify))
+        .route(
+            "/api/v1/channels/dingtalk/webhook",
+            get(dingtalk_webhook_verify),
+        )
         // API 路由
         .route("/api/stats", get(get_stats))
         .route("/api/nodes", get(list_nodes))
         .route("/api/nodes/:node_id", get(get_node))
-        .route("/api/nodes/:node_id/permissions", post(update_node_permissions))
+        .route(
+            "/api/nodes/:node_id/permissions",
+            post(update_node_permissions),
+        )
         .route("/api/tasks", get(list_tasks).post(submit_task_api))
         .route("/api/tasks/:task_id", get(get_task))
         .route("/api/tasks/:task_id/cancel", post(cancel_task))
@@ -797,7 +825,10 @@ pub fn create_router(state: WebState) -> Router {
         .route("/api/v1/skills/:skill_name", get(get_runtime_skill))
         .route("/api/v1/sessions", get(list_runtime_sessions))
         .route("/api/v1/sessions/:session_id", get(get_runtime_session))
-        .route("/api/v1/sessions/:session_id/messages", get(get_runtime_session_messages))
+        .route(
+            "/api/v1/sessions/:session_id/messages",
+            get(get_runtime_session_messages),
+        )
         .with_state(Arc::new(state));
 
     // 添加 CORS
@@ -925,7 +956,10 @@ pub async fn submit_dingtalk_task(
     };
 
     if text.is_empty() {
-        info!("Skip non-text DingTalk message for session {}", inbound.session.id);
+        info!(
+            "Skip non-text DingTalk message for session {}",
+            inbound.session.id
+        );
         return Ok(());
     }
 
@@ -1040,9 +1074,7 @@ pub async fn submit_dingtalk_task(
 
             info!(
                 "Submitted DingTalk task {} for session {} via agent {}",
-                task_id,
-                session_key,
-                agent_id
+                task_id, session_key, agent_id
             );
 
             Ok(())
@@ -1527,8 +1559,9 @@ fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String
                 content.clone()
             }
         }
-        CommandOutput::Json { content } => serde_json::to_string_pretty(content)
-            .unwrap_or_else(|_| content.to_string()),
+        CommandOutput::Json { content } => {
+            serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string())
+        }
         CommandOutput::None => "执行成功，无输出。".to_string(),
         other => format!("执行成功，输出类型：{:?}", other),
     }
@@ -1545,12 +1578,13 @@ async fn list_runtime_agents(
     State(state): State<Arc<WebState>>,
 ) -> Json<ApiResponse<Vec<AgentRuntimeSummary>>> {
     let sessions = collect_runtime_sessions(&state).await;
-    let session_counts: HashMap<String, usize> = sessions.into_iter().fold(HashMap::new(), |mut acc, item| {
-        if let Some(agent_id) = item.agent_id {
-            *acc.entry(agent_id).or_insert(0) += 1;
-        }
-        acc
-    });
+    let session_counts: HashMap<String, usize> =
+        sessions.into_iter().fold(HashMap::new(), |mut acc, item| {
+            if let Some(agent_id) = item.agent_id {
+                *acc.entry(agent_id).or_insert(0) += 1;
+            }
+            acc
+        });
 
     let mut agents: Vec<_> = state
         .agent_runtime
@@ -1632,7 +1666,10 @@ async fn get_runtime_skill(
     Path(skill_name): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<SkillRuntimeDetail>>) {
     match state.agent_runtime.skills.get(&skill_name) {
-        Some(skill) => (StatusCode::OK, Json(ApiResponse::success(skill_to_detail(&skill)))),
+        Some(skill) => (
+            StatusCode::OK,
+            Json(ApiResponse::success(skill_to_detail(&skill))),
+        ),
         None => (
             StatusCode::NOT_FOUND,
             Json(ApiResponse::error("Skill not found")),
@@ -1666,7 +1703,10 @@ async fn get_runtime_session(
     Path(session_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<SessionRuntimeDetail>>) {
     let sessions = collect_runtime_sessions(&state).await;
-    match sessions.into_iter().find(|session| session.session_id == session_id) {
+    match sessions
+        .into_iter()
+        .find(|session| session.session_id == session_id)
+    {
         Some(session) => (StatusCode::OK, Json(ApiResponse::success(session))),
         None => (
             StatusCode::NOT_FOUND,
@@ -1680,7 +1720,10 @@ async fn get_runtime_session_messages(
     Path(session_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<Vec<SessionMessageRecord>>>) {
     let sessions = collect_runtime_sessions(&state).await;
-    let Some(session) = sessions.into_iter().find(|item| item.session_id == session_id) else {
+    let Some(session) = sessions
+        .into_iter()
+        .find(|item| item.session_id == session_id)
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(ApiResponse::error("Session not found")),
@@ -1895,7 +1938,10 @@ async fn update_node_permissions(
         )
         .await
     {
-        Ok(()) => (StatusCode::OK, Json(ApiResponse::success("Permission update sent"))),
+        Ok(()) => (
+            StatusCode::OK,
+            Json(ApiResponse::success("Permission update sent")),
+        ),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::error(&error.to_string())),
@@ -1968,7 +2014,11 @@ async fn list_approvals(
         );
     };
 
-    match security_manager.operation_approver().list_pending_requests().await {
+    match security_manager
+        .operation_approver()
+        .list_pending_requests()
+        .await
+    {
         Ok(requests) => (StatusCode::OK, Json(ApiResponse::success(requests))),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1989,7 +2039,11 @@ async fn get_approval(
         );
     };
 
-    match security_manager.operation_approver().get_request(&request_id).await {
+    match security_manager
+        .operation_approver()
+        .get_request(&request_id)
+        .await
+    {
         Ok(Some(request)) => (StatusCode::OK, Json(ApiResponse::success(request))),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -2033,7 +2087,11 @@ async fn decide_approval(
         );
     };
 
-    let existing_request = match security_manager.operation_approver().get_request(&request_id).await {
+    let existing_request = match security_manager
+        .operation_approver()
+        .get_request(&request_id)
+        .await
+    {
         Ok(Some(request)) => request,
         Ok(None) => {
             return (
@@ -2068,7 +2126,11 @@ async fn decide_approval(
         );
     }
 
-    let updated_request = match security_manager.operation_approver().get_request(&request_id).await {
+    let updated_request = match security_manager
+        .operation_approver()
+        .get_request(&request_id)
+        .await
+    {
         Ok(Some(request)) => request,
         Ok(None) => {
             return (
@@ -2084,7 +2146,9 @@ async fn decide_approval(
         }
     };
 
-    if let Err(error) = notify_node_approval_decision(&state, &existing_request, &payload, approved).await {
+    if let Err(error) =
+        notify_node_approval_decision(&state, &existing_request, &payload, approved).await
+    {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::error(&error.to_string())),
@@ -2127,7 +2191,8 @@ async fn notify_node_approval_decision(
             .ok_or_else(|| crate::HubError::NodeNotFound(node_id.clone()))?
     };
 
-    state.hub
+    state
+        .hub
         .message_router()
         .send_to_node(
             &node_id,
@@ -2340,7 +2405,8 @@ mod tests {
         uhorse_protocol::NodeId,
         tokio::sync::mpsc::Receiver<HubToNode>,
     ) {
-        let (app, _state, _hub, node_id, rx, _workspace) = create_router_test_state_with_registered_node().await;
+        let (app, _state, _hub, node_id, rx, _workspace) =
+            create_router_test_state_with_registered_node().await;
         (app, node_id, rx)
     }
 
@@ -2351,7 +2417,8 @@ mod tests {
         tokio::sync::mpsc::Receiver<HubToNode>,
         TempDir,
     ) {
-        let (app, _state, hub, node_id, rx, workspace) = create_router_test_state_with_registered_node().await;
+        let (app, _state, hub, node_id, rx, workspace) =
+            create_router_test_state_with_registered_node().await;
         (app, hub, node_id, rx, workspace)
     }
 
@@ -2360,7 +2427,11 @@ mod tests {
         app
     }
 
-    async fn post_json<T: Serialize>(app: Router, path: &str, payload: &T) -> (StatusCode, serde_json::Value) {
+    async fn post_json<T: Serialize>(
+        app: Router,
+        path: &str,
+        payload: &T,
+    ) -> (StatusCode, serde_json::Value) {
         let request = Request::builder()
             .method("POST")
             .uri(path)
@@ -2463,7 +2534,11 @@ mod tests {
     #[tokio::test]
     async fn test_summarize_task_result_or_fallback_falls_back_when_llm_fails() {
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = Arc::new(WebState::new(Arc::new(hub), None, Some(Arc::new(FailingLlmClient))));
+        let state = Arc::new(WebState::new(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(FailingLlmClient)),
+        ));
         let completed_task = CompletedTask {
             task_id: TaskId::from_string("task-fallback"),
             command: Command::File(FileCommand::Exists {
@@ -2571,7 +2646,12 @@ mod tests {
     async fn test_persist_session_state_stores_agent_metadata() {
         let runtime = create_test_runtime().await;
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = Arc::new(WebState::new_with_runtime(Arc::new(hub), None, None, runtime.clone()));
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime.clone(),
+        ));
         let session_key = SessionKey::with_team("dingtalk", "user-1", "corp-1");
         let task_id = TaskId::from_string("task-42");
 
@@ -2595,7 +2675,10 @@ mod tests {
 
         assert_eq!(session_state.message_count, 1);
         assert_eq!(
-            session_state.metadata.get("current_agent").map(String::as_str),
+            session_state
+                .metadata
+                .get("current_agent")
+                .map(String::as_str),
             Some("main")
         );
         assert_eq!(
@@ -2606,15 +2689,24 @@ mod tests {
             Some("conv-1")
         );
         assert_eq!(
-            session_state.metadata.get("sender_user_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("sender_user_id")
+                .map(String::as_str),
             Some("user-1")
         );
         assert_eq!(
-            session_state.metadata.get("sender_staff_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("sender_staff_id")
+                .map(String::as_str),
             Some("staff-1")
         );
         assert_eq!(
-            session_state.metadata.get("last_task_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("last_task_id")
+                .map(String::as_str),
             Some(task_id.as_str())
         );
     }
@@ -2623,7 +2715,12 @@ mod tests {
     async fn test_collect_agent_planning_context_includes_scope_and_memory() {
         let runtime = create_test_runtime().await;
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = Arc::new(WebState::new_with_runtime(Arc::new(hub), None, None, runtime.clone()));
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime.clone(),
+        ));
         let session_key = SessionKey::new("dingtalk", "user-ctx");
         let scope = runtime.agent_manager.get_scope("main").unwrap();
 
@@ -2688,7 +2785,12 @@ mod tests {
     async fn test_persist_task_result_memory_updates_history_and_today_memory() {
         let runtime = create_test_runtime().await;
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = Arc::new(WebState::new_with_runtime(Arc::new(hub), None, None, runtime.clone()));
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime.clone(),
+        ));
         let session_key = SessionKey::new("dingtalk", "user-memory");
         let task_id = TaskId::from_string("task-memory");
 
@@ -2749,7 +2851,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            session_state.metadata.get("last_task_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("last_task_id")
+                .map(String::as_str),
             Some(task_id.as_str())
         );
     }
@@ -2794,7 +2899,10 @@ mod tests {
         .await
         .unwrap();
 
-        let session = uhorse_core::Session::new(uhorse_core::ChannelType::DingTalk, "fallback-user".to_string());
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
         let inbound = DingTalkInboundMessage {
             message: uhorse_core::Message::new(
                 session.id.clone(),
@@ -2839,7 +2947,10 @@ mod tests {
 
         assert_eq!(context.session_id.as_str(), "dingtalk:actual-user:corp-1");
         assert_eq!(context.intent.as_deref(), Some("检查 Cargo.toml 是否存在"));
-        assert_eq!(context.env.get("agent_id").map(String::as_str), Some("main"));
+        assert_eq!(
+            context.env.get("agent_id").map(String::as_str),
+            Some("main")
+        );
         assert_eq!(
             context.env.get("conversation_id").map(String::as_str),
             Some("conv-submit")
@@ -2866,23 +2977,38 @@ mod tests {
             .unwrap();
         assert_eq!(session_state.message_count, 1);
         assert_eq!(
-            session_state.metadata.get("current_agent").map(String::as_str),
+            session_state
+                .metadata
+                .get("current_agent")
+                .map(String::as_str),
             Some("main")
         );
         assert_eq!(
-            session_state.metadata.get("conversation_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("conversation_id")
+                .map(String::as_str),
             Some("conv-submit")
         );
         assert_eq!(
-            session_state.metadata.get("sender_user_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("sender_user_id")
+                .map(String::as_str),
             Some("actual-user")
         );
         assert_eq!(
-            session_state.metadata.get("sender_staff_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("sender_staff_id")
+                .map(String::as_str),
             Some("staff-1")
         );
         assert_eq!(
-            session_state.metadata.get("last_task_id").map(String::as_str),
+            session_state
+                .metadata
+                .get("last_task_id")
+                .map(String::as_str),
             Some(task_id.as_str())
         );
     }
@@ -2922,7 +3048,10 @@ mod tests {
         .await
         .unwrap();
 
-        let session = uhorse_core::Session::new(uhorse_core::ChannelType::DingTalk, "fallback-user".to_string());
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
         let inbound = DingTalkInboundMessage {
             message: uhorse_core::Message::new(
                 session.id.clone(),
@@ -2943,7 +3072,8 @@ mod tests {
 
         submit_dingtalk_task(&state, inbound).await.unwrap();
 
-        let assignment = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
+        let assignment =
+            tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(assignment.is_err());
         assert!(state.dingtalk_routes.read().await.is_empty());
 
@@ -2970,7 +3100,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         )
         .await;
 
-        let session = uhorse_core::Session::new(uhorse_core::ChannelType::DingTalk, "fallback-user".to_string());
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
         let inbound = DingTalkInboundMessage {
             message: uhorse_core::Message::new(
                 session.id.clone(),
@@ -3102,7 +3235,12 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     async fn test_list_runtime_sessions_and_messages_return_runtime_state() {
         let runtime = create_test_runtime().await;
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = Arc::new(WebState::new_with_runtime(Arc::new(hub), None, None, runtime.clone()));
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime.clone(),
+        ));
         let session_key = SessionKey::new("dingtalk", "user-api");
 
         persist_session_state(
@@ -3131,11 +3269,9 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(sessions[0].session_id, session_key.as_str());
         assert_eq!(sessions[0].agent_id.as_deref(), Some("main"));
 
-        let (_, Json(messages_response)) = get_runtime_session_messages(
-            State(state),
-            Path(session_key.as_str().to_string()),
-        )
-        .await;
+        let (_, Json(messages_response)) =
+            get_runtime_session_messages(State(state), Path(session_key.as_str().to_string()))
+                .await;
         let messages = messages_response.data.unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].user_message, "hello");
@@ -3153,7 +3289,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(status, StatusCode::OK);
         assert_eq!(approvals.len(), 1);
         assert_eq!(approvals[0].id, approval.id);
-        assert_eq!(approvals[0].status, uhorse_security::ApprovalStatus::Pending);
+        assert_eq!(
+            approvals[0].status,
+            uhorse_security::ApprovalStatus::Pending
+        );
     }
 
     #[tokio::test]
@@ -3166,7 +3305,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(returned.id, approval.id);
-        assert_eq!(returned.metadata.get("request_id"), Some(&serde_json::json!("request-get")));
+        assert_eq!(
+            returned.metadata.get("request_id"),
+            Some(&serde_json::json!("request-get"))
+        );
     }
 
     #[tokio::test]
@@ -3319,7 +3461,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
                 assert_eq!(context.session_id.as_str(), "api-session");
                 assert_eq!(context.channel, "api");
                 assert_eq!(context.intent.as_deref(), Some("check file"));
-                assert_eq!(context.env.get("source").map(String::as_str), Some("web-test"));
+                assert_eq!(
+                    context.env.get("source").map(String::as_str),
+                    Some("web-test")
+                );
                 match command {
                     Command::File(FileCommand::Exists { path }) => {
                         assert_eq!(path, target_path.to_string_lossy().to_string());
@@ -3330,7 +3475,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             other => panic!("unexpected message: {:?}", other),
         }
 
-        let status = hub.get_task_status(&TaskId::from_string(task_id)).await.unwrap();
+        let status = hub
+            .get_task_status(&TaskId::from_string(task_id))
+            .await
+            .unwrap();
         assert_eq!(status.status, TaskStatus::Running);
         assert_eq!(status.node_id.as_ref(), Some(&node_id));
     }
@@ -3401,7 +3549,11 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     #[tokio::test]
     async fn test_get_task_returns_actual_command_type_and_priority_for_completed_task() {
         let (app, hub, _node_id, mut rx, workspace) = create_task_submit_test_state().await;
-        let path = workspace.path().join("Cargo.toml").to_string_lossy().to_string();
+        let path = workspace
+            .path()
+            .join("Cargo.toml")
+            .to_string_lossy()
+            .to_string();
 
         let (status, body) = post_json(
             app,
@@ -3429,7 +3581,11 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             .unwrap()
             .unwrap();
 
-        let (status, body) = get_json(create_router(WebState::new(hub.clone(), None, None)), &format!("/api/tasks/{}", task_id)).await;
+        let (status, body) = get_json(
+            create_router(WebState::new(hub.clone(), None, None)),
+            &format!("/api/tasks/{}", task_id),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["success"], json!(true));
         assert_eq!(body["data"]["command_type"], json!("file"));

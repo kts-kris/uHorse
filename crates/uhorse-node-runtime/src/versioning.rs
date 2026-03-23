@@ -35,7 +35,9 @@ impl VersionManager {
         let output = match &target {
             DiffTarget::WorkingTree => self.git(["diff", "--"]),
             DiffTarget::Staged => self.git(["diff", "--cached", "--"]),
-            DiffTarget::RevisionRange { from, to } => self.git(["diff", from.as_str(), to.as_str(), "--"]),
+            DiffTarget::RevisionRange { from, to } => {
+                self.git(["diff", from.as_str(), to.as_str(), "--"])
+            }
         }?;
         Ok(WorkspaceDiff {
             target,
@@ -73,11 +75,7 @@ impl VersionManager {
     /// 获取最近一次检查点
     pub fn current_checkpoint(&self) -> NodeResult<CheckpointRecord> {
         self.ensure_git_repo()?;
-        let output = self.git([
-            "log",
-            "-1",
-            "--pretty=format:%H%x1f%s%x1f%cI",
-        ])?;
+        let output = self.git(["log", "-1", "--pretty=format:%H%x1f%s%x1f%cI"])?;
         CheckpointRecord::from_log_line(&output)
     }
 
@@ -141,7 +139,10 @@ impl VersionManager {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let collected: Vec<String> = args.into_iter().map(|arg| arg.as_ref().to_string()).collect();
+        let collected: Vec<String> = args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect();
         let output = Command::new("git")
             .arg("-C")
             .arg(self.workspace.root())
@@ -181,12 +182,7 @@ impl WorkspaceVersionStatus {
 
         for line in output.lines() {
             if let Some(rest) = line.strip_prefix("## ") {
-                branch = rest
-                    .split("...")
-                    .next()
-                    .unwrap_or(rest)
-                    .trim()
-                    .to_string();
+                branch = rest.split("...").next().unwrap_or(rest).trim().to_string();
                 continue;
             }
 
@@ -332,7 +328,9 @@ impl CheckpointRecord {
             revision: revision.to_string(),
             message: message.to_string(),
             created_at: DateTime::parse_from_rfc3339(created_at)
-                .map_err(|error| NodeError::Execution(format!("Invalid checkpoint timestamp: {}", error)))?
+                .map_err(|error| {
+                    NodeError::Execution(format!("Invalid checkpoint timestamp: {}", error))
+                })?
                 .with_timezone(&Utc),
         })
     }
@@ -392,7 +390,11 @@ mod tests {
         let output = Command::new("git")
             .arg("-C")
             .arg(root)
-            .args(args.into_iter().map(|arg| arg.as_ref().to_string()).collect::<Vec<_>>())
+            .args(
+                args.into_iter()
+                    .map(|arg| arg.as_ref().to_string())
+                    .collect::<Vec<_>>(),
+            )
             .output()
             .unwrap();
         if output.status.success() {
@@ -432,7 +434,9 @@ mod tests {
         let (temp, _workspace, manager) = init_git_repo();
         fs::write(temp.path().join("notes.txt"), "draft\n").unwrap();
 
-        let checkpoint = manager.create_checkpoint("checkpoint: 保存 notes", true).unwrap();
+        let checkpoint = manager
+            .create_checkpoint("checkpoint: 保存 notes", true)
+            .unwrap();
         assert_eq!(checkpoint.message, "checkpoint: 保存 notes");
 
         let status = manager.status().unwrap();
@@ -455,7 +459,9 @@ mod tests {
         let (temp, _workspace, manager) = init_git_repo();
         fs::write(temp.path().join("notes.txt"), "draft\n").unwrap();
         let initial = manager.current_checkpoint().unwrap();
-        manager.create_checkpoint("checkpoint: 保存 notes", true).unwrap();
+        manager
+            .create_checkpoint("checkpoint: 保存 notes", true)
+            .unwrap();
 
         let restored = manager.restore(&initial.revision).unwrap();
         assert_eq!(restored.revision, initial.revision);

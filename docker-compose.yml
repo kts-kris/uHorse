@@ -1,33 +1,25 @@
 version: '3.8'
 
 services:
-  uhorse:
+  uhorse-hub:
     build:
       context: .
       dockerfile: Dockerfile
-    image: uhorse:latest
-    container_name: uhorse
+    image: uhorse-hub:latest
+    container_name: uhorse_hub
     restart: unless-stopped
     ports:
-      - "8080:8080"  # HTTP API
-      - "9090:9090"  # Metrics
+      - "8765:8765"  # HTTP API
     environment:
       - RUST_LOG=info
-      - UHORSE_SERVER_HOST=0.0.0.0
-      - UHORSE_SERVER_PORT=8080
-      - UHORSE_DATABASE_PATH=/app/data/uhorse.db
-      - UHORSE_LOG_LEVEL=info
-      # 安全配置（生产环境应使用密钥管理）
-      - UHORSE_JWT_SECRET=dev-secret-change-in-production
-      - UHORSE_TOKEN_EXPIRY=86400
     volumes:
       - uhorse_data:/app/data
       - uhorse_logs:/app/logs
-      - ./config.toml:/app/config/config.toml:ro
+      - ./hub.toml:/app/config/hub.toml:ro
     networks:
       - uhorse_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3

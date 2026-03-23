@@ -408,7 +408,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         .unwrap();
 
         let mut registry = SkillRegistry::new();
-        let count = registry.load_from_dir(tempdir.path().to_path_buf()).await.unwrap();
+        let count = registry
+            .load_from_dir(tempdir.path().to_path_buf())
+            .await
+            .unwrap();
         assert_eq!(count, 1);
 
         let skill = registry.get("echo").unwrap();

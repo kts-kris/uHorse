@@ -6,12 +6,15 @@ use crate::connection::{ConnectionConfig, HubConnection};
 use crate::error::{NodeError, NodeResult};
 use crate::executor::CommandExecutor;
 use crate::permission::{
-    Action, ApprovalResolution, PermissionManager, PermissionResult, PermissionRule, ResourcePattern,
+    Action, ApprovalResolution, PermissionManager, PermissionResult, PermissionRule,
+    ResourcePattern,
 };
 use crate::status::{HeartbeatSnapshot, Metrics, StatusReporter};
 use crate::workspace::Workspace;
 use chrono::{DateTime, Utc};
-use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -141,13 +144,27 @@ pub struct PermissionRuleConfig {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PermissionResourceConfig {
     AllowAll,
-    ExactPath { path: String },
-    PathPrefix { prefix: String },
-    Glob { pattern: String },
-    Regex { pattern: String },
-    CommandType { types: Vec<String> },
-    All { patterns: Vec<PermissionResourceConfig> },
-    Any { patterns: Vec<PermissionResourceConfig> },
+    ExactPath {
+        path: String,
+    },
+    PathPrefix {
+        prefix: String,
+    },
+    Glob {
+        pattern: String,
+    },
+    Regex {
+        pattern: String,
+    },
+    CommandType {
+        types: Vec<String>,
+    },
+    All {
+        patterns: Vec<PermissionResourceConfig>,
+    },
+    Any {
+        patterns: Vec<PermissionResourceConfig>,
+    },
 }
 
 fn default_permission_rule_enabled() -> bool {
@@ -291,7 +308,9 @@ fn convert_protocol_resource_pattern(pattern: uhorse_protocol::ResourcePattern) 
         uhorse_protocol::ResourcePattern::Exact { path } => ResourcePattern::ExactPath { path },
         uhorse_protocol::ResourcePattern::Glob { pattern } => ResourcePattern::Glob { pattern },
         uhorse_protocol::ResourcePattern::Regex { pattern } => ResourcePattern::Regex { pattern },
-        uhorse_protocol::ResourcePattern::Prefix { prefix } => ResourcePattern::PathPrefix { prefix },
+        uhorse_protocol::ResourcePattern::Prefix { prefix } => {
+            ResourcePattern::PathPrefix { prefix }
+        }
     }
 }
 
@@ -422,7 +441,9 @@ impl Node {
 
         watcher
             .watch(&root, RecursiveMode::Recursive)
-            .map_err(|e| NodeError::Execution(format!("Failed to watch workspace {:?}: {}", root, e)))?;
+            .map_err(|e| {
+                NodeError::Execution(format!("Failed to watch workspace {:?}: {}", root, e))
+            })?;
 
         let watcher_root = root.clone();
         tokio::task::spawn_blocking(move || {
@@ -575,7 +596,9 @@ impl Node {
         status_reporter
             .collect_snapshot(current_tasks, max_tasks, network_latency_ms)
             .await
-            .map_err(|error| NodeError::Internal(format!("Failed to collect heartbeat snapshot: {}", error)))
+            .map_err(|error| {
+                NodeError::Internal(format!("Failed to collect heartbeat snapshot: {}", error))
+            })
     }
 
     /// 启动消息处理器
@@ -703,8 +726,9 @@ impl Node {
                     }
                     PermissionResult::Denied(reason) => {
                         let duration_ms = started_at.elapsed().as_millis() as u64;
-                        let result = CommandResult::failure(ExecutionError::permission_denied(&reason))
-                            .with_duration(duration_ms);
+                        let result =
+                            CommandResult::failure(ExecutionError::permission_denied(&reason))
+                                .with_duration(duration_ms);
 
                         {
                             let mut m = metrics.write().await;
@@ -731,10 +755,7 @@ impl Node {
                                 NodeError::Connection(format!("Failed to send task result: {}", e))
                             })?;
 
-                        warn!(
-                            "Task {} denied on node {}: {}",
-                            task_id, node_id, reason
-                        );
+                        warn!("Task {} denied on node {}: {}", task_id, node_id, reason);
                     }
                     PermissionResult::RequiresApproval { reason, .. } => {
                         let approval = permission_manager
@@ -759,7 +780,10 @@ impl Node {
                             })
                             .await
                             .map_err(|e| {
-                                NodeError::Connection(format!("Failed to send approval request: {}", e))
+                                NodeError::Connection(format!(
+                                    "Failed to send approval request: {}",
+                                    e
+                                ))
                             })?;
 
                         info!(
@@ -903,13 +927,11 @@ impl Node {
                             m.record_execution(false, 0);
                         }
 
-                        let result = CommandResult::failure(
-                            ExecutionError::permission_denied(
-                                reason
-                                    .clone()
-                                    .unwrap_or_else(|| "Approval rejected".to_string()),
-                            ),
-                        );
+                        let result = CommandResult::failure(ExecutionError::permission_denied(
+                            reason
+                                .clone()
+                                .unwrap_or_else(|| "Approval rejected".to_string()),
+                        ));
 
                         outbound_tx
                             .send(NodeToHub::TaskResult {
@@ -923,10 +945,7 @@ impl Node {
                                 NodeError::Connection(format!("Failed to send task result: {}", e))
                             })?;
 
-                        warn!(
-                            "Approval rejected for task {} on node {}",
-                            task_id, node_id
-                        );
+                        warn!("Approval rejected for task {} on node {}", task_id, node_id);
                     }
                 }
             }
@@ -944,18 +963,14 @@ impl Node {
             NodeError::Permission(message) => ExecutionError::permission_denied(message.clone()),
             NodeError::Timeout(message) => ExecutionError::timeout(message.clone()),
             NodeError::Execution(message) => ExecutionError::execution_failed(message.clone()),
-            NodeError::Workspace(message) => {
-                ExecutionError::validation_failed(message.clone())
-            }
+            NodeError::Workspace(message) => ExecutionError::validation_failed(message.clone()),
             NodeError::Config(message) => ExecutionError::validation_failed(message.clone()),
             NodeError::Connection(message) => {
                 ExecutionError::new("CONNECTION_FAILED", message.clone(), ErrorSource::External)
             }
-            NodeError::Protocol(error) => ExecutionError::new(
-                "PROTOCOL_ERROR",
-                error.to_string(),
-                ErrorSource::Internal,
-            ),
+            NodeError::Protocol(error) => {
+                ExecutionError::new("PROTOCOL_ERROR", error.to_string(), ErrorSource::Internal)
+            }
             NodeError::Io(error) => {
                 ExecutionError::new("IO_ERROR", error.to_string(), ErrorSource::Executor)
             }
@@ -1209,7 +1224,11 @@ mod tests {
                 retry_count: 0,
                 max_retries: 3,
             },
-            &Arc::new(CommandExecutor::new(workspace, permission_manager.clone(), ".uhorse".to_string())),
+            &Arc::new(CommandExecutor::new(
+                workspace,
+                permission_manager.clone(),
+                ".uhorse".to_string(),
+            )),
             &permission_manager,
             &metrics,
             &running_tasks,
@@ -1495,9 +1514,14 @@ mod tests {
             },
         );
 
-        let snapshot = Node::collect_heartbeat_snapshot(&node.status_reporter, 1, node.config.max_concurrent_tasks, Some(42))
-            .await
-            .unwrap();
+        let snapshot = Node::collect_heartbeat_snapshot(
+            &node.status_reporter,
+            1,
+            node.config.max_concurrent_tasks,
+            Some(42),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(snapshot.status.current_tasks, 1);
         assert_eq!(snapshot.status.max_tasks, 7);
@@ -1551,19 +1575,17 @@ mod tests {
                 .with_args(vec!["-c".to_string(), "printf ok".to_string()])
                 .with_cwd(temp.path().to_string_lossy().to_string()),
         );
-        let result = permission_manager.check(
-            &command,
-            &TaskContext::new(
-                uhorse_protocol::UserId::from_string("test-user"),
-                uhorse_protocol::SessionId::new(),
-                "test-channel",
-            ),
-        )
-        .await;
-        assert!(matches!(
-            result,
-            PermissionResult::RequiresApproval { .. }
-        ));
+        let result = permission_manager
+            .check(
+                &command,
+                &TaskContext::new(
+                    uhorse_protocol::UserId::from_string("test-user"),
+                    uhorse_protocol::SessionId::new(),
+                    "test-channel",
+                ),
+            )
+            .await;
+        assert!(matches!(result, PermissionResult::RequiresApproval { .. }));
 
         let outbound = tokio::time::timeout(Duration::from_millis(200), outbound_rx.recv()).await;
         assert!(outbound.is_err());

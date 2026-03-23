@@ -245,7 +245,10 @@ impl CommandExecutor {
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+                NodeError::Execution(format!(
+                    "Failed to create parent directory {:?}: {}",
+                    parent, e
+                ))
             })?;
         }
 
@@ -265,7 +268,10 @@ impl CommandExecutor {
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+                NodeError::Execution(format!(
+                    "Failed to create parent directory {:?}: {}",
+                    parent, e
+                ))
             })?;
         }
 
@@ -538,7 +544,10 @@ impl CommandExecutor {
 
         if let Some(parent) = to.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+                NodeError::Execution(format!(
+                    "Failed to create parent directory {:?}: {}",
+                    parent, e
+                ))
             })?;
         }
 
@@ -563,7 +572,10 @@ impl CommandExecutor {
 
         if let Some(parent) = to.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                NodeError::Execution(format!("Failed to create parent directory {:?}: {}", parent, e))
+                NodeError::Execution(format!(
+                    "Failed to create parent directory {:?}: {}",
+                    parent, e
+                ))
             })?;
         }
 
@@ -826,12 +838,14 @@ impl CommandExecutor {
             )));
         }
 
-        tokio::fs::create_dir_all(&internal_dir).await.map_err(|e| {
-            NodeError::Execution(format!(
-                "Failed to create internal work directory {:?}: {}",
-                internal_dir, e
-            ))
-        })?;
+        tokio::fs::create_dir_all(&internal_dir)
+            .await
+            .map_err(|e| {
+                NodeError::Execution(format!(
+                    "Failed to create internal work directory {:?}: {}",
+                    internal_dir, e
+                ))
+            })?;
 
         Ok(internal_dir)
     }
@@ -863,9 +877,8 @@ impl CommandExecutor {
         };
 
         let output = match tokio::time::timeout(timeout_duration, command.output()).await {
-            Ok(result) => result.map_err(|e| {
-                NodeError::Execution(format!("Failed to execute command: {}", e))
-            })?,
+            Ok(result) => result
+                .map_err(|e| NodeError::Execution(format!("Failed to execute command: {}", e)))?,
             Err(_) => {
                 return Err(NodeError::Timeout(format!(
                     "Command timed out after {:?}",
@@ -879,7 +892,12 @@ impl CommandExecutor {
 
         if output.status.success() {
             if !stderr.is_empty() {
-                Ok(CommandOutput::text(format!("{}{}{}", stdout, if stdout.is_empty() { "" } else { "\n" }, stderr)))
+                Ok(CommandOutput::text(format!(
+                    "{}{}{}",
+                    stdout,
+                    if stdout.is_empty() { "" } else { "\n" },
+                    stderr
+                )))
             } else {
                 Ok(CommandOutput::text(stdout))
             }
@@ -1004,7 +1022,10 @@ mod tests {
 
         match result {
             CommandOutput::Text { content } => {
-                assert_eq!(content.trim(), temp.path().canonicalize().unwrap().to_string_lossy());
+                assert_eq!(
+                    content.trim(),
+                    temp.path().canonicalize().unwrap().to_string_lossy()
+                );
             }
             other => panic!("unexpected output: {:?}", other),
         }
@@ -1040,7 +1061,14 @@ mod tests {
             CommandOutput::Text { content } => {
                 let temp_path = content.trim();
                 assert!(temp_path.contains(".uhorse"));
-                assert!(temp_path.starts_with(&temp.path().canonicalize().unwrap().to_string_lossy().to_string()));
+                assert!(temp_path.starts_with(
+                    &temp
+                        .path()
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                ));
             }
             other => panic!("unexpected output: {:?}", other),
         }

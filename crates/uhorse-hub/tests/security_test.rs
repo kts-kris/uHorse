@@ -296,8 +296,14 @@ async fn test_message_router_creates_hub_approval_from_node_request() {
     assert_eq!(pending[0].status, ApprovalStatus::Pending);
     assert_eq!(pending[0].action, "system_command");
     assert_eq!(pending[0].requested_by, node_id.as_str());
-    assert_eq!(pending[0].metadata.get("request_id"), Some(&serde_json::json!(request_id)));
-    assert_eq!(pending[0].metadata.get("task_id"), Some(&serde_json::json!(task_id.as_str())));
+    assert_eq!(
+        pending[0].metadata.get("request_id"),
+        Some(&serde_json::json!(request_id))
+    );
+    assert_eq!(
+        pending[0].metadata.get("task_id"),
+        Some(&serde_json::json!(task_id.as_str()))
+    );
 }
 
 #[tokio::test]

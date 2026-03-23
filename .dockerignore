@@ -63,6 +63,5 @@ Thumbs.db
 desktop.ini
 
 # Rust
-Cargo.lock
 **/*.rs.bk
 *.pdb

@@ -62,12 +62,12 @@ pub use uhorse_node_runtime::status;
 pub mod tools;
 pub use uhorse_node_runtime::workspace;
 
+pub use tools::{BrowserExecutor, DatabaseExecutor, SkillExecutor};
 pub use uhorse_node_runtime::{
     CommandExecutor, ConnectionConfig, ConnectionState, ExecutionContext, HubConnection, Metrics,
     Node, NodeConfig, NodeError, NodeResult, PermissionManager, PermissionResult, PermissionRule,
     StatusReporter, Workspace, WorkspaceConfig,
 };
-pub use tools::{BrowserExecutor, DatabaseExecutor, SkillExecutor};
 
 /// 节点版本
 pub const NODE_VERSION: &str = env!("CARGO_PKG_VERSION");

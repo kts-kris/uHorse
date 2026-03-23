@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use uhorse_protocol::{CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub, TaskId};
+use uhorse_protocol::{
+    CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub, TaskId,
+};
 use uhorse_security::ApprovalLevel;
 
 use crate::error::{HubError, HubResult};
@@ -113,13 +115,11 @@ impl MessageRouter {
                         .complete_task(
                             &tid,
                             node_id,
-                            CommandResult::failure(
-                                ExecutionError::new(
-                                    error.code,
-                                    error.message,
-                                    ErrorSource::Executor,
-                                ),
-                            ),
+                            CommandResult::failure(ExecutionError::new(
+                                error.code,
+                                error.message,
+                                ErrorSource::Executor,
+                            )),
                         )
                         .await?;
                 } else {
@@ -143,9 +143,7 @@ impl MessageRouter {
                 );
 
                 let security_manager = security_manager.ok_or_else(|| {
-                    HubError::Permission(
-                        "Approval request requires security manager".to_string(),
-                    )
+                    HubError::Permission("Approval request requires security manager".to_string())
                 })?;
 
                 let operation = Self::approval_operation_for_command(&command);
