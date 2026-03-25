@@ -34,6 +34,63 @@ impl Default for IdempotencyCache {
     }
 }
 
+#[async_trait::async_trait]
+impl IdempotencyService for IdempotencyCache {
+    async fn check_or_record(
+        &self,
+        key: &str,
+        _ttl_seconds: u64,
+    ) -> Result<Option<serde_json::Value>> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut records = self.records.write().await;
+
+        // 清理过期记录
+        records.retain(|_, record| record.expires_at > now);
+
+        if let Some(record) = records.get(key) {
+            return Ok(Some(record.response.clone()));
+        }
+
+        Ok(None)
+    }
+
+    async fn store_response(
+        &self,
+        key: &str,
+        response: &serde_json::Value,
+        ttl_seconds: u64,
+    ) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let record = IdempotencyRecord {
+            response: response.clone(),
+            expires_at: now + ttl_seconds,
+        };
+
+        self.records.write().await.insert(key.to_string(), record);
+        Ok(())
+    }
+
+    async fn cleanup_expired(&self) -> Result<usize> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut records = self.records.write().await;
+        let before = records.len();
+        records.retain(|_, record| record.expires_at > now);
+        Ok(before - records.len())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,62 +220,5 @@ mod tests {
         // 之后检查应该返回响应
         let final_check = cache.check_or_record(key, 60).await.unwrap();
         assert!(final_check.is_some());
-    }
-}
-
-#[async_trait::async_trait]
-impl IdempotencyService for IdempotencyCache {
-    async fn check_or_record(
-        &self,
-        key: &str,
-        ttl_seconds: u64,
-    ) -> Result<Option<serde_json::Value>> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let mut records = self.records.write().await;
-
-        // 清理过期记录
-        records.retain(|_, record| record.expires_at > now);
-
-        if let Some(record) = records.get(key) {
-            return Ok(Some(record.response.clone()));
-        }
-
-        Ok(None)
-    }
-
-    async fn store_response(
-        &self,
-        key: &str,
-        response: &serde_json::Value,
-        ttl_seconds: u64,
-    ) -> Result<()> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let record = IdempotencyRecord {
-            response: response.clone(),
-            expires_at: now + ttl_seconds,
-        };
-
-        self.records.write().await.insert(key.to_string(), record);
-        Ok(())
-    }
-
-    async fn cleanup_expired(&self) -> Result<usize> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let mut records = self.records.write().await;
-        let before = records.len();
-        records.retain(|_, record| record.expires_at > now);
-        Ok(before - records.len())
     }
 }

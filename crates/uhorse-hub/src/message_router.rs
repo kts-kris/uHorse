@@ -309,9 +309,14 @@ impl MessageRouter {
         };
 
         channel
-            .send_message(user_id, &MessageContent::Text(Self::render_notification_message(node_id, event)))
+            .send_message(
+                user_id,
+                &MessageContent::Text(Self::render_notification_message(node_id, event)),
+            )
             .await
-            .map_err(|error| HubError::Communication(format!("Failed to send DingTalk notification: {}", error)))
+            .map_err(|error| {
+                HubError::Communication(format!("Failed to send DingTalk notification: {}", error))
+            })
     }
 
     fn render_notification_message(
@@ -327,10 +332,7 @@ impl MessageRouter {
 
         format!(
             "[uHorse 节点通知]\n类型：{}\n节点：{}\n标题：{}\n内容：{}",
-            kind,
-            node_id,
-            event.title,
-            event.body
+            kind, node_id, event.title, event.body
         )
     }
 

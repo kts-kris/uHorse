@@ -112,6 +112,7 @@ pub struct ServerCapabilities {
     pub features: ServerFeatures,
 }
 
+/// 服务器特性声明
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerFeatures {
     /// 支持幂等性
@@ -229,6 +230,7 @@ pub struct ErrorDetail {
 }
 
 impl ErrorDetail {
+    /// 创建新的错误详情
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -237,6 +239,7 @@ impl ErrorDetail {
         }
     }
 
+    /// 设置错误详情
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);
         self
@@ -275,13 +278,21 @@ impl Event {
 
 /// 预定义的事件名称
 pub mod events {
+    /// 消息接收事件
     pub const MESSAGE_RECEIVED: &str = "message.received";
+    /// 消息发送事件
     pub const MESSAGE_SENT: &str = "message.sent";
+    /// 工具执行成功事件
     pub const TOOL_EXECUTED: &str = "tool.executed";
+    /// 工具执行失败事件
     pub const TOOL_FAILED: &str = "tool.failed";
+    /// 会话创建事件
     pub const SESSION_CREATED: &str = "session.created";
+    /// 会话关闭事件
     pub const SESSION_CLOSED: &str = "session.closed";
+    /// 设备连接事件
     pub const DEVICE_CONNECTED: &str = "device.connected";
+    /// 设备断开事件
     pub const DEVICE_DISCONNECTED: &str = "device.disconnected";
 }
 
@@ -295,6 +306,7 @@ pub struct Ping {
 }
 
 impl Ping {
+    /// 创建新的 Ping 消息
     pub fn new() -> Self {
         Self {
             timestamp: std::time::SystemTime::now()
@@ -302,6 +314,12 @@ impl Ping {
                 .unwrap()
                 .as_secs(),
         }
+    }
+}
+
+impl Default for Ping {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -313,6 +331,7 @@ pub struct Pong {
 }
 
 impl Pong {
+    /// 创建新的 Pong 消息
     pub fn new(timestamp: u64) -> Self {
         Self { timestamp }
     }

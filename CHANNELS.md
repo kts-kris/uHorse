@@ -64,6 +64,10 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 ```
 
 > 注意：DingTalk 只能通过 **统一配置** 初始化。legacy `HubConfig` 模式不能初始化 DingTalk。

@@ -18,9 +18,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uhorse_core::{Message, MessageContent, MessageRole, Session, SessionId};
+use uhorse_core::{Session, SessionId};
 use uhorse_llm::LLMClient;
-use uuid::Uuid;
 
 /// Gateway 配置
 #[derive(Debug, Clone)]
@@ -50,19 +49,42 @@ impl Default for GatewayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GatewayEvent {
     /// 消息接收
-    MessageReceived { session_id: String, message: String },
+    MessageReceived {
+        /// 关联会话 ID。
+        session_id: String,
+        /// 接收到的消息内容。
+        message: String,
+    },
     /// 消息发送
-    MessageSent { session_id: String, message: String },
+    MessageSent {
+        /// 关联会话 ID。
+        session_id: String,
+        /// 发送的消息内容。
+        message: String,
+    },
     /// Agent 切换
     AgentSwitched {
+        /// 关联会话 ID。
         session_id: String,
+        /// 原 Agent 名称。
         from_agent: String,
+        /// 新 Agent 名称。
         to_agent: String,
     },
     /// 技能调用
-    SkillInvoked { session_id: String, skill: String },
+    SkillInvoked {
+        /// 关联会话 ID。
+        session_id: String,
+        /// 被调用的技能名称。
+        skill: String,
+    },
     /// 错误
-    Error { session_id: String, error: String },
+    Error {
+        /// 关联会话 ID。
+        session_id: String,
+        /// 错误详情。
+        error: String,
+    },
 }
 
 /// Gateway - 控制平面
@@ -115,7 +137,7 @@ where
         let router = Router::new();
 
         let gateway = Self {
-            config: config.clone(),
+            config,
             llm_client,
             memory,
             router: Arc::new(router),
@@ -125,7 +147,6 @@ where
         };
 
         // 启动事件处理任务
-        let event_sender_clone = gateway.event_sender.clone();
         tokio::spawn(async move {
             while let Some(event) = event_receiver.recv().await {
                 // 处理事件（日志、监控等）
@@ -241,6 +262,16 @@ where
         });
 
         Ok(response)
+    }
+
+    /// 获取配置。
+    pub fn config(&self) -> &GatewayConfig {
+        &self.config
+    }
+
+    /// 获取路由器。
+    pub fn router(&self) -> &Router {
+        &self.router
     }
 
     /// 获取所有会话

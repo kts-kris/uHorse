@@ -3,6 +3,7 @@
 > **Version**: 3.0.0
 > **Last Updated**: 2025-03-13
 > **Audience**: Enterprise Architects, Technical Decision Makers, DevOps Teams
+> **Note**: when examples refer to the current mainline default listener, they are normalized to port `8765` and health path `/api/health`.
 
 ---
 
@@ -164,7 +165,7 @@ Enterprise employees need to quickly access information, query data, and perform
 
 [server]
 host = "0.0.0.0"
-port = 8080
+port = 8765
 
 [channels]
 enabled = ["dingtalk", "feishu", "wecom"]
@@ -573,7 +574,7 @@ services:
     container_name: uhorse
     restart: unless-stopped
     ports:
-      - "8080:8080"   # HTTP API
+      - "8765:8765"   # HTTP API
       - "9090:9090"   # Metrics
     environment:
       - RUST_LOG=info
@@ -588,7 +589,7 @@ services:
       - redis
       - nats
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -704,7 +705,7 @@ spec:
       - name: uhorse
         image: uhorse/uhorse:3.0.0
         ports:
-        - containerPort: 8080
+        - containerPort: 8765
         - containerPort: 9090
         env:
         - name: RUST_LOG
@@ -720,14 +721,14 @@ spec:
             cpu: "500m"
         livenessProbe:
           httpGet:
-            path: /health/live
-            port: 8080
+            path: /api/health
+            port: 8765
           initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health/ready
-            port: 8080
+            path: /api/health
+            port: 8765
           initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
@@ -937,7 +938,7 @@ cargo build --release
 ./target/release/uhorse run
 
 # 5. Health check
-curl http://localhost:8080/health/live
+curl http://localhost:8765/api/health
 ```
 
 ### B. Reference Links

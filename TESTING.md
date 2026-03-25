@@ -178,6 +178,7 @@ curl -X POST http://127.0.0.1:8765/api/node-auth/token \
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
@@ -258,6 +259,10 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 ```
 
 ### LLM 最小配置
@@ -296,6 +301,7 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 当前已经明确验证的是：
 
 - `GET /api/health`
+- `GET /metrics`
 - `GET /api/nodes`
 - `POST /api/node-auth/token`
 - `POST /api/tasks`

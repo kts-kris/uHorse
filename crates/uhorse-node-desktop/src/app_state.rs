@@ -19,8 +19,8 @@ use crate::config_store::{
 use crate::dto::{
     DefaultSettingsDto, DesktopCapabilityStatusDto, DesktopCheckpointDto, DesktopHeartbeatDto,
     DesktopLifecycleState, DesktopLogEntryDto, DesktopLogLevel, DesktopMetricsDto,
-    DesktopNodeStatusDto, DesktopSettingsDto, DesktopVersionEntryDto,
-    DesktopVersionSummaryDto, DesktopWorkspaceStatusDto, WorkspaceValidationDto,
+    DesktopNodeStatusDto, DesktopSettingsDto, DesktopVersionEntryDto, DesktopVersionSummaryDto,
+    DesktopWorkspaceStatusDto, WorkspaceValidationDto,
 };
 
 const DESKTOP_LAUNCH_AGENT_ID: &str = "com.uhorse.node-desktop";
@@ -41,21 +41,32 @@ struct DesktopApp {
     logs: VecDeque<DesktopLogEntryDto>,
 }
 
-#[derive(Debug, Clone, Copy)]
+const DESKTOP_NOTIFICATION_TITLE: &str = "uHorse Node Desktop";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopNotificationKind {
     Test,
+    Info,
+    Warn,
+    Error,
 }
 
 impl DesktopNotificationKind {
     fn as_log_message(self) -> &'static str {
         match self {
             Self::Test => "Test notification dispatched",
+            Self::Info => "Info notification dispatched",
+            Self::Warn => "Warning notification dispatched",
+            Self::Error => "Error notification dispatched",
         }
     }
 
     fn as_protocol_kind(self) -> NotificationEventKind {
         match self {
             Self::Test => NotificationEventKind::Test,
+            Self::Info => NotificationEventKind::Info,
+            Self::Warn => NotificationEventKind::Warn,
+            Self::Error => NotificationEventKind::Error,
         }
     }
 }
@@ -69,13 +80,63 @@ struct DesktopNotification {
 }
 
 impl DesktopNotification {
-    fn new(kind: DesktopNotificationKind, title: impl Into<String>, subtitle: Option<&str>, message: impl Into<String>) -> Self {
+    fn new(
+        kind: DesktopNotificationKind,
+        title: impl Into<String>,
+        subtitle: Option<&str>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             kind,
             title: title.into(),
             subtitle: subtitle.map(|value| value.to_string()),
             message: message.into(),
         }
+    }
+
+    fn workspace_validation_failed(message: impl Into<String>) -> Self {
+        Self::new(
+            DesktopNotificationKind::Warn,
+            DESKTOP_NOTIFICATION_TITLE,
+            Some("工作区校验失败"),
+            message,
+        )
+    }
+
+    fn node_started() -> Self {
+        Self::new(
+            DesktopNotificationKind::Info,
+            DESKTOP_NOTIFICATION_TITLE,
+            Some("节点启动成功"),
+            "Node started successfully",
+        )
+    }
+
+    fn node_start_failed(message: impl Into<String>) -> Self {
+        Self::new(
+            DesktopNotificationKind::Error,
+            DESKTOP_NOTIFICATION_TITLE,
+            Some("节点启动失败"),
+            message,
+        )
+    }
+
+    fn node_stopped() -> Self {
+        Self::new(
+            DesktopNotificationKind::Info,
+            DESKTOP_NOTIFICATION_TITLE,
+            Some("节点停止成功"),
+            "Node stopped",
+        )
+    }
+
+    fn node_stop_failed(message: impl Into<String>) -> Self {
+        Self::new(
+            DesktopNotificationKind::Error,
+            DESKTOP_NOTIFICATION_TITLE,
+            Some("节点停止失败"),
+            message,
+        )
     }
 }
 
@@ -131,7 +192,10 @@ impl DesktopAppState {
         }
     }
 
-    pub async fn save_settings(&self, settings: DesktopSettingsDto) -> NodeResult<DesktopSettingsDto> {
+    pub async fn save_settings(
+        &self,
+        settings: DesktopSettingsDto,
+    ) -> NodeResult<DesktopSettingsDto> {
         let mut app = self.inner.write().await;
         let previous_launch_at_login = app.desktop.launch_at_login;
 
@@ -187,7 +251,7 @@ impl DesktopAppState {
 
         let notification = DesktopNotification::new(
             DesktopNotificationKind::Test,
-            "uHorse Node Desktop",
+            DESKTOP_NOTIFICATION_TITLE,
             Some("测试通知"),
             message,
         );
@@ -208,7 +272,11 @@ impl DesktopAppState {
         Ok(path)
     }
 
-    pub async fn validate_workspace(&self, workspace_path: String, require_git_repo: bool) -> WorkspaceValidationDto {
+    pub async fn validate_workspace(
+        &self,
+        workspace_path: String,
+        require_git_repo: bool,
+    ) -> WorkspaceValidationDto {
         let validation = match Workspace::new(&workspace_path) {
             Ok(workspace) => {
                 let git_repo = workspace.is_git_repo();
@@ -216,7 +284,10 @@ impl DesktopAppState {
                 let error = if valid {
                     None
                 } else {
-                    Some("Workspace must be a git repository when require_git_repo is enabled".to_string())
+                    Some(
+                        "Workspace must be a git repository when require_git_repo is enabled"
+                            .to_string(),
+                    )
                 };
 
                 WorkspaceValidationDto {
@@ -249,16 +320,33 @@ impl DesktopAppState {
         let message = if validation.valid {
             format!("Workspace validation passed: {}", validation.path)
         } else {
-            format!("Workspace validation failed: {}", validation.error.clone().unwrap_or_default())
+            format!(
+                "Workspace validation failed: {}",
+                validation.error.clone().unwrap_or_default()
+            )
         };
-        push_log(&mut app.logs, level, message, "workspace.validate");
+        push_log(&mut app.logs, level, message.clone(), "workspace.validate");
+
+        if !validation.valid {
+            try_dispatch_notification(
+                &mut app,
+                DesktopNotification::workspace_validation_failed(message),
+                "workspace.validate",
+            );
+        }
+
         validation
     }
 
     pub async fn start_node(&self) -> NodeResult<DesktopNodeStatusDto> {
         let mut app = self.inner.write().await;
         if matches!(app.lifecycle_state, DesktopLifecycleState::Running) {
-            push_log(&mut app.logs, DesktopLogLevel::Info, "Start requested while node already running", "runtime.start");
+            push_log(
+                &mut app.logs,
+                DesktopLogLevel::Info,
+                "Start requested while node already running",
+                "runtime.start",
+            );
             return Self::build_status(&app).await;
         }
 
@@ -275,43 +363,105 @@ impl DesktopAppState {
         let mut node = match Node::new(app.config.clone()) {
             Ok(node) => node,
             Err(error) => {
+                let error_message = error.to_string();
                 app.lifecycle_state = DesktopLifecycleState::Failed;
-                app.recent_error = Some(error.to_string());
-                push_log(&mut app.logs, DesktopLogLevel::Error, error.to_string(), "runtime.start");
+                app.recent_error = Some(error_message.clone());
+                push_log(
+                    &mut app.logs,
+                    DesktopLogLevel::Error,
+                    error_message.clone(),
+                    "runtime.start",
+                );
+                try_dispatch_notification(
+                    &mut app,
+                    DesktopNotification::node_start_failed(error_message),
+                    "runtime.start",
+                );
                 return Err(error);
             }
         };
 
         if let Err(error) = node.start().await {
+            let error_message = error.to_string();
             app.lifecycle_state = DesktopLifecycleState::Failed;
-            app.recent_error = Some(error.to_string());
-            push_log(&mut app.logs, DesktopLogLevel::Error, error.to_string(), "runtime.start");
+            app.recent_error = Some(error_message.clone());
+            push_log(
+                &mut app.logs,
+                DesktopLogLevel::Error,
+                error_message.clone(),
+                "runtime.start",
+            );
+            try_dispatch_notification(
+                &mut app,
+                DesktopNotification::node_start_failed(error_message),
+                "runtime.start",
+            );
             return Err(error);
         }
 
         app.node = Some(node);
         app.lifecycle_state = DesktopLifecycleState::Running;
-        push_log(&mut app.logs, DesktopLogLevel::Info, "Node started successfully", "runtime.start");
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Info,
+            "Node started successfully",
+            "runtime.start",
+        );
+        try_dispatch_notification(
+            &mut app,
+            DesktopNotification::node_started(),
+            "runtime.start",
+        );
         Self::build_status(&app).await
     }
 
     pub async fn stop_node(&self) -> NodeResult<DesktopNodeStatusDto> {
         let mut app = self.inner.write().await;
         app.lifecycle_state = DesktopLifecycleState::Stopping;
-        push_log(&mut app.logs, DesktopLogLevel::Info, "Stopping node", "runtime.stop");
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Info,
+            "Stopping node",
+            "runtime.stop",
+        );
 
-        if let Some(node) = app.node.as_mut() {
-            if let Err(error) = node.stop().await {
-                app.lifecycle_state = DesktopLifecycleState::Failed;
-                app.recent_error = Some(error.to_string());
-                push_log(&mut app.logs, DesktopLogLevel::Error, error.to_string(), "runtime.stop");
-                return Err(error);
-            }
+        let stop_result = if let Some(node) = app.node.as_mut() {
+            node.stop().await
+        } else {
+            Ok(())
+        };
+
+        if let Err(error) = stop_result {
+            let error_message = error.to_string();
+            app.lifecycle_state = DesktopLifecycleState::Failed;
+            app.recent_error = Some(error_message.clone());
+            push_log(
+                &mut app.logs,
+                DesktopLogLevel::Error,
+                error_message.clone(),
+                "runtime.stop",
+            );
+            try_dispatch_notification(
+                &mut app,
+                DesktopNotification::node_stop_failed(error_message),
+                "runtime.stop",
+            );
+            return Err(error);
         }
 
         app.node = None;
         app.lifecycle_state = DesktopLifecycleState::Stopped;
-        push_log(&mut app.logs, DesktopLogLevel::Info, "Node stopped", "runtime.stop");
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Info,
+            "Node stopped",
+            "runtime.stop",
+        );
+        try_dispatch_notification(
+            &mut app,
+            DesktopNotification::node_stopped(),
+            "runtime.stop",
+        );
         Self::build_status(&app).await
     }
 
@@ -380,7 +530,10 @@ impl DesktopAppState {
         let manager = VersionManager::new(workspace);
         match manager.status() {
             Ok(status) => {
-                let current_checkpoint = manager.current_checkpoint().ok().map(DesktopCheckpointDto::from_record);
+                let current_checkpoint = manager
+                    .current_checkpoint()
+                    .ok()
+                    .map(DesktopCheckpointDto::from_record);
                 let checkpoints = manager
                     .list_checkpoints(10)
                     .unwrap_or_default()
@@ -426,7 +579,10 @@ impl DesktopAppState {
     async fn build_status(app: &DesktopApp) -> NodeResult<DesktopNodeStatusDto> {
         if let Some(node) = app.node.as_ref() {
             let metrics = node.get_metrics().await;
-            let heartbeat = node.heartbeat_snapshot().await.map(DesktopHeartbeatDto::from_snapshot);
+            let heartbeat = node
+                .heartbeat_snapshot()
+                .await
+                .map(DesktopHeartbeatDto::from_snapshot);
             let connection_state = connection_state_label(&node.connection_state().await);
             let workspace = node.workspace();
             let latest_checkpoint = if workspace.is_git_repo() {
@@ -455,7 +611,9 @@ impl DesktopAppState {
             });
         }
 
-        let workspace = Workspace::new(&app.config.workspace_path).ok().map(Arc::new);
+        let workspace = Workspace::new(&app.config.workspace_path)
+            .ok()
+            .map(Arc::new);
         let latest_checkpoint = workspace
             .filter(|workspace| workspace.is_git_repo())
             .and_then(|workspace| VersionManager::new(workspace).current_checkpoint().ok())
@@ -525,7 +683,12 @@ impl DesktopCheckpointDto {
     }
 }
 
-fn push_log(logs: &mut VecDeque<DesktopLogEntryDto>, level: DesktopLogLevel, message: impl Into<String>, source: impl Into<String>) {
+fn push_log(
+    logs: &mut VecDeque<DesktopLogEntryDto>,
+    level: DesktopLogLevel,
+    message: impl Into<String>,
+    source: impl Into<String>,
+) {
     logs.push_front(DesktopLogEntryDto {
         level,
         message: message.into(),
@@ -538,9 +701,30 @@ fn push_log(logs: &mut VecDeque<DesktopLogEntryDto>, level: DesktopLogLevel, mes
     }
 }
 
-fn dispatch_notification(app: &mut DesktopApp, notification: DesktopNotification, source: &str) -> NodeResult<()> {
+fn try_dispatch_notification(
+    app: &mut DesktopApp,
+    notification: DesktopNotification,
+    source: &str,
+) {
+    if let Err(error) = dispatch_notification(app, notification, source) {
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Warn,
+            format!("Failed to dispatch notification: {}", error),
+            source,
+        );
+    }
+}
+
+fn dispatch_notification(
+    app: &mut DesktopApp,
+    notification: DesktopNotification,
+    source: &str,
+) -> NodeResult<()> {
     if !app.desktop.notifications_enabled {
-        return Err(NodeError::Config("通知功能已关闭，请先开启通知功能".to_string()));
+        return Err(NodeError::Config(
+            "通知功能已关闭，请先开启通知功能".to_string(),
+        ));
     }
 
     show_system_notification(
@@ -614,8 +798,13 @@ fn write_launch_agent(launch_agent_path: &Path, config_path: &Path) -> Result<()
 
     let executable = std::env::current_exe()
         .map_err(|error| format!("Failed to resolve current executable: {}", error))?;
-    let config_path = absolute_path(config_path)
-        .map_err(|error| format!("Failed to resolve config path {}: {}", config_path.display(), error))?;
+    let config_path = absolute_path(config_path).map_err(|error| {
+        format!(
+            "Failed to resolve config path {}: {}",
+            config_path.display(),
+            error
+        )
+    })?;
     let working_directory = std::env::current_dir()
         .map_err(|error| format!("Failed to resolve current working directory: {}", error))?;
 
@@ -704,7 +893,9 @@ fn show_system_notification(title: &str, subtitle: Option<&str>, message: &str) 
         let output = Command::new("osascript")
             .args(["-e", &script])
             .output()
-            .map_err(|error| NodeError::Internal(format!("Failed to launch notification: {}", error)))?;
+            .map_err(|error| {
+                NodeError::Internal(format!("Failed to launch notification: {}", error))
+            })?;
 
         if output.status.success() {
             return Ok(());
@@ -721,7 +912,9 @@ fn show_system_notification(title: &str, subtitle: Option<&str>, message: &str) 
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (title, subtitle, message);
-        Err(NodeError::Internal("当前平台暂不支持系统通知测试".to_string()))
+        Err(NodeError::Internal(
+            "当前平台暂不支持系统通知测试".to_string(),
+        ))
     }
 }
 
@@ -734,7 +927,9 @@ fn pick_workspace_directory() -> NodeResult<String> {
                 "POSIX path of (choose folder with prompt \"选择 uHorse 工作区\")",
             ])
             .output()
-            .map_err(|error| NodeError::Internal(format!("Failed to open workspace picker: {}", error)))?;
+            .map_err(|error| {
+                NodeError::Internal(format!("Failed to open workspace picker: {}", error))
+            })?;
 
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -758,7 +953,9 @@ fn pick_workspace_directory() -> NodeResult<String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        Err(NodeError::Internal("当前平台暂不支持工作区选择器".to_string()))
+        Err(NodeError::Internal(
+            "当前平台暂不支持工作区选择器".to_string(),
+        ))
     }
 }
 
@@ -803,7 +1000,8 @@ mod tests {
     #[tokio::test]
     async fn test_default_settings_uses_computer_name() {
         let temp = TempDir::new().unwrap();
-        let state = DesktopAppState::new(ConfigStore::new(temp.path().join("node-desktop.toml"))).unwrap();
+        let state =
+            DesktopAppState::new(ConfigStore::new(temp.path().join("node-desktop.toml"))).unwrap();
 
         let defaults = state.default_settings().await;
         assert!(!defaults.suggested_name.trim().is_empty());
@@ -816,7 +1014,11 @@ mod tests {
     #[tokio::test]
     async fn test_validate_workspace_reports_missing_directory() {
         let temp = TempDir::new().unwrap();
-        let state = DesktopAppState::new(ConfigStore::new(temp.path().join("node-desktop.toml"))).unwrap();
+        let store = ConfigStore::new(temp.path().join("node-desktop.toml"));
+        let mut config = DesktopConfig::default();
+        config.desktop.notifications_enabled = false;
+        store.save(&config).unwrap();
+        let state = DesktopAppState::new(store).unwrap();
 
         let validation = state
             .validate_workspace(temp.path().join("missing").display().to_string(), true)
@@ -824,6 +1026,13 @@ mod tests {
 
         assert!(!validation.valid);
         assert!(validation.error.is_some());
+
+        let logs = state.logs().await;
+        assert!(logs.iter().any(|entry| {
+            entry.source == "workspace.validate"
+                && matches!(entry.level, DesktopLogLevel::Warn)
+                && entry.message.starts_with("Workspace validation failed:")
+        }));
     }
 
     #[tokio::test]
@@ -840,7 +1049,10 @@ mod tests {
         let status = state.runtime_status().await.unwrap();
 
         assert_eq!(status.workspace_path, workspace_path);
-        assert!(matches!(status.lifecycle_state, DesktopLifecycleState::Stopped));
+        assert!(matches!(
+            status.lifecycle_state,
+            DesktopLifecycleState::Stopped
+        ));
     }
 
     #[tokio::test]
@@ -884,14 +1096,30 @@ mod tests {
         config.node.workspace_path = temp.path().to_string_lossy().to_string();
         config.node.require_git_repo = false;
         config.node.connection.hub_url = "ws://127.0.0.1:65535/ws".to_string();
+        config.desktop.notifications_enabled = false;
         store.save(&config).unwrap();
 
         let state = DesktopAppState::new(store).unwrap();
         let started = state.start_node().await.unwrap();
-        assert!(matches!(started.lifecycle_state, DesktopLifecycleState::Running));
+        assert!(matches!(
+            started.lifecycle_state,
+            DesktopLifecycleState::Running
+        ));
 
         let stopped = state.stop_node().await.unwrap();
-        assert!(matches!(stopped.lifecycle_state, DesktopLifecycleState::Stopped));
+        assert!(matches!(
+            stopped.lifecycle_state,
+            DesktopLifecycleState::Stopped
+        ));
+
+        let logs = state.logs().await;
+        assert!(logs
+            .iter()
+            .any(|entry| entry.source == "runtime.start"
+                && entry.message == "Node started successfully"));
+        assert!(logs
+            .iter()
+            .any(|entry| entry.source == "runtime.stop" && entry.message == "Node stopped"));
     }
 
     #[test]
@@ -900,6 +1128,73 @@ mod tests {
             DesktopNotificationKind::Test.as_protocol_kind(),
             NotificationEventKind::Test
         ));
+        assert!(matches!(
+            DesktopNotificationKind::Info.as_protocol_kind(),
+            NotificationEventKind::Info
+        ));
+        assert!(matches!(
+            DesktopNotificationKind::Warn.as_protocol_kind(),
+            NotificationEventKind::Warn
+        ));
+        assert!(matches!(
+            DesktopNotificationKind::Error.as_protocol_kind(),
+            NotificationEventKind::Error
+        ));
+    }
+
+    #[test]
+    fn test_workspace_validation_failed_notification_shape() {
+        let notification = DesktopNotification::workspace_validation_failed(
+            "Workspace validation failed: missing .git",
+        );
+
+        assert_eq!(notification.kind, DesktopNotificationKind::Warn);
+        assert_eq!(notification.title, DESKTOP_NOTIFICATION_TITLE);
+        assert_eq!(notification.subtitle.as_deref(), Some("工作区校验失败"));
+        assert_eq!(
+            notification.message,
+            "Workspace validation failed: missing .git"
+        );
+    }
+
+    #[test]
+    fn test_node_started_notification_shape() {
+        let notification = DesktopNotification::node_started();
+
+        assert_eq!(notification.kind, DesktopNotificationKind::Info);
+        assert_eq!(notification.title, DESKTOP_NOTIFICATION_TITLE);
+        assert_eq!(notification.subtitle.as_deref(), Some("节点启动成功"));
+        assert_eq!(notification.message, "Node started successfully");
+    }
+
+    #[test]
+    fn test_node_start_failed_notification_shape() {
+        let notification = DesktopNotification::node_start_failed("connection refused");
+
+        assert_eq!(notification.kind, DesktopNotificationKind::Error);
+        assert_eq!(notification.title, DESKTOP_NOTIFICATION_TITLE);
+        assert_eq!(notification.subtitle.as_deref(), Some("节点启动失败"));
+        assert_eq!(notification.message, "connection refused");
+    }
+
+    #[test]
+    fn test_node_stopped_notification_shape() {
+        let notification = DesktopNotification::node_stopped();
+
+        assert_eq!(notification.kind, DesktopNotificationKind::Info);
+        assert_eq!(notification.title, DESKTOP_NOTIFICATION_TITLE);
+        assert_eq!(notification.subtitle.as_deref(), Some("节点停止成功"));
+        assert_eq!(notification.message, "Node stopped");
+    }
+
+    #[test]
+    fn test_node_stop_failed_notification_shape() {
+        let notification = DesktopNotification::node_stop_failed("permission denied");
+
+        assert_eq!(notification.kind, DesktopNotificationKind::Error);
+        assert_eq!(notification.title, DESKTOP_NOTIFICATION_TITLE);
+        assert_eq!(notification.subtitle.as_deref(), Some("节点停止失败"));
+        assert_eq!(notification.message, "permission denied");
     }
 
     #[tokio::test]

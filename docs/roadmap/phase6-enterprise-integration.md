@@ -1,5 +1,7 @@
 # Phase 6: 企业集成体系
 
+> 说明：本文档是 **路线图 / 阶段规划材料**，用于记录当时的目标、设计和阶段状态，不应直接视为当前仓库主线已实现能力清单。当前主线请以 `docs/architecture/v4.0-architecture.md`、`README.md`、`LOCAL_SETUP.md` 为准。
+
 ## 概述
 
 **目标**: 实现 SSO/OAuth2、SIEM 集成、Webhook 增强、第三方系统对接

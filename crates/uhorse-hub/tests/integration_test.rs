@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use reqwest::StatusCode;
 use tempfile::tempdir;
 use tokio::time::timeout;
 use uhorse_hub::{create_router, Hub, HubConfig, NodeAuthenticator, WebState};
@@ -363,6 +364,136 @@ async fn test_local_hub_rejects_node_with_mismatched_auth_token() {
     assert!(hub.get_online_nodes().await.is_empty());
 
     node.stop().await.unwrap();
+    server.abort();
+    let _ = server.await;
+    hub.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_metrics_follow_websocket_and_http_paths() {
+    let workspace = tempdir().unwrap();
+
+    let hub_config = HubConfig {
+        hub_id: "metrics-path-hub".to_string(),
+        bind_address: "127.0.0.1".to_string(),
+        port: 18766,
+        heartbeat_timeout_secs: 10,
+        task_timeout_secs: 30,
+        ..Default::default()
+    };
+
+    let jwt_secret = "metrics-test-secret-12345";
+    let authenticator = NodeAuthenticator::with_secret(jwt_secret).unwrap();
+    let node_id = NodeId::from_string("metrics-authenticated-node");
+    let auth_info = authenticator
+        .authenticate_node(&node_id, "metrics-credentials")
+        .await
+        .unwrap();
+
+    let security_manager = Arc::new(
+        uhorse_hub::SecurityManager::new(
+            jwt_secret,
+            Arc::new(uhorse_security::ApprovalManager::new()),
+        )
+        .unwrap(),
+    );
+    let (hub, _task_result_rx) = Hub::new_with_security(hub_config.clone(), Some(security_manager));
+    let hub = Arc::new(hub);
+    hub.start().await.unwrap();
+
+    let web_state = WebState::new(hub.clone(), None, None);
+    let app = create_router(web_state);
+    let listener =
+        tokio::net::TcpListener::bind((hub_config.bind_address.as_str(), hub_config.port))
+            .await
+            .unwrap();
+
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let http_client = reqwest::Client::new();
+    let metrics_url = format!("http://127.0.0.1:{}/metrics", hub_config.port);
+    let health_url = format!("http://127.0.0.1:{}/api/health", hub_config.port);
+
+    let mut node = Node::new(NodeConfig {
+        node_id: Some(node_id.clone()),
+        name: "metrics-node".to_string(),
+        workspace_path: workspace.path().to_string_lossy().to_string(),
+        connection: ConnectionConfig {
+            hub_url: format!("ws://127.0.0.1:{}/ws", hub_config.port),
+            reconnect_interval_secs: 1,
+            heartbeat_interval_secs: 1,
+            connect_timeout_secs: 5,
+            max_reconnect_attempts: 1,
+            auth_token: Some(auth_info.access_token.clone()),
+        },
+        require_git_repo: false,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let baseline_metrics = http_client
+        .get(&metrics_url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(baseline_metrics.contains("uhorse_api_requests_total 0"));
+    assert!(baseline_metrics.contains("uhorse_websocket_connections 0"));
+
+    node.start().await.unwrap();
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if hub.get_online_nodes().await.len() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let health_response = http_client.get(&health_url).send().await.unwrap();
+    assert_eq!(health_response.status(), StatusCode::OK);
+
+    let metrics_after_health = http_client
+        .get(&metrics_url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(metrics_after_health.contains("uhorse_api_requests_total 3"));
+    assert!(metrics_after_health.contains("uhorse_websocket_connections 1"));
+
+    node.stop().await.unwrap();
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if hub.get_online_nodes().await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let metrics_after_stop = http_client
+        .get(&metrics_url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(metrics_after_stop.contains("uhorse_websocket_connections 0"));
+
     server.abort();
     let _ = server.await;
     hub.shutdown().await.unwrap();

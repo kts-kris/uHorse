@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 use uhorse_core::{
     Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    SessionId, UHorseError,
+    UHorseError,
 };
 
 /// 飞书 API 响应
@@ -601,7 +601,7 @@ impl FeishuChannel {
 
         let (msg_type, content_json) = match content {
             MessageContent::Text(text) => ("text", serde_json::json!({ "text": text })),
-            MessageContent::Image { url, caption } => (
+            MessageContent::Image { url, caption: _ } => (
                 "image",
                 serde_json::json!({
                     "image_key": url.replace("feishu://image?key=", "")

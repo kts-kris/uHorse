@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_includes_memory_md_for_main_session_only() {
-        let workspace_dir = tempdir().unwrap().into_path();
+        let workspace_dir = tempdir().unwrap().keep();
         let agent = create_agent_with_scope(workspace_dir.clone());
         agent.scope().unwrap().init_workspace().await.unwrap();
 
@@ -335,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_appends_today_memory_entries() {
-        let workspace_dir = tempdir().unwrap().into_path();
+        let workspace_dir = tempdir().unwrap().keep();
         let agent = create_agent_with_scope(workspace_dir.clone());
         agent.scope().unwrap().init_workspace().await.unwrap();
 

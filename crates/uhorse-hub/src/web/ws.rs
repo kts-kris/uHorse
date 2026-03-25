@@ -15,17 +15,24 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
+use uhorse_observability::MetricsCollector;
 use uhorse_protocol::{HubToNode, MessageCodec, MessageId, NodeToHub};
 
 use crate::{Hub, HubError, WebState};
 
 /// WebSocket 升级处理器
 pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, state.hub.clone()))
+    ws.on_upgrade(move |socket| {
+        handle_socket(
+            socket,
+            Arc::clone(&state.hub),
+            Arc::clone(&state.metrics_collector),
+        )
+    })
 }
 
 /// 处理 WebSocket 连接
-async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
+async fn handle_socket(socket: WebSocket, hub: Arc<Hub>, metrics_collector: Arc<MetricsCollector>) {
     let (mut ws_sender, mut receiver) = socket.split();
 
     // 等待节点注册消息
@@ -38,6 +45,7 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
     };
 
     let node_id = registration.node_id.clone();
+    metrics_collector.inc_messages_received("websocket");
     if let Err(error) = authenticate_registration(&hub, &registration).await {
         warn!("Rejected node {} during registration: {}", node_id, error);
         let _ = ws_sender
@@ -50,6 +58,7 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
     }
 
     let sender = Arc::new(Mutex::new(ws_sender));
+    metrics_collector.inc_websocket_connections().await;
     info!("Node {} connected via WebSocket", node_id);
 
     // 创建消息通道
@@ -73,6 +82,7 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
     {
         error!("Failed to register node {}: {}", node_id, e);
         hub.message_router().unregister_node_sender(&node_id).await;
+        metrics_collector.dec_websocket_connections().await;
         return;
     }
 
@@ -89,13 +99,16 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
             drop(sender_guard);
             hub.message_router().unregister_node_sender(&node_id).await;
             let _ = hub.handle_node_disconnect(&node_id).await;
+            metrics_collector.dec_websocket_connections().await;
             return;
         }
+        metrics_collector.inc_messages_sent("websocket");
     }
 
     // 发送任务 - 从 Hub 转发到 WebSocket
     let node_id_clone = node_id.clone();
     let sender_clone = sender.clone();
+    let send_metrics_collector = Arc::clone(&metrics_collector);
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let Ok(payload) = MessageCodec::encode_hub_to_node(&msg) {
@@ -104,6 +117,7 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
                     debug!("Node {} sender disconnected", node_id_clone);
                     break;
                 }
+                send_metrics_collector.inc_messages_sent("websocket");
             }
         }
     });
@@ -111,11 +125,13 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
     // 接收任务 - 从 WebSocket 转发到 Hub
     let node_id_clone = node_id.clone();
     let hub_clone = hub.clone();
+    let recv_metrics_collector = Arc::clone(&metrics_collector);
     let recv_task = tokio::spawn(async move {
         while let Some(msg) = receiver.next().await {
             match msg {
                 Ok(Message::Binary(data)) => match MessageCodec::decode_node_to_hub(&data) {
                     Ok(node_msg) => {
+                        recv_metrics_collector.inc_messages_received("websocket");
                         if let Err(e) = hub_clone
                             .handle_node_message(&node_id_clone, node_msg)
                             .await
@@ -129,6 +145,7 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
                 },
                 Ok(Message::Text(text)) => match serde_json::from_str::<NodeToHub>(&text) {
                     Ok(node_msg) => {
+                        recv_metrics_collector.inc_messages_received("websocket");
                         if let Err(e) = hub_clone
                             .handle_node_message(&node_id_clone, node_msg)
                             .await
@@ -168,6 +185,7 @@ async fn handle_socket(socket: WebSocket, hub: Arc<Hub>) {
     info!("Node {} disconnected", node_id);
     hub.message_router().unregister_node_sender(&node_id).await;
     let _ = hub.handle_node_disconnect(&node_id).await;
+    metrics_collector.dec_websocket_connections().await;
 }
 
 /// 注册信息

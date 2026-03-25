@@ -82,7 +82,7 @@ For a minimal local roundtrip you usually only need:
 - `hub.toml` for Hub host / port / scheduler fields
 - `node.toml` for node name / workspace / Hub WebSocket URL
 
-See [CONFIG-en.md](CONFIG-en.md) for the actual config structure.
+See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, Hub also needs `channels.dingtalk.notification_bindings` in addition to the DingTalk credentials.
 
 ### 5. Start Hub and Node
 
@@ -135,6 +135,7 @@ Output:
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
@@ -162,12 +163,16 @@ These scripts still exist in the repository root:
 - `start.sh`
 - `stop.sh`
 
-They mainly wrap the older `uhorse` monolithic flow and are not the primary entrypoint for the current v4.0 Hub-Node setup.
+They are now aligned to the current Hub-Node mainline:
+
+- `install.sh`: builds `uhorse-hub` / `uhorse-node` and generates minimal `hub.toml` / `node.toml`
+- `quick-setup.sh`: creates a minimal local setup
+- `start.sh` / `stop.sh`: manage the local `uhorse-hub` process only
 
 If you want to:
 
 - verify the local Hub-Node roundtrip
-- configure DingTalk Stream
+- configure DingTalk Stream or mirror Node Desktop notifications to DingTalk
 - configure LLMs or a custom model provider
 - deploy Hub on a server and Node on a workstation
 

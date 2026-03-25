@@ -9,6 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info, warn};
+use uhorse_observability::{
+    init_full_observability, HealthService, MetricsCollector, MetricsExporter, OtelConfig,
+};
 use uhorse_security::ApprovalManager;
 
 use uhorse_channel::DingTalkChannel;
@@ -71,6 +74,15 @@ struct RuntimeConfig {
     hub_config: HubConfig,
 }
 
+fn hub_service_name(config: &UHorseConfig) -> String {
+    let service_name = config.observability.service_name.trim();
+    if service_name.is_empty() || service_name == "uhorse" {
+        "uhorse-hub".to_string()
+    } else {
+        service_name.to_string()
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -80,13 +92,13 @@ async fn main() -> anyhow::Result<()> {
         return generate_config(&output);
     }
 
-    // 初始化日志
-    init_logging(&args.log_level)?;
-
-    info!("🚀 uHorse Hub v{} starting...", env!("CARGO_PKG_VERSION"));
-
     // 加载或使用默认配置
     let runtime_config = load_config(&args.config, &args)?;
+
+    // 初始化日志
+    init_logging(&runtime_config.app_config, &args.log_level)?;
+
+    info!("🚀 uHorse Hub v{} starting...", env!("CARGO_PKG_VERSION"));
 
     // 初始化运行时依赖
     let dingtalk_channel = init_dingtalk_channel(&runtime_config.app_config).await?;
@@ -131,8 +143,14 @@ async fn main() -> anyhow::Result<()> {
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?,
     );
-    let web_state = WebState::new_with_runtime(
+    let health_service = Arc::new(HealthService::new(env!("CARGO_PKG_VERSION").to_string()));
+    let metrics_collector = Arc::new(MetricsCollector::default());
+    let metrics_exporter = Arc::new(MetricsExporter::new(Arc::clone(&metrics_collector)));
+    let web_state = WebState::new_with_runtime_and_health(
         hub.clone(),
+        health_service,
+        metrics_collector,
+        metrics_exporter,
         dingtalk_channel.clone(),
         llm_client,
         agent_runtime,
@@ -218,19 +236,19 @@ fn create_security_manager(jwt_secret: &str) -> anyhow::Result<Arc<SecurityManag
 }
 
 /// 初始化日志
-fn init_logging(level: &str) -> anyhow::Result<()> {
-    use tracing_subscriber::EnvFilter;
+fn init_logging(config: &UHorseConfig, fallback_level: &str) -> anyhow::Result<()> {
+    let log_level = if fallback_level != "info" || config.logging.level.trim().is_empty() {
+        fallback_level.to_string()
+    } else {
+        config.logging.level.clone()
+    };
+    let mut observability = OtelConfig::new(hub_service_name(config)).with_env_filter(log_level);
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
+    if let Some(endpoint) = config.observability.otlp_endpoint.clone() {
+        observability = observability.with_otlp_endpoint(endpoint);
+    }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
-
+    init_full_observability(observability)?;
     Ok(())
 }
 
@@ -242,9 +260,18 @@ fn load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
         let content = std::fs::read_to_string(config_path)?;
 
         if looks_like_unified_config(&content) {
-            let app_config = create_default_loader(config_path)
+            let mut app_config = create_default_loader(config_path)
                 .load()
                 .with_context(|| format!("Failed to load unified config from: {}", path))?;
+
+            if app_config.server.health.path == "/health" {
+                app_config.server.health.path = "/api/health".to_string();
+            }
+            if app_config.observability.service_name.trim().is_empty()
+                || app_config.observability.service_name == "uhorse"
+            {
+                app_config.observability.service_name = "uhorse-hub".to_string();
+            }
 
             info!("📄 Loaded unified config from: {}", path);
 
@@ -265,6 +292,8 @@ fn load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
         let mut app_config = UHorseConfig::default();
         app_config.server.host = hub_config.bind_address.clone();
         app_config.server.port = hub_config.port;
+        app_config.server.health.path = "/api/health".to_string();
+        app_config.observability.service_name = "uhorse-hub".to_string();
 
         info!("📄 Loaded legacy hub config from: {}", path);
 
@@ -279,6 +308,8 @@ fn load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
     let mut app_config = UHorseConfig::default();
     app_config.server.host = args.host.clone();
     app_config.server.port = args.port;
+    app_config.server.health.path = "/api/health".to_string();
+    app_config.observability.service_name = "uhorse-hub".to_string();
 
     let hub_config = HubConfig {
         hub_id: args.hub_id.clone(),
@@ -372,6 +403,9 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
     let mut config = UHorseConfig::default();
     config.server.host = "0.0.0.0".to_string();
     config.server.port = 8765;
+    config.logging.level = "info".to_string();
+    config.server.health.path = "/api/health".to_string();
+    config.observability.service_name = "uhorse-hub".to_string();
     config.channels.enabled = vec!["dingtalk".to_string()];
     config.channels.dingtalk = Some(uhorse_config::DingTalkConfig {
         app_key: "your-app-key".to_string(),

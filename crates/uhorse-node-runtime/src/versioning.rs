@@ -284,7 +284,12 @@ pub enum DiffTarget {
     /// 索引与 HEAD 之间
     Staged,
     /// 两个 revision 之间
-    RevisionRange { from: String, to: String },
+    RevisionRange {
+        /// 起始 revision
+        from: String,
+        /// 结束 revision
+        to: String,
+    },
 }
 
 /// 工作区 diff

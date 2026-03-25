@@ -49,7 +49,7 @@ These docs are aligned to what is **actually implemented and exercised in the re
 
 | Capability | Status | Notes |
 |------------|--------|-------|
-| Local Hub startup | ✅ | actual health endpoint is `GET /api/health` |
+| Local Hub startup | ✅ | the current observability endpoints are `GET /api/health` and `GET /metrics` |
 | Local Node startup | ✅ | `uhorse-node` loads `node.toml` and connects to `ws://.../ws` |
 | Node JWT bootstrap | ✅ | `POST /api/node-auth/token` issues tokens when `[security].jwt_secret` is configured |
 | Hub → Node dispatch | ✅ | `POST /api/tasks` submits work into the scheduler |
@@ -58,7 +58,7 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Node reconnect after Hub restart | ✅ | Node reconnects and re-registers automatically |
 | Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` covers a real Hub + Node + WebSocket roundtrip |
 | Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
-| DingTalk Stream integration | ✅ | Stream mode is the recommended path; webhook routes remain for compatibility only |
+| DingTalk Stream integration | ✅ | Stream mode is the recommended path; mirroring Node Desktop notifications also requires `channels.dingtalk.notification_bindings` |
 
 ## Quick Start
 
@@ -120,6 +120,7 @@ Verify:
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
@@ -165,6 +166,11 @@ hub_url = "ws://127.0.0.1:8765/ws"
 auth_token = "<access_token>"
 ```
 
+If you want to mirror Node Desktop local notifications to DingTalk, both sides must be configured:
+
+- enable `mirror_notifications_to_dingtalk` in the local Node Desktop settings
+- add a `node_id` → DingTalk `user_id` mapping in `channels.dingtalk.notification_bindings` on Hub
+
 ### 5. Submit a minimal task
 
 ```bash
@@ -195,7 +201,7 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 ```text
 ┌──────────────────────────────────────────────┐
 │                  uhorse-hub                  │
-│  • Web API: /api/health /api/nodes /api/*   │
+│  • Web API: /api/health /metrics /api/*     │
 │  • WebSocket: /ws                            │
 │  • Task Scheduler                            │
 │  • Approval API                              │

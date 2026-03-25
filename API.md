@@ -21,6 +21,7 @@
 当前 Hub 运行时实际暴露并与 Hub-Node 主链相关的接口主要是：
 
 - `GET /api/health`
+- `GET /metrics`
 - `GET /ws`
 - `GET /api/stats`
 - `GET /api/nodes`
@@ -43,7 +44,7 @@
 
 ## 通用响应格式
 
-除 `GET /api/health` 外，当前 Hub Web API 统一使用如下包装结构：
+除 `GET /api/health` 与 `GET /metrics` 外，当前 Hub Web API 统一使用如下包装结构：
 
 ```json
 {
@@ -94,6 +95,26 @@ curl http://127.0.0.1:8765/api/health
   "version": "4.0.0-alpha.3"
 }
 ```
+
+---
+
+## 指标接口
+
+### `GET /metrics`
+
+用于抓取当前 Hub 暴露的 Prometheus 指标文本。
+
+```bash
+curl http://127.0.0.1:8765/metrics
+```
+
+返回内容类型：
+
+```text
+text/plain; version=0.0.4; charset=utf-8
+```
+
+当前输出会同时包含 exporter 指标和 Hub 统计指标。
 
 ---
 

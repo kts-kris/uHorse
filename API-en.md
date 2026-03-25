@@ -21,6 +21,7 @@ This document only covers the APIs that are **actually implemented and used by t
 The current Hub runtime exposes these Hub-Node related endpoints:
 
 - `GET /api/health`
+- `GET /metrics`
 - `GET /ws`
 - `GET /api/stats`
 - `GET /api/nodes`
@@ -43,7 +44,7 @@ The current Hub runtime exposes these Hub-Node related endpoints:
 
 ## Common Response Format
 
-Except for `GET /api/health`, current Hub HTTP APIs use the same wrapper shape:
+Except for `GET /api/health` and `GET /metrics`, current Hub HTTP APIs use the same wrapper shape:
 
 ```json
 {
@@ -94,6 +95,26 @@ Successful response:
   "version": "4.0.0-alpha.3"
 }
 ```
+
+---
+
+## Metrics Endpoint
+
+### `GET /metrics`
+
+Use this to scrape the Prometheus metrics exposed by the current Hub.
+
+```bash
+curl http://127.0.0.1:8765/metrics
+```
+
+Response content type:
+
+```text
+text/plain; version=0.0.4; charset=utf-8
+```
+
+The output currently includes both exporter metrics and Hub stats.
 
 ---
 

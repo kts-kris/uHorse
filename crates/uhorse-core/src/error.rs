@@ -9,91 +9,117 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum UHorseError {
     // ============== 会话错误 ==============
+    /// 指定会话不存在
     #[error("Session not found: {0}")]
     SessionNotFound(SessionId),
 
+    /// 指定会话已过期
     #[error("Session expired: {0}")]
     SessionExpired(SessionId),
 
+    /// 指定会话已被隔离
     #[error("Session isolated: {0}")]
     SessionIsolated(SessionId),
 
     // ============== 工具错误 ==============
+    /// 指定工具不存在
     #[error("Tool not found: {0}")]
     ToolNotFound(ToolId),
 
+    /// 工具权限不足
     #[error("Tool permission denied for {0}: requires {1:?}")]
     PermissionDenied(ToolId, crate::types::PermissionLevel),
 
+    /// 工具执行失败
     #[error("Tool execution failed: {0}")]
     ToolExecutionFailed(String),
 
+    /// 工具参数校验失败
     #[error("Tool validation failed: {0}")]
     ToolValidationFailed(String),
 
     // ============== 通道错误 ==============
+    /// 通道适配器错误
     #[error("Channel error: {0}")]
     ChannelError(#[from] ChannelError),
 
     // ============== 插件错误 ==============
+    /// 插件运行错误
     #[error("Plugin error: {0}")]
     PluginError(#[from] PluginError),
 
     // ============== 调度错误 ==============
+    /// 调度任务不存在
     #[error("Job not found: {0}")]
     JobNotFound(JobId),
 
+    /// 调度任务执行失败
     #[error("Job execution failed: {0}")]
     JobExecutionFailed(String),
 
+    /// 调度规则发生冲突
     #[error("Schedule conflict: {0}")]
     ScheduleConflict(String),
 
     // ============== 认证错误 ==============
+    /// 认证失败
     #[error("Authentication failed: {0}")]
     AuthFailed(String),
 
+    /// 访问令牌已过期
     #[error("Token expired")]
     TokenExpired,
 
+    /// 访问令牌无效
     #[error("Invalid token")]
     InvalidToken,
 
+    /// 设备尚未完成配对
     #[error("Device not paired: {0}")]
     DeviceNotPaired(DeviceId),
 
     // ============== 协议错误 ==============
+    /// 协议处理失败
     #[error("Protocol error: {0}")]
     ProtocolError(String),
 
+    /// 消息格式无效
     #[error("Invalid message format: {0}")]
     InvalidMessage(String),
 
+    /// 协议版本不受支持
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(String),
 
     // ============== 存储错误 ==============
+    /// 存储层错误
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
 
     // ============== 配置错误 ==============
+    /// 配置无效
     #[error("Configuration error: {0}")]
     ConfigError(String),
 
     // ============== 幂等性错误 ==============
+    /// 幂等键冲突
     #[error("Idempotency conflict: {0}")]
     IdempotencyConflict(String),
 
+    /// 幂等键已过期
     #[error("Idempotency key expired: {0}")]
     IdempotencyKeyExpired(String),
 
     // ============== 通用错误 ==============
+    /// 序列化或反序列化失败
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 
+    /// 内部错误
     #[error("Internal error: {0}")]
     InternalError(String),
 
+    /// 功能尚未实现
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 }
@@ -145,32 +171,41 @@ impl UHorseError {
 /// 通道错误
 #[derive(Error, Debug)]
 pub enum ChannelError {
+    /// 通道发送失败
     #[error("Send failed: {0}")]
     SendFailed(String),
 
+    /// 通道响应校验失败
     #[error("Verification failed")]
     VerificationFailed,
 
+    /// 通道触发限流
     #[error("Rate limited")]
     RateLimited,
 
+    /// 通道配置无效
     #[error("Configuration error: {0}")]
     ConfigError(String),
 
+    /// 通道连接已丢失
     #[error("Connection lost")]
     ConnectionLost,
 
+    /// 通道请求超时
     #[error("Timeout")]
     Timeout,
 
+    /// 通道连接失败
     #[error("Connection error: {0}")]
     ConnectionError(String),
 
+    /// 通道返回无效响应
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
 }
 
 impl ChannelError {
+    /// 获取通道错误码
     pub fn code(&self) -> ErrorCode {
         match self {
             ChannelError::SendFailed(_) => ErrorCode::InternalError,
@@ -188,26 +223,33 @@ impl ChannelError {
 /// 插件错误
 #[derive(Error, Debug)]
 pub enum PluginError {
+    /// 插件不存在
     #[error("Plugin not found: {0}")]
     NotFound(String),
 
+    /// 插件方法不存在
     #[error("Method not found: {0}")]
     MethodNotFound(String),
 
+    /// 插件执行超时
     #[error("Execution timeout")]
     Timeout,
 
+    /// 插件进程崩溃
     #[error("Plugin crashed")]
     Crashed,
 
+    /// 插件初始化失败
     #[error("Initialization failed: {0}")]
     InitFailed(String),
 
+    /// 插件返回无效响应
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
 }
 
 impl PluginError {
+    /// 获取插件错误码
     pub fn code(&self) -> ErrorCode {
         match self {
             PluginError::NotFound(_) => ErrorCode::ToolNotFound,
@@ -223,26 +265,33 @@ impl PluginError {
 /// 存储错误
 #[derive(Error, Debug)]
 pub enum StorageError {
+    /// 数据库操作失败
     #[error("Database error: {0}")]
     DatabaseError(String),
 
+    /// 数据迁移失败
     #[error("Migration failed: {0}")]
     MigrationError(String),
 
+    /// 存储连接失败
     #[error("Connection error: {0}")]
     ConnectionError(String),
 
+    /// 查询执行失败
     #[error("Query error: {0}")]
     QueryError(String),
 
+    /// 事务执行失败
     #[error("Transaction error: {0}")]
     TransactionError(String),
 
+    /// 记录不存在
     #[error("Record not found: {0}")]
     NotFound(String),
 }
 
 impl StorageError {
+    /// 获取存储错误码
     pub fn code(&self) -> ErrorCode {
         match self {
             StorageError::DatabaseError(_) => ErrorCode::InternalError,

@@ -7,10 +7,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 use uhorse_core::{
     Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    SessionId, UHorseError,
+    UHorseError,
 };
 
 /// Telegram API 响应
@@ -22,10 +22,8 @@ struct TelegramResponse<T> {
 }
 
 /// Telegram Bot 信息
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct BotUser {
-    id: i64,
-    is_bot: bool,
     first_name: String,
     username: Option<String>,
 }
@@ -191,7 +189,7 @@ impl TelegramChannel {
     }
 
     /// 获取 Bot 信息
-    pub async fn get_me(&self) -> Result<BotUser, ChannelError> {
+    async fn get_me(&self) -> Result<BotUser, ChannelError> {
         let url = self.api_url("getMe");
         let response = self
             .client

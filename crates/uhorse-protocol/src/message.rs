@@ -40,6 +40,7 @@ impl std::fmt::Display for MessageId {
 
 /// Hub 发送给 Node 的消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "direction", rename_all = "snake_case")]
 pub enum HubToNode {
     /// 任务分配

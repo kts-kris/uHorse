@@ -60,7 +60,7 @@ impl EnhancedDoctor {
             ("Database", Self::check_database().await),
             ("LLM API Key", Self::check_llm_key()),
             ("Data Directory", Self::check_data_dir()),
-            ("Port 8080", Self::check_port()),
+            ("Port 8765", Self::check_port()),
             ("Dependencies", Self::check_deps()),
         ];
 
@@ -406,21 +406,21 @@ impl EnhancedDoctor {
     fn check_port() -> CheckResult {
         use std::net::TcpListener;
 
-        match TcpListener::bind("127.0.0.1:8080") {
+        match TcpListener::bind("127.0.0.1:8765") {
             Ok(_) => CheckResult {
-                name: "Port 8080".to_string(),
+                name: "Port 8765".to_string(),
                 status: CheckStatus::Ok,
-                message: "Port 8080 is available".to_string(),
+                message: "Port 8765 is available".to_string(),
                 fix: None,
             },
             Err(_) => CheckResult {
-                name: "Port 8080".to_string(),
+                name: "Port 8765".to_string(),
                 status: CheckStatus::Warning,
-                message: "Port 8080 is in use".to_string(),
+                message: "Port 8765 is in use".to_string(),
                 fix: Some(FixAction {
                     description: "Stop conflicting service or change port in config.toml".to_string(),
                     action: FixType::Manual {
-                        instructions: "Find process: lsof -i :8080, or change port in config.toml".to_string(),
+                        instructions: "Find process: lsof -i :8765, or change port in config.toml".to_string(),
                     },
                 }),
             },

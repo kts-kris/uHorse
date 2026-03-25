@@ -2,19 +2,19 @@
 //!
 //! 云端中枢的核心实现，整合 3.x 模块和 4.0 新增能力
 
-use crate::error::{HubError, HubResult};
+use crate::error::HubResult;
 use crate::message_router::MessageRouter;
 use crate::node_manager::{NodeManager, NodeManagerStats};
 use crate::security_integration::SecurityManager;
 use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskStatusInfo};
-use uhorse_channel::DingTalkChannel;
-use uhorse_config::DingTalkNotificationBinding;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
+use uhorse_channel::DingTalkChannel;
+use uhorse_config::DingTalkNotificationBinding;
 use uhorse_protocol::{
     Command, NodeCapabilities, NodeId, NodeToHub, Priority, TaskContext, TaskId, WorkspaceInfo,
 };
@@ -43,7 +43,7 @@ impl Default for HubConfig {
         Self {
             hub_id: "default-hub".to_string(),
             bind_address: "0.0.0.0".to_string(),
-            port: 8080,
+            port: 8765,
             max_nodes: 100,
             heartbeat_timeout_secs: 30,
             task_timeout_secs: 300,
@@ -292,13 +292,14 @@ impl Hub {
         self.task_scheduler.get_task_status(task_id).await
     }
 
+    /// 获取已完成任务详情
     pub async fn get_completed_task(&self, task_id: &TaskId) -> Option<CompletedTask> {
         self.task_scheduler.get_completed_task(task_id).await
     }
 
     /// 取消任务
     pub async fn cancel_task(&self, task_id: &TaskId, reason: &str) -> HubResult<()> {
-        self.task_scheduler.cancel_task(task_id).await
+        self.message_router.cancel_task(task_id, reason).await
     }
 
     /// 获取所有节点
@@ -369,7 +370,7 @@ mod tests {
     fn test_hub_config_default() {
         let config = HubConfig::default();
         assert_eq!(config.hub_id, "default-hub");
-        assert_eq!(config.port, 8080);
+        assert_eq!(config.port, 8765);
         assert_eq!(config.max_nodes, 100);
     }
 
@@ -443,6 +444,8 @@ mod tests {
 
         let status = hub.get_task_status(&task_id).await.unwrap();
         assert!(matches!(status.status, TaskStatus::Queued));
-        assert!(timeout(Duration::from_millis(200), rx.recv()).await.is_err());
+        assert!(timeout(Duration::from_millis(200), rx.recv())
+            .await
+            .is_err());
     }
 }

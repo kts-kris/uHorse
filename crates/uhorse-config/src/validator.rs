@@ -380,7 +380,12 @@ mod tests {
     #[test]
     fn test_validate_dingtalk_notification_binding_requires_node_id_and_user_id() {
         let mut config = base_config();
-        config.channels.dingtalk.as_mut().unwrap().notification_bindings = vec![
+        config
+            .channels
+            .dingtalk
+            .as_mut()
+            .unwrap()
+            .notification_bindings = vec![
             DingTalkNotificationBinding {
                 node_id: " ".to_string(),
                 user_id: "user-1".to_string(),
@@ -393,15 +398,11 @@ mod tests {
 
         let result = ChannelsValidator.validate(&config);
         let errors = result.errors();
-        assert!(
-            errors
-                .iter()
-                .any(|error| error == "DingTalk notification binding node_id is required")
-        );
-        assert!(
-            errors
-                .iter()
-                .any(|error| error == "DingTalk notification binding user_id is required")
-        );
+        assert!(errors
+            .iter()
+            .any(|error| error == "DingTalk notification binding node_id is required"));
+        assert!(errors
+            .iter()
+            .any(|error| error == "DingTalk notification binding user_id is required"));
     }
 }

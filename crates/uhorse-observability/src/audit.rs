@@ -3,7 +3,7 @@
 //! 记录系统操作的审计日志。
 
 use serde::{Deserialize, Serialize};
-use uhorse_core::{Result, SessionId};
+use uhorse_core::Result;
 
 /// 审计日志记录器
 #[derive(Debug)]

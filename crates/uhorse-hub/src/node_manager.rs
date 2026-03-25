@@ -275,8 +275,10 @@ impl NodeManager {
     pub async fn get_stats(&self) -> NodeManagerStats {
         let nodes = self.nodes.read().await;
 
-        let mut stats = NodeManagerStats::default();
-        stats.total_nodes = nodes.len();
+        let mut stats = NodeManagerStats {
+            total_nodes: nodes.len(),
+            ..NodeManagerStats::default()
+        };
 
         for info in nodes.values() {
             match info.state {

@@ -40,7 +40,7 @@ impl ToolRegistry for ToolRegistryImpl {
         Ok(())
     }
 
-    async fn get_tool(&self, id: &ToolId) -> Result<Option<Box<dyn ToolExecutor>>> {
+    async fn get_tool(&self, _id: &ToolId) -> Result<Option<Box<dyn ToolExecutor>>> {
         // 注意：这里无法返回 Arc 的克隆，因为 trait 不兼容
         // 实际使用时需要重新设计
         Ok(None)

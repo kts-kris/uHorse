@@ -44,7 +44,7 @@ fn setup_hub(node_count: usize) -> (Arc<Hub>, HubConfig) {
 
     // 注册节点
     for i in 0..node_count {
-        let node_id = NodeId::from_string(&format!("bench-node-{}", i));
+        let node_id = NodeId::from_string(format!("bench-node-{}", i));
         let capabilities = NodeCapabilities {
             max_concurrent_tasks: 100,
             ..Default::default()
@@ -129,7 +129,7 @@ fn bench_batch_task_submission(c: &mut Criterion) {
                             );
                             let task = hub
                                 .submit_task(
-                                    Command::Shell(ShellCommand::new(&format!("echo {}", i))),
+                                    Command::Shell(ShellCommand::new(format!("echo {}", i))),
                                     ctx,
                                     Priority::Normal,
                                     None,
@@ -232,7 +232,7 @@ fn bench_concurrent_submission(c: &mut Criterion) {
                                 );
                                 hub_clone
                                     .submit_task(
-                                        Command::Shell(ShellCommand::new(&format!("echo {}", i))),
+                                        Command::Shell(ShellCommand::new(format!("echo {}", i))),
                                         ctx,
                                         Priority::Normal,
                                         None,
@@ -313,7 +313,7 @@ fn bench_priority_sorting(c: &mut Criterion) {
                                 _ => Priority::Critical,
                             };
                             hub.submit_task(
-                                Command::Shell(ShellCommand::new(&format!("echo {}", i))),
+                                Command::Shell(ShellCommand::new(format!("echo {}", i))),
                                 ctx.clone(),
                                 priority,
                                 None,

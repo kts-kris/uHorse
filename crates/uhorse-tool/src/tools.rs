@@ -2,7 +2,6 @@
 //!
 //! 提供常用的内置工具实现。
 
-use async_trait::async_trait;
 use uhorse_core::{ExecutionContext, PermissionLevel, Result, ToolExecutor, ToolId};
 
 // ============== 计算器工具 ==============
@@ -340,7 +339,7 @@ impl ToolExecutor for SearchTool {
             uhorse_core::UHorseError::ToolValidationFailed("Missing 'query' parameter".to_string())
         })?;
 
-        let limit = params["limit"].as_u64().unwrap_or(5) as usize;
+        let _limit = params["limit"].as_u64().unwrap_or(5) as usize;
 
         // TODO: 集成真实的搜索 API
         // 这里返回模拟结果

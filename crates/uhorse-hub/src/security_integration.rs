@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uhorse_protocol::NodeId;
 use uhorse_security::{
     approval::Approver, ApprovalLevel, ApprovalManager, ApprovalStatus, EncryptedField,

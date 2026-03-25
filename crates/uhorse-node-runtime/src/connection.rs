@@ -216,6 +216,7 @@ impl HubConnection {
     }
 
     /// 连接循环
+    #[allow(clippy::too_many_arguments)]
     async fn connection_loop(
         state: Arc<RwLock<ConnectionState>>,
         running: Arc<AtomicBool>,
@@ -277,6 +278,7 @@ impl HubConnection {
     }
 
     /// 连接并运行
+    #[allow(clippy::too_many_arguments)]
     async fn connect_and_run(
         state: &Arc<RwLock<ConnectionState>>,
         config: &ConnectionConfig,

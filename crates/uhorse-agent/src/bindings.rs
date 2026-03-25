@@ -21,9 +21,8 @@
 //! 3. **默认**: 使用默认 Agent
 
 use crate::error::{AgentError, AgentResult};
-use crate::session_key::{ChannelType, SessionKey};
+use crate::session_key::SessionKey;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Binding 配置
@@ -209,7 +208,7 @@ impl BindingsRouter {
         }
 
         // 按优先级排序（优先级高的在前）
-        matched.sort_by(|a, b| b.get_priority().cmp(&a.get_priority()));
+        matched.sort_by_key(|binding| std::cmp::Reverse(binding.get_priority()));
 
         // 返回优先级最高的匹配
         let chosen = matched.first().unwrap();

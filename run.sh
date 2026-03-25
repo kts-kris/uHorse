@@ -1,57 +1,21 @@
 #!/bin/bash
-# uHorse 前台启动脚本（开发模式）
-# 用法: ./run.sh
+set -euo pipefail
 
-set -e
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_ROOT"
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+HOST="${UHORSE_HUB_HOST:-127.0.0.1}"
+PORT="${UHORSE_HUB_PORT:-8765}"
+LOG_LEVEL="${UHORSE_HUB_LOG_LEVEL:-info}"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  uHorse 前台启动 (开发模式)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# 检查配置文件
-if [ ! -f config.toml ]; then
-    echo -e "${YELLOW}创建默认配置...${NC}"
-    cat > config.toml << 'EOF'
-[server]
-host = "127.0.0.1"
-port = 8080
-
-[channels]
-enabled = []
-
-[database]
-path = "./data/uhorse.db"
-
-[security]
-jwt_secret = "dev-secret"
-token_expiry = 86400
-EOF
+if [ ! -x "./target/release/uhorse-hub" ]; then
+    echo "[info] 编译 uhorse-hub release 二进制..."
+    cargo build --release -p uhorse-hub
 fi
 
-# 检查数据目录
-mkdir -p data logs
+echo "[info] 前台启动 uHorse Hub"
+echo "[info] 健康检查：http://127.0.0.1:${PORT}/api/health"
+echo "[info] WebSocket：ws://127.0.0.1:${PORT}/ws"
+echo "[info] Node 请按 LOCAL_SETUP.md 或 make node-run 单独启动"
 
-# 检查二进制文件
-if [ ! -f target/release/uhorse ]; then
-    echo -e "${YELLOW}首次编译...${NC}"
-    cargo build --release
-fi
-
-echo ""
-echo -e "${GREEN}启动 uHorse...${NC}"
-echo ""
-echo -e "${CYAN}服务地址:${NC}"
-echo "  http://localhost:8080"
-echo "  http://localhost:8080/health/live"
-echo ""
-echo -e "${YELLOW}按 Ctrl+C 停止${NC}"
-echo ""
-
-# 直接运行（前台）
-exec ./target/release/uhorse
+exec ./target/release/uhorse-hub --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL"

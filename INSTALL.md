@@ -82,7 +82,7 @@ cargo build --release -p uhorse-hub -p uhorse-node
 - `hub.toml`：Hub 地址、端口、调度参数
 - `node.toml`：Node 名称、工作目录、Hub WebSocket 地址
 
-完整字段见 [CONFIG.md](CONFIG.md)。
+完整字段见 [CONFIG.md](CONFIG.md)。如果你要验证 Node Desktop 真实通知镜像到钉钉，除了配置 DingTalk 凭据外，还需要在 Hub 侧补充 `channels.dingtalk.notification_bindings`。
 
 ### 5. 启动程序
 
@@ -135,6 +135,7 @@ cargo build --release -p uhorse
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
@@ -162,12 +163,16 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 - `start.sh`
 - `stop.sh`
 
-它们主要围绕旧的 `uhorse` 单体运行路径，不是当前 v4.0 Hub-Node 安装文档的主推荐入口。
+现在它们已经收口到当前 Hub-Node 主线：
 
-如果你的目标是：
+- `install.sh`：编译 `uhorse-hub` / `uhorse-node` 并生成最小 `hub.toml` / `node.toml`
+- `quick-setup.sh`：快速生成本地最小配置
+- `start.sh` / `stop.sh`：仅管理本地 `uhorse-hub`
+
+但如果你的目标是：
 
 - 本地验证 Hub-Node 闭环
-- 配置 DingTalk Stream
+- 配置 DingTalk Stream 或 Node Desktop 通知镜像到钉钉
 - 配置 LLM / 自定义模型服务商
 - 部署 Hub 到服务器、Node 到本机
 

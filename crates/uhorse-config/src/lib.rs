@@ -118,7 +118,7 @@ fn default_server_host() -> String {
     "0.0.0.0".to_string()
 }
 fn default_server_port() -> u16 {
-    8080
+    8765
 }
 fn default_max_connections() -> usize {
     1000
@@ -160,7 +160,7 @@ impl Default for HealthConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            path: "/health".to_string(),
+            path: "/api/health".to_string(),
             verbose: false,
         }
     }
@@ -467,7 +467,7 @@ pub struct ObservabilityConfig {
 impl Default for ObservabilityConfig {
     fn default() -> Self {
         Self {
-            service_name: "uhorse".to_string(),
+            service_name: "uhorse-hub".to_string(),
             tracing_enabled: true,
             metrics_enabled: true,
             otlp_endpoint: None,
@@ -653,5 +653,14 @@ user_id = "manager-1"
                 user_id: "manager-1".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn test_default_hub_runtime_values_align_with_mainline() {
+        let config = UHorseConfig::default();
+
+        assert_eq!(config.server.port, 8765);
+        assert_eq!(config.server.health.path, "/api/health");
+        assert_eq!(config.observability.service_name, "uhorse-hub");
     }
 }

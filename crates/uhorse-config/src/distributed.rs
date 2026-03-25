@@ -18,8 +18,6 @@ const CONFIG_PREFIX: &str = "/uhorse/config/";
 #[derive(Debug, Clone)]
 struct CachedConfig {
     value: String,
-    version: u64,
-    timestamp: i64,
 }
 
 /// Distributed configuration client
@@ -61,8 +59,6 @@ impl DistributedConfigClient {
         if let Some(value_str) = self.backend.get(&full_key).await? {
             let cached = CachedConfig {
                 value: value_str.clone(),
-                version: 0,
-                timestamp: chrono::Utc::now().timestamp(),
             };
 
             // Update cache
@@ -91,14 +87,7 @@ impl DistributedConfigClient {
         {
             let mut cache: tokio::sync::RwLockWriteGuard<'_, HashMap<String, CachedConfig>> =
                 self.cache.write().await;
-            cache.insert(
-                full_key,
-                CachedConfig {
-                    value: value_str,
-                    version: 0,
-                    timestamp: chrono::Utc::now().timestamp(),
-                },
-            );
+            cache.insert(full_key, CachedConfig { value: value_str });
         }
 
         tracing::info!("Set config key: {}", key);
@@ -273,7 +262,7 @@ mod tests {
         let backend = InMemoryConfigBackend::new();
 
         backend.set("app.server.host", "localhost").await.unwrap();
-        backend.set("app.server.port", "8080").await.unwrap();
+        backend.set("app.server.port", "8765").await.unwrap();
         backend
             .set("app.database.url", "sqlite://db")
             .await

@@ -3,11 +3,11 @@
 //! 完整的审批流程系统，支持多级审批、条件审批和自动审批规则。
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uhorse_core::{Result, UHorseError};
 use uuid::Uuid;
 
@@ -389,7 +389,7 @@ impl ApprovalManager {
             }
 
             // 过期后更新状态
-            if let Some(mut req) = pending.write().await.get_mut(&req_id) {
+            if let Some(req) = pending.write().await.get_mut(&req_id) {
                 if req.status == ApprovalStatus::Pending {
                     req.status = ApprovalStatus::TimedOut;
                     // 移入历史
@@ -501,7 +501,7 @@ impl ApprovalManager {
     /// 取消请求
     pub async fn cancel_request(&self, request_id: &str) -> Result<bool> {
         let mut pending = self.pending.write().await;
-        if let Some(mut request) = pending.get_mut(request_id) {
+        if let Some(request) = pending.get_mut(request_id) {
             request.status = ApprovalStatus::Cancelled;
             let req = pending.remove(request_id).unwrap();
             self.history
@@ -561,7 +561,7 @@ impl ApprovalManager {
             .collect();
 
         for id in expired {
-            if let Some(mut request) = pending.get_mut(&id) {
+            if let Some(request) = pending.get_mut(&id) {
                 request.status = ApprovalStatus::TimedOut;
                 let req = pending.remove(&id).unwrap();
                 self.history.write().await.insert(id, req);

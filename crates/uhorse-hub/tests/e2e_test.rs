@@ -150,7 +150,7 @@ async fn test_hub_lifecycle() {
 
     // 注册多个节点
     for i in 1..=3 {
-        let node_id = NodeId::from_string(&format!("node-{}", i));
+        let node_id = NodeId::from_string(format!("node-{}", i));
         let workspace = create_test_workspace(
             &format!("workspace-{}", i),
             &format!("/tmp/workspace-{}", i),
@@ -205,7 +205,7 @@ async fn test_multi_node_parallel_tasks() {
 
     // 注册多个节点
     for i in 1..=5 {
-        let node_id = NodeId::from_string(&format!("parallel-node-{}", i));
+        let node_id = NodeId::from_string(format!("parallel-node-{}", i));
         let capabilities = NodeCapabilities {
             max_concurrent_tasks: 5,
             ..Default::default()
@@ -231,7 +231,7 @@ async fn test_multi_node_parallel_tasks() {
 
     let mut task_ids = Vec::new();
     for i in 1..=10 {
-        let command = Command::Shell(ShellCommand::new(&format!("echo task-{}", i)));
+        let command = Command::Shell(ShellCommand::new(format!("echo task-{}", i)));
         let task_id = hub
             .submit_task(
                 command,
@@ -603,14 +603,14 @@ async fn test_concurrent_task_submission() {
         let hub_ref = Arc::clone(&hub_clone);
         let handle = tokio::spawn(async move {
             let context = TaskContext::new(
-                UserId::from_string(&format!("user-{}", i)),
-                SessionId::from_string(&format!("session-{}", i)),
+                UserId::from_string(format!("user-{}", i)),
+                SessionId::from_string(format!("session-{}", i)),
                 "test-channel",
             );
 
             hub_ref
                 .submit_task(
-                    Command::Shell(ShellCommand::new(&format!("echo {}", i))),
+                    Command::Shell(ShellCommand::new(format!("echo {}", i))),
                     context,
                     Priority::Normal,
                     None,

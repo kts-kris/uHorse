@@ -86,7 +86,7 @@ pub fn print_completion(config_path: &str) {
     println!("      {}", "uhorse start".yellow());
     println!();
     println!("    {} Check health:", "2.".cyan());
-    println!("      {}", "curl http://localhost:8080/health/live".yellow());
+    println!("      {}", "curl http://localhost:8765/api/health".yellow());
     println!();
     println!("    {} View docs:", "3.".cyan());
     println!("      {}", "https://uhorse.ai/docs".yellow());

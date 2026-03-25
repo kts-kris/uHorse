@@ -16,10 +16,12 @@
 //! ```
 
 use crate::error::{AgentError, AgentResult};
-use crate::mcp::types::{McpContent, McpTool, McpToolCall, McpToolResult};
+#[cfg(test)]
+use crate::mcp::types::McpContent;
+use crate::mcp::types::{McpTool, McpToolCall, McpToolResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 /// SKILL.md 解析结果
@@ -180,7 +182,7 @@ pub struct SkillManifestParser;
 
 impl SkillManifestParser {
     /// 从 SKILL.md 文件解析清单
-    pub async fn parse_from_file(path: &PathBuf) -> AgentResult<SkillManifest> {
+    pub async fn parse_from_file(path: &Path) -> AgentResult<SkillManifest> {
         let content = tokio::fs::read_to_string(path)
             .await
             .map_err(|e| AgentError::Skill(format!("Failed to read SKILL.md: {}", e)))?;
@@ -199,9 +201,8 @@ impl SkillManifestParser {
 
         // 简单的 Markdown 解析（生产环境可以使用更强大的解析器）
         for line in content.lines() {
-            if line.starts_with("# ") {
+            if let Some(title) = line.strip_prefix("# ") {
                 // 标题可能是技能名称
-                let title = &line[2..];
                 if name.is_empty() {
                     name = title.to_string();
                 }
@@ -364,6 +365,49 @@ impl Default for SkillRegistry {
     }
 }
 
+/// 测试用执行器
+#[cfg(test)]
+struct DummyExecutor;
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl SkillExecutor for DummyExecutor {
+    async fn execute_tool(&self, _call: &McpToolCall) -> AgentResult<McpToolResult> {
+        Ok(McpToolResult {
+            name: "dummy".to_string(),
+            content: vec![McpContent::Text {
+                text: "Dummy result".to_string(),
+            }],
+            is_error: false,
+        })
+    }
+
+    fn manifest(&self) -> &SkillManifest {
+        // 返回一个静态的 manifest
+        static MANIFEST: std::sync::OnceLock<SkillManifest> = std::sync::OnceLock::new();
+        MANIFEST.get_or_init(|| SkillManifest {
+            name: "dummy".to_string(),
+            description: "Dummy skill".to_string(),
+            version: "1.0.0".to_string(),
+            author: None,
+            tags: vec![],
+            tools: vec![],
+            resources: vec![],
+            dependencies: vec![],
+        })
+    }
+
+    fn config(&self) -> &SkillConfig {
+        static CONFIG: std::sync::OnceLock<SkillConfig> = std::sync::OnceLock::new();
+        CONFIG.get_or_init(|| SkillConfig {
+            name: "dummy".to_string(),
+            enabled: true,
+            permission: SkillPermission::Normal,
+            rate_limit: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,46 +459,5 @@ test,demo
         let manifest = SkillManifestParser::parse_from_content(content).unwrap();
         assert_eq!(manifest.name, "Test Skill");
         assert_eq!(manifest.version, "1.0.0");
-    }
-}
-
-/// 测试用执行器
-struct DummyExecutor;
-
-#[async_trait::async_trait]
-impl SkillExecutor for DummyExecutor {
-    async fn execute_tool(&self, _call: &McpToolCall) -> AgentResult<McpToolResult> {
-        Ok(McpToolResult {
-            name: "dummy".to_string(),
-            content: vec![McpContent::Text {
-                text: "Dummy result".to_string(),
-            }],
-            is_error: false,
-        })
-    }
-
-    fn manifest(&self) -> &SkillManifest {
-        // 返回一个静态的 manifest
-        static MANIFEST: std::sync::OnceLock<SkillManifest> = std::sync::OnceLock::new();
-        MANIFEST.get_or_init(|| SkillManifest {
-            name: "dummy".to_string(),
-            description: "Dummy skill".to_string(),
-            version: "1.0.0".to_string(),
-            author: None,
-            tags: vec![],
-            tools: vec![],
-            resources: vec![],
-            dependencies: vec![],
-        })
-    }
-
-    fn config(&self) -> &SkillConfig {
-        static CONFIG: std::sync::OnceLock<SkillConfig> = std::sync::OnceLock::new();
-        CONFIG.get_or_init(|| SkillConfig {
-            name: "dummy".to_string(),
-            enabled: true,
-            permission: SkillPermission::Normal,
-            rate_limit: None,
-        })
     }
 }

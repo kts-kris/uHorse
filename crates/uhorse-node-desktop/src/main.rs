@@ -159,9 +159,7 @@ async fn save_settings(
     into_api_response(state.save_settings(payload).await)
 }
 
-async fn test_notification(
-    State(state): State<DesktopAppState>,
-) -> impl IntoResponse {
+async fn test_notification(State(state): State<DesktopAppState>) -> impl IntoResponse {
     into_api_response(state.test_notification().await)
 }
 
@@ -182,9 +180,7 @@ async fn get_workspace_status(
     Json(ApiResponse::success(state.workspace_status().await))
 }
 
-async fn pick_workspace(
-    State(state): State<DesktopAppState>,
-) -> impl IntoResponse {
+async fn pick_workspace(State(state): State<DesktopAppState>) -> impl IntoResponse {
     match state.pick_workspace().await {
         Ok(path) => (
             StatusCode::OK,
@@ -197,21 +193,15 @@ async fn pick_workspace(
     }
 }
 
-async fn get_runtime_status(
-    State(state): State<DesktopAppState>,
-) -> impl IntoResponse {
+async fn get_runtime_status(State(state): State<DesktopAppState>) -> impl IntoResponse {
     into_api_response(state.runtime_status().await)
 }
 
-async fn start_node(
-    State(state): State<DesktopAppState>,
-) -> impl IntoResponse {
+async fn start_node(State(state): State<DesktopAppState>) -> impl IntoResponse {
     into_api_response(state.start_node().await)
 }
 
-async fn stop_node(
-    State(state): State<DesktopAppState>,
-) -> impl IntoResponse {
+async fn stop_node(State(state): State<DesktopAppState>) -> impl IntoResponse {
     into_api_response(state.stop_node().await)
 }
 
@@ -227,7 +217,9 @@ async fn get_logs(
     Json(ApiResponse::success(state.logs().await))
 }
 
-fn into_api_response<T: serde::Serialize>(result: NodeResult<T>) -> (StatusCode, Json<ApiResponse<T>>) {
+fn into_api_response<T: serde::Serialize>(
+    result: NodeResult<T>,
+) -> (StatusCode, Json<ApiResponse<T>>) {
     match result {
         Ok(data) => (StatusCode::OK, Json(ApiResponse::success(data))),
         Err(error) => {
@@ -244,8 +236,9 @@ fn status_code_for_error(error: &NodeError) -> StatusCode {
         NodeError::Connection(_) => StatusCode::BAD_GATEWAY,
         NodeError::Execution(_) => StatusCode::CONFLICT,
         NodeError::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
-        NodeError::Protocol(_) | NodeError::Io(_) | NodeError::Serialization(_) | NodeError::Internal(_) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        NodeError::Protocol(_)
+        | NodeError::Io(_)
+        | NodeError::Serialization(_)
+        | NodeError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

@@ -31,7 +31,12 @@ pub enum AgentError {
 
     /// 技能执行失败
     #[error("Skill execution failed: {skill}: {error}")]
-    SkillExecution { skill: String, error: String },
+    SkillExecution {
+        /// 失败的技能名称。
+        skill: String,
+        /// 执行失败详情。
+        error: String,
+    },
 
     /// 会话未找到
     #[error("Session not found: {0}")]

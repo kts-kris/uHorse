@@ -197,30 +197,51 @@ pub enum ResourcePattern {
     AllowAll,
 
     /// 精确路径
-    ExactPath { path: String },
+    ExactPath {
+        /// 路径
+        path: String,
+    },
 
     /// 路径前缀
-    PathPrefix { prefix: String },
+    PathPrefix {
+        /// 前缀
+        prefix: String,
+    },
 
     /// Glob 模式
-    Glob { pattern: String },
+    Glob {
+        /// 模式
+        pattern: String,
+    },
 
     /// 正则表达式
-    Regex { pattern: String },
+    Regex {
+        /// 表达式
+        pattern: String,
+    },
 
     /// 命令类型
-    CommandType { types: Vec<String> },
+    CommandType {
+        /// 类型列表
+        types: Vec<String>,
+    },
 
     /// 组合模式（AND）
-    All { patterns: Vec<ResourcePattern> },
+    All {
+        /// 子模式列表
+        patterns: Vec<ResourcePattern>,
+    },
 
     /// 组合模式（OR）
-    Any { patterns: Vec<ResourcePattern> },
+    Any {
+        /// 子模式列表
+        patterns: Vec<ResourcePattern>,
+    },
 }
 
 impl ResourcePattern {
     /// 检查是否匹配命令
-    pub fn matches(&self, command: &Command, context: &TaskContext) -> bool {
+    pub fn matches(&self, command: &Command, _context: &TaskContext) -> bool {
         match self {
             Self::AllowAll => true,
             Self::ExactPath { path } => self.command_involves_path(command, path),
@@ -231,8 +252,8 @@ impl ResourcePattern {
                 let cmd_type = format!("{:?}", command.command_type()).to_lowercase();
                 types.iter().any(|t| t.to_lowercase() == cmd_type)
             }
-            Self::All { patterns } => patterns.iter().all(|p| p.matches(command, context)),
-            Self::Any { patterns } => patterns.iter().any(|p| p.matches(command, context)),
+            Self::All { patterns } => patterns.iter().all(|p| p.matches(command, _context)),
+            Self::Any { patterns } => patterns.iter().any(|p| p.matches(command, _context)),
         }
     }
 
@@ -306,19 +327,36 @@ pub enum Action {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Condition {
     /// 时间范围
-    TimeRange { start: String, end: String },
+    TimeRange {
+        /// 开始时间
+        start: String,
+        /// 结束时间
+        end: String,
+    },
 
     /// 用户限制
-    UserRestriction { allowed_users: Vec<String> },
+    UserRestriction {
+        /// 允许的用户 ID 列表
+        allowed_users: Vec<String>,
+    },
 
     /// 大小限制
-    SizeLimit { max_bytes: u64 },
+    SizeLimit {
+        /// 最大字节数
+        max_bytes: u64,
+    },
 
     /// 工作日限制
-    WeekdayRestriction { allowed_days: Vec<u8> },
+    WeekdayRestriction {
+        /// 允许的星期列表
+        allowed_days: Vec<u8>,
+    },
 
     /// IP 白名单
-    IpWhitelist { allowed_ips: Vec<String> },
+    IpWhitelist {
+        /// 允许的 IP 列表
+        allowed_ips: Vec<String>,
+    },
 }
 
 impl Condition {
@@ -381,13 +419,18 @@ pub enum ApprovalStatus {
     Pending,
     /// 已批准
     Approved {
+        /// 审批人
         approver: String,
+        /// 审批时间
         approved_at: DateTime<Utc>,
     },
     /// 已拒绝
     Rejected {
+        /// 拒绝人
         rejector: String,
+        /// 拒绝时间
         rejected_at: DateTime<Utc>,
+        /// 拒绝原因
         reason: String,
     },
     /// 已过期

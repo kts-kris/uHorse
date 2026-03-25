@@ -121,23 +121,38 @@ impl fmt::Display for SessionKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelType {
+    /// Telegram 通道。
     Telegram,
+    /// Slack 通道。
     Slack,
+    /// Discord 通道。
     Discord,
+    /// WhatsApp 通道。
     WhatsApp,
+    /// 钉钉通道。
     DingTalk,
+    /// 飞书通道。
     Feishu,
+    /// 企业微信通道。
     WeWork,
+    /// Signal 通道。
     Signal,
-    iMessage,
+    /// iMessage 通道。
+    IMessage,
+    /// Web 通道。
     Web,
-    Custom(String),
+    /// 自定义通道。
+    Custom(
+        /// 自定义通道名称。
+        String,
+    ),
 }
 
-impl ChannelType {
-    /// 从字符串解析
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+impl std::str::FromStr for ChannelType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
             "telegram" => ChannelType::Telegram,
             "slack" => ChannelType::Slack,
             "discord" => ChannelType::Discord,
@@ -146,12 +161,14 @@ impl ChannelType {
             "feishu" | "飞书" => ChannelType::Feishu,
             "wework" | "企业微信" | "wecom" => ChannelType::WeWork,
             "signal" => ChannelType::Signal,
-            "imessage" | "imesg" => ChannelType::iMessage,
+            "imessage" | "imesg" => ChannelType::IMessage,
             "web" => ChannelType::Web,
             other => ChannelType::Custom(other.to_string()),
-        }
+        })
     }
+}
 
+impl ChannelType {
     /// 转换为字符串
     pub fn as_str(&self) -> &str {
         match self {
@@ -163,7 +180,7 @@ impl ChannelType {
             ChannelType::Feishu => "feishu",
             ChannelType::WeWork => "wework",
             ChannelType::Signal => "signal",
-            ChannelType::iMessage => "imessage",
+            ChannelType::IMessage => "imessage",
             ChannelType::Web => "web",
             ChannelType::Custom(s) => s,
         }

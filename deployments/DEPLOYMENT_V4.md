@@ -12,7 +12,7 @@
 ```text
 ┌──────────────────────────────────────────────┐
 │                  uhorse-hub                  │
-│  • HTTP API: /api/health /api/nodes /api/*  │
+│  • HTTP API: /api/health /metrics /api/*    │
 │  • WebSocket: /ws                            │
 │  • Task scheduling                           │
 │  • DingTalk Stream intake                    │
@@ -116,7 +116,7 @@ uhorse-hub --config /etc/uhorse/hub.toml --log-level info
 
 ### 方式二：统一配置
 
-适合 DingTalk / LLM / 自定义模型服务商。
+适合 DingTalk / LLM / 自定义模型服务商；如果要镜像 Node Desktop 本地通知到钉钉，也应使用这一配置路径。
 
 示例：
 
@@ -131,7 +131,7 @@ write_timeout = 10
 
 [server.health]
 enabled = true
-path = "/health"
+path = "/api/health"
 verbose = false
 
 [database]
@@ -148,6 +148,10 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 
 [security]
 jwt_secret = "replace-with-random-secret"
@@ -170,7 +174,7 @@ target = true
 service_name = "uhorse-hub"
 tracing_enabled = true
 metrics_enabled = true
-otlp_endpoint = ""
+# otlp_endpoint = "http://127.0.0.1:4317"
 metrics_port = 9090
 
 [scheduler]
@@ -255,12 +259,14 @@ uhorse-node --config /etc/uhorse/node.toml --log-level info
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
 ### 4. 关键判断标准
 
 - `/api/health` 正常返回
+- `/metrics` 可正常抓取 Prometheus 指标
 - `/api/nodes` 能看到在线节点
 - Node 日志显示已连接 Hub
 - Hub 日志显示 `/ws` 连接建立
@@ -279,6 +285,10 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 ```
 
 当前主推荐是：
@@ -415,7 +425,7 @@ sudo systemctl enable --now uhorse-node
 部署时需要特别注意以下边界：
 
 - 当前统一配置并不会覆盖所有 Hub 专属调度字段
-- `server.health.path` 不是当前实际对外健康检查路由的唯一真相，实际路由仍是 `/api/health`
+- `server.health.path` 需要与当前主线路由保持一致，推荐直接配置为 `/api/health`
 - `deployments/k8s/base/*` 仍偏旧单体视角，不应直接当作当前 v4.0 生产模板
 - 若要在你自己的环境复现 DingTalk 最后一跳，仍需要准备你自己的真实企业凭据
 

@@ -586,6 +586,7 @@ impl TaskScheduler {
         None
     }
 
+    /// 获取已完成任务详情
     pub async fn get_completed_task(&self, task_id: &TaskId) -> Option<CompletedTask> {
         self.completed_tasks.read().await.get(task_id).cloned()
     }

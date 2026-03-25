@@ -5,12 +5,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command as TokioCommand};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 use uhorse_core::{Plugin, PluginError, Result};
 
 /// 插件配置
@@ -75,7 +74,7 @@ impl ProcessPlugin {
     }
 
     /// 从配置文件创建插件
-    pub fn from_config_file(path: PathBuf) -> Result<Self> {
+    pub fn from_config_file(_path: PathBuf) -> Result<Self> {
         // TODO: 实现从 JSON/TOML 文件加载配置
         Err(uhorse_core::UHorseError::NotImplemented(
             "Config file loading not implemented".to_string(),
@@ -232,6 +231,7 @@ struct PluginRequest {
 
 /// 插件响应格式
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct PluginResponse {
     jsonrpc: Option<String>,
     id: Option<u64>,
@@ -240,6 +240,7 @@ struct PluginResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct PluginErrorDetail {
     code: i32,
     message: String,

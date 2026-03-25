@@ -49,7 +49,7 @@ uHorse 当前主线是 **v4.0 Hub-Node 架构**：
 
 | 能力 | 状态 | 说明 |
 |------|------|------|
-| Hub 本机启动 | ✅ | 当前实际健康检查路由为 `GET /api/health` |
+| Hub 本机启动 | ✅ | 当前实际观测入口为 `GET /api/health` 与 `GET /metrics` |
 | Node 本机启动 | ✅ | `uhorse-node` 可加载 `node.toml` 并连接 `ws://.../ws` |
 | Node JWT 引导 | ✅ | `POST /api/node-auth/token` 可在启用 `[security].jwt_secret` 时签发 token |
 | Hub → Node 任务下发 | ✅ | `POST /api/tasks` 提交后进入调度器 |
@@ -58,7 +58,7 @@ uHorse 当前主线是 **v4.0 Hub-Node 架构**：
 | Hub 重启后 Node 重连 | ✅ | Node 具备自动重连与重新注册能力 |
 | 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 已覆盖真实 Hub + Node + WebSocket 闭环 |
 | 鉴权拒绝路径 | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` 已覆盖 token 与注册 `node_id` 不一致场景 |
-| DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream，兼容 webhook 路由仅保留作辅助用途 |
+| DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream；若要镜像 Node Desktop 真实通知，还需配置 `channels.dingtalk.notification_bindings` |
 
 ## 快速开始
 
@@ -120,6 +120,7 @@ hub_url = "ws://127.0.0.1:8765/ws"
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
@@ -165,6 +166,11 @@ hub_url = "ws://127.0.0.1:8765/ws"
 auth_token = "<access_token>"
 ```
 
+如果你要把 Node Desktop 本地通知镜像到钉钉，还需要同时满足两侧配置：
+
+- Node Desktop 本地开启 `mirror_notifications_to_dingtalk`
+- Hub 侧在 `channels.dingtalk.notification_bindings` 中把 `node_id` 绑定到 DingTalk `user_id`
+
 ### 5. 提交一个最小任务
 
 ```bash
@@ -195,7 +201,7 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 ```text
 ┌──────────────────────────────────────────────┐
 │                  uhorse-hub                  │
-│  • Web API: /api/health /api/nodes /api/*   │
+│  • Web API: /api/health /metrics /api/*     │
 │  • WebSocket: /ws                            │
 │  • Task Scheduler                            │
 │  • Approval API                              │

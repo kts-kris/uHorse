@@ -170,7 +170,10 @@ mod tests {
         let loaded = store.load().unwrap();
 
         assert_eq!(loaded.node.name, "Desktop Node");
-        assert_eq!(loaded.node.node_id.as_ref().map(NodeId::as_str), Some("node-desktop-test"));
+        assert_eq!(
+            loaded.node.node_id.as_ref().map(NodeId::as_str),
+            Some("node-desktop-test")
+        );
         assert_eq!(loaded.node.workspace_path, config.node.workspace_path);
         assert!(!loaded.desktop.notifications_enabled);
         assert!(!loaded.desktop.show_notification_details);
@@ -198,6 +201,9 @@ launch_at_login = false
         .unwrap();
 
         let loaded = ConfigStore::new(config_path).load().unwrap();
-        assert_eq!(loaded.node.node_id.as_ref().map(NodeId::as_str), Some("node-desktop-my-desktop"));
+        assert_eq!(
+            loaded.node.node_id.as_ref().map(NodeId::as_str),
+            Some("node-desktop-my-desktop")
+        );
     }
 }

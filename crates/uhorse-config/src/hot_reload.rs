@@ -8,6 +8,9 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 
+type ConfigReloaders = Vec<Arc<dyn ConfigReloader>>;
+type ConfigSubscriberMap = HashMap<String, ConfigReloaders>;
+
 /// Configuration change event
 #[derive(Debug, Clone)]
 pub struct ConfigChangeEvent {
@@ -28,7 +31,7 @@ pub trait ConfigReloader: Send + Sync {
 
 /// Hot reload manager
 pub struct HotReloadManager {
-    subscribers: Arc<RwLock<HashMap<String, Vec<Arc<dyn ConfigReloader>>>>>,
+    subscribers: Arc<RwLock<ConfigSubscriberMap>>,
     tx: broadcast::Sender<ConfigChangeEvent>,
 }
 
@@ -92,8 +95,7 @@ fn matches_pattern(pattern: &str, key: &str) -> bool {
         return true;
     }
 
-    if pattern.ends_with('*') {
-        let prefix = &pattern[..pattern.len() - 1];
+    if let Some(prefix) = pattern.strip_suffix('*') {
         return key.starts_with(prefix);
     }
 

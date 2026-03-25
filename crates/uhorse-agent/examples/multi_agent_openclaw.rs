@@ -6,9 +6,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use uhorse_agent::agent_scope::{AgentManager, AgentScope, AgentScopeConfig};
-use uhorse_agent::memory::FileMemory;
-use uhorse_agent::{Agent, AgentBuilder, Gateway, GatewayConfig};
-use uhorse_llm::{LLMClient, OpenAIClient};
+use uhorse_agent::Agent;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,9 +43,9 @@ async fn main() -> Result<()> {
     };
     let main_scope = Arc::new(AgentScope::new(main_scope_config)?);
     main_scope.init_workspace().await?;
-    agent_manager.register_scope(main_scope.clone());
+    agent_manager.register_scope(main_scope.clone())?;
 
-    let main_agent = Agent::builder()
+    let _main_agent = Agent::builder()
         .agent_id("main")
         .name("Main Assistant")
         .description("Helpful AI assistant for general tasks")
@@ -86,9 +84,9 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    agent_manager.register_scope(coder_scope.clone());
+    agent_manager.register_scope(coder_scope.clone())?;
 
-    let coder_agent = Agent::builder()
+    let _coder_agent = Agent::builder()
         .agent_id("coder")
         .name("Code Expert")
         .description("Expert programmer agent for technical tasks")
@@ -126,9 +124,9 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    agent_manager.register_scope(writer_scope.clone());
+    agent_manager.register_scope(writer_scope.clone())?;
 
-    let writer_agent = Agent::builder()
+    let _writer_agent = Agent::builder()
         .agent_id("writer")
         .name("Creative Writer")
         .description("Creative writer agent for content creation")
@@ -207,23 +205,4 @@ async fn main() -> Result<()> {
     println!("\n💡 提示: 查看 ~/.uhorse/ 目录下的 workspace 结构");
 
     Ok(())
-}
-
-/// 模拟 LLM 客户端（用于演示）
-struct DemoLLMClient;
-
-#[async_trait::async_trait]
-impl LLMClient for DemoLLMClient {
-    async fn chat_completion(
-        &self,
-        messages: Vec<uhorse_llm::ChatMessage>,
-    ) -> anyhow::Result<String> {
-        let last_msg = messages.last().unwrap();
-        let content = &last_msg.content;
-
-        Ok(format!(
-            "（演示模式 - Agent 会根据其独立 workspace/SOUL.md 中的性格设定来回复）\n\n收到消息: {}",
-            content
-        ))
-    }
 }

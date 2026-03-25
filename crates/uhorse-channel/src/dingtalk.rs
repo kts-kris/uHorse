@@ -777,7 +777,7 @@ impl DingTalkChannel {
         S::Error: std::fmt::Display,
     {
         ws_sender
-            .send(WsMessage::Text(payload.into()))
+            .send(WsMessage::Text(payload))
             .await
             .map_err(|e| ChannelError::ConnectionError(format!("WebSocket send error: {}", e)))
     }

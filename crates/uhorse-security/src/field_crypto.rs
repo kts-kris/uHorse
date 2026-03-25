@@ -10,7 +10,7 @@ use rand::RngCore;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::info;
 use zeroize::ZeroizeOnDrop;
 
 /// Encryption key (32 bytes for AES-256)
@@ -320,23 +320,27 @@ impl EncryptedField {
 
 /// Data classification levels
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub enum DataClassification {
     /// Public data - no encryption required
     Public,
     /// Internal data - encryption optional
+    #[default]
     Internal,
     /// Confidential data - encryption required
     Confidential,
     /// Restricted data - encryption + access control required
     Restricted,
-}
-
-impl Default for DataClassification {
-    fn default() -> Self {
-        Self::Internal
-    }
 }
 
 /// Sensitive field marker trait

@@ -8,10 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, warn};
-use uhorse_core::{
-    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    SessionId, UHorseError,
-};
+use uhorse_core::{Channel, ChannelError, ChannelType, MessageContent, Result, UHorseError};
 
 /// WhatsApp 通道
 #[derive(Debug, Clone)]

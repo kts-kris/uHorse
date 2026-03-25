@@ -9,7 +9,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 /// 从 uHorse 配置转换
 impl TryFrom<uhorse_config::LLMConfig> for LLMConfig {

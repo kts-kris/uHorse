@@ -125,7 +125,7 @@ impl ConfigWizard {
 
         // 默认值
         let default_host = "127.0.0.1".to_string();
-        let default_port = "8080".to_string();
+        let default_port = "8765".to_string();
 
         // 询问主机地址
         self.config.server.host = self.prompt_input(
@@ -954,7 +954,7 @@ impl ConfigWizard {
         println!();
         println!("  2️⃣  查看服务状态:");
         println!(
-            "     curl http://{}:{}/health/live",
+            "     curl http://{}:{}/api/health",
             self.config.server.host, self.config.server.port
         );
         println!();

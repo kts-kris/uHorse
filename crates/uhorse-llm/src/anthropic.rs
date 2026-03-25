@@ -5,7 +5,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 use tracing::{debug, instrument};
@@ -17,8 +17,6 @@ use crate::config::LLMConfig;
 #[derive(Debug, Deserialize)]
 struct AnthropicResponse {
     content: Vec<ContentBlock>,
-    model: String,
-    usage: AnthropicUsage,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,12 +24,6 @@ struct ContentBlock {
     #[serde(rename = "type")]
     block_type: String,
     text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicUsage {
-    input_tokens: u32,
-    output_tokens: u32,
 }
 
 /// Anthropic Claude 客户端

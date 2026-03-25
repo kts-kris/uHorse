@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use uhorse_agent::SkillRegistry;
 use uhorse_protocol::{Command, NodeId, Priority, ShellCommand, TaskContext, TaskId};
 
@@ -89,7 +89,7 @@ pub struct Orchestrator {
     /// 任务调度器
     task_scheduler: Arc<TaskScheduler>,
     /// 节点管理器
-    node_manager: Arc<NodeManager>,
+    _node_manager: Arc<NodeManager>,
 }
 
 impl Orchestrator {
@@ -102,7 +102,7 @@ impl Orchestrator {
         Self {
             skill_registry,
             task_scheduler,
-            node_manager,
+            _node_manager: node_manager,
         }
     }
 
