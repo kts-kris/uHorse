@@ -18,6 +18,7 @@ pub use connection::{ConnectionConfig, ConnectionState, HubConnection};
 pub use error::{NodeError, NodeResult};
 pub use executor::{CommandExecutor, ExecutionContext};
 pub use node::{Node, NodeConfig};
+pub use uhorse_protocol::{NodeId, NotificationEvent, NotificationEventKind};
 pub use permission::{PermissionManager, PermissionResult, PermissionRule};
 pub use status::{Metrics, StatusReporter};
 pub use versioning::{

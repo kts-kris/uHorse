@@ -774,6 +774,7 @@ impl ConfigWizard {
                 for (key, value) in &dingtalk.extra {
                     config.push_str(&format!("{} = \"{}\"\n", key, value));
                 }
+                config.push_str("notification_bindings = []\n");
                 config.push_str("\n");
             }
         }

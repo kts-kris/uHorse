@@ -2,7 +2,7 @@
 //!
 //! 验证配置的有效性。
 
-use super::UHorseConfig;
+use super::{DingTalkNotificationBinding, UHorseConfig};
 use anyhow::Result as AnyhowResult;
 use std::path::Path;
 
@@ -224,6 +224,9 @@ impl ConfigValidator for ChannelsValidator {
                 if dingtalk.agent_id == 0 {
                     errors.push("DingTalk agent_id must be > 0".to_string());
                 }
+                for binding in &dingtalk.notification_bindings {
+                    validate_dingtalk_notification_binding(binding, &mut errors);
+                }
             } else {
                 errors.push("DingTalk config is missing".to_string());
             }
@@ -329,6 +332,18 @@ impl ConfigValidator for CompositeValidator {
     }
 }
 
+fn validate_dingtalk_notification_binding(
+    binding: &DingTalkNotificationBinding,
+    errors: &mut Vec<String>,
+) {
+    if binding.node_id.trim().is_empty() {
+        errors.push("DingTalk notification binding node_id is required".to_string());
+    }
+    if binding.user_id.trim().is_empty() {
+        errors.push("DingTalk notification binding user_id is required".to_string());
+    }
+}
+
 /// 验证配置
 pub fn validate_config(config: &UHorseConfig, production: bool) -> AnyhowResult<()> {
     let validator = if production {
@@ -343,5 +358,50 @@ pub fn validate_config(config: &UHorseConfig, production: bool) -> AnyhowResult<
             let error_msg = format!("Configuration validation failed:\n{}", errors.join("\n"));
             Err(anyhow::anyhow!(error_msg))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> UHorseConfig {
+        let mut config = UHorseConfig::default();
+        config.channels.enabled = vec!["dingtalk".to_string()];
+        config.channels.dingtalk = Some(super::super::DingTalkConfig {
+            app_key: "key".to_string(),
+            app_secret: "secret".to_string(),
+            agent_id: 1,
+            notification_bindings: vec![],
+        });
+        config
+    }
+
+    #[test]
+    fn test_validate_dingtalk_notification_binding_requires_node_id_and_user_id() {
+        let mut config = base_config();
+        config.channels.dingtalk.as_mut().unwrap().notification_bindings = vec![
+            DingTalkNotificationBinding {
+                node_id: " ".to_string(),
+                user_id: "user-1".to_string(),
+            },
+            DingTalkNotificationBinding {
+                node_id: "node-1".to_string(),
+                user_id: " ".to_string(),
+            },
+        ];
+
+        let result = ChannelsValidator.validate(&config);
+        let errors = result.errors();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error == "DingTalk notification binding node_id is required")
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error == "DingTalk notification binding user_id is required")
+        );
     }
 }

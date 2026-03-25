@@ -262,6 +262,15 @@ fn default_telegram_max_connections() -> usize {
     100
 }
 
+/// DingTalk 通知绑定
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DingTalkNotificationBinding {
+    /// 节点 ID
+    pub node_id: String,
+    /// 接收通知的 DingTalk 用户 ID
+    pub user_id: String,
+}
+
 /// DingTalk 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkConfig {
@@ -271,6 +280,9 @@ pub struct DingTalkConfig {
     pub app_secret: String,
     /// Agent ID
     pub agent_id: u64,
+    /// 节点通知绑定
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notification_bindings: Vec<DingTalkNotificationBinding>,
 }
 
 /// Slack 配置
@@ -589,4 +601,57 @@ fn default_llm_max_tokens() -> usize {
 }
 fn default_llm_system_prompt() -> String {
     "You are a helpful AI assistant for uHorse, a multi-channel AI gateway.".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dingtalk_notification_bindings_default_to_empty() {
+        let config: UHorseConfig = toml::from_str(
+            r#"
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "key"
+app_secret = "secret"
+agent_id = 1
+"#,
+        )
+        .unwrap();
+
+        let dingtalk = config.channels.dingtalk.unwrap();
+        assert!(dingtalk.notification_bindings.is_empty());
+    }
+
+    #[test]
+    fn test_dingtalk_notification_bindings_deserialize() {
+        let config: UHorseConfig = toml::from_str(
+            r#"
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "key"
+app_secret = "secret"
+agent_id = 1
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "node-desktop-test"
+user_id = "manager-1"
+"#,
+        )
+        .unwrap();
+
+        let dingtalk = config.channels.dingtalk.unwrap();
+        assert_eq!(
+            dingtalk.notification_bindings,
+            vec![DingTalkNotificationBinding {
+                node_id: "node-desktop-test".to_string(),
+                user_id: "manager-1".to_string(),
+            }]
+        );
+    }
 }

@@ -213,6 +213,60 @@ impl HubToNode {
     }
 }
 
+/// 通知事件类型
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationEventKind {
+    /// 测试通知
+    Test,
+    /// 普通信息
+    Info,
+    /// 警告信息
+    Warn,
+    /// 错误信息
+    Error,
+}
+
+/// Node 上报的通知事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationEvent {
+    /// 事件 ID
+    pub event_id: String,
+    /// 通知类型
+    pub kind: NotificationEventKind,
+    /// 标题
+    pub title: String,
+    /// 内容
+    pub body: String,
+    /// 是否包含详细内容
+    pub details_included: bool,
+    /// 事件时间
+    pub timestamp: DateTime<Utc>,
+    /// 可选去重键
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dedupe_key: Option<String>,
+}
+
+impl NotificationEvent {
+    /// 创建新的通知事件
+    pub fn new(
+        kind: NotificationEventKind,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        details_included: bool,
+    ) -> Self {
+        Self {
+            event_id: uuid::Uuid::new_v4().to_string(),
+            kind,
+            title: title.into(),
+            body: body.into(),
+            details_included,
+            timestamp: Utc::now(),
+            dedupe_key: None,
+        }
+    }
+}
+
 // ============================================================================
 // Node -> Hub 消息
 // ============================================================================
@@ -369,6 +423,19 @@ pub enum NodeToHub {
         /// 已安装的技能
         installed_skills: Vec<InstalledSkill>,
     },
+
+    /// 通知事件上报
+    NotificationEvent {
+        /// 消息 ID
+        #[serde(default = "MessageId::new")]
+        message_id: MessageId,
+
+        /// 节点 ID
+        node_id: NodeId,
+
+        /// 通知事件内容
+        event: NotificationEvent,
+    },
 }
 
 impl NodeToHub {
@@ -383,6 +450,7 @@ impl NodeToHub {
             Self::ApprovalRequest { message_id, .. } => message_id,
             Self::Unregister { message_id, .. } => message_id,
             Self::SkillReport { message_id, .. } => message_id,
+            Self::NotificationEvent { message_id, .. } => message_id,
         }
     }
 
@@ -397,6 +465,7 @@ impl NodeToHub {
             Self::ApprovalRequest { .. } => "approval_request",
             Self::Unregister { .. } => "unregister",
             Self::SkillReport { .. } => "skill_report",
+            Self::NotificationEvent { .. } => "notification_event",
         }
     }
 
@@ -407,6 +476,7 @@ impl NodeToHub {
             Self::Heartbeat { node_id, .. } => Some(node_id),
             Self::Unregister { node_id, .. } => Some(node_id),
             Self::SkillReport { node_id, .. } => Some(node_id),
+            Self::NotificationEvent { node_id, .. } => Some(node_id),
             _ => None,
         }
     }
@@ -736,5 +806,27 @@ mod tests {
         let decoded = MessageCodec::decode_node_to_hub(&encoded).unwrap();
 
         assert_eq!(msg.message_type(), decoded.message_type());
+    }
+
+    #[test]
+    fn test_node_to_hub_notification_event_serialization() {
+        let node_id = NodeId::new();
+        let msg = NodeToHub::NotificationEvent {
+            message_id: MessageId::new(),
+            node_id: node_id.clone(),
+            event: NotificationEvent::new(
+                NotificationEventKind::Warn,
+                "Hub 同步通知",
+                "测试通知内容",
+                true,
+            ),
+        };
+
+        let encoded = MessageCodec::encode_node_to_hub(&msg).unwrap();
+        let decoded = MessageCodec::decode_node_to_hub(&encoded).unwrap();
+
+        assert_eq!(msg.message_type(), decoded.message_type());
+        assert_eq!(decoded.node_id(), Some(&node_id));
+        assert_eq!(msg.message_id(), decoded.message_id());
     }
 }

@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 use uhorse_security::ApprovalManager;
 
 use uhorse_channel::DingTalkChannel;
-use uhorse_config::{loader::create_default_loader, UHorseConfig};
+use uhorse_config::{loader::create_default_loader, DingTalkNotificationBinding, UHorseConfig};
 use uhorse_core::Channel;
 use uhorse_hub::{
     create_router,
@@ -100,8 +100,19 @@ async fn main() -> anyhow::Result<()> {
         .as_deref()
         .map(create_security_manager)
         .transpose()?;
-    let (hub, mut task_result_rx) =
-        Hub::new_with_security(runtime_config.hub_config.clone(), security_manager);
+    let notification_bindings = runtime_config
+        .app_config
+        .channels
+        .dingtalk
+        .as_ref()
+        .map(|config| config.notification_bindings.clone())
+        .unwrap_or_default();
+    let (hub, mut task_result_rx) = Hub::new_with_components(
+        runtime_config.hub_config.clone(),
+        security_manager,
+        dingtalk_channel.clone(),
+        notification_bindings,
+    );
     let hub = Arc::new(hub);
 
     // 启动 Hub
@@ -361,6 +372,16 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
     let mut config = UHorseConfig::default();
     config.server.host = "0.0.0.0".to_string();
     config.server.port = 8765;
+    config.channels.enabled = vec!["dingtalk".to_string()];
+    config.channels.dingtalk = Some(uhorse_config::DingTalkConfig {
+        app_key: "your-app-key".to_string(),
+        app_secret: "your-app-secret".to_string(),
+        agent_id: 123456789,
+        notification_bindings: vec![DingTalkNotificationBinding {
+            node_id: "your-stable-node-id".to_string(),
+            user_id: "your-dingtalk-user-id".to_string(),
+        }],
+    });
 
     let content = toml::to_string_pretty(&config)?;
     std::fs::write(output, content)?;

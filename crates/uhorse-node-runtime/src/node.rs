@@ -27,7 +27,8 @@ use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use uhorse_protocol::{
     Command, CommandResult, ErrorSource, ExecutionError, ExecutionMetrics, HubToNode,
-    NodeCapabilities, NodeId, NodeStatus, NodeToHub, TaskContext, TaskId,
+    NodeCapabilities, NodeId, NodeStatus, NodeToHub, NotificationEvent, NotificationEventKind,
+    TaskContext, TaskId,
 };
 
 /// 节点配置
@@ -268,6 +269,9 @@ pub struct Node {
 
     /// 工作区 watcher
     workspace_watcher: Option<RecommendedWatcher>,
+
+    /// 业务出站消息发送器
+    outbound_tx: Option<mpsc::Sender<NodeToHub>>,
 }
 
 /// 运行中的任务
@@ -388,6 +392,7 @@ impl Node {
             status_tx,
             heartbeat_snapshot,
             workspace_watcher: None,
+            outbound_tx: None,
         })
     }
 
@@ -417,6 +422,7 @@ impl Node {
         }
 
         // 3. 启动后台任务
+        self.outbound_tx = Some(outbound_tx.clone());
         self.start_status_task();
         self.start_message_handler(hub_rx, outbound_tx);
 
@@ -987,6 +993,37 @@ impl Node {
         CommandResult::failure(execution_error).with_duration(duration_ms)
     }
 
+    /// 立即上报通知事件到 Hub
+    pub fn report_notification_nowait(&self, event: NotificationEvent) -> NodeResult<()> {
+        if !self.running.load(Ordering::SeqCst) {
+            return Err(NodeError::Connection("Node is not running".to_string()));
+        }
+
+        let outbound_tx = self
+            .outbound_tx
+            .as_ref()
+            .ok_or_else(|| NodeError::Connection("Outbound channel is not available".to_string()))?;
+
+        outbound_tx
+            .try_send(NodeToHub::NotificationEvent {
+                message_id: uhorse_protocol::MessageId::new(),
+                node_id: self.node_id.clone(),
+                event,
+            })
+            .map_err(|error| NodeError::Connection(format!("Failed to send notification event: {}", error)))
+    }
+
+    /// 以简化参数立即上报通知事件到 Hub
+    pub fn report_notification_event_nowait(
+        &self,
+        kind: NotificationEventKind,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        details_included: bool,
+    ) -> NodeResult<()> {
+        self.report_notification_nowait(NotificationEvent::new(kind, title, body, details_included))
+    }
+
     /// 停止节点
     pub async fn stop(&mut self) -> NodeResult<()> {
         if !self
@@ -1002,6 +1039,7 @@ impl Node {
         let _ = self.stop_signal.send(());
 
         self.workspace_watcher = None;
+        self.outbound_tx = None;
 
         // 停止连接
         self.connection.stop().await;
@@ -1013,6 +1051,41 @@ impl Node {
     /// 获取节点 ID
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
+    }
+
+    /// 获取配置
+    pub fn config(&self) -> &NodeConfig {
+        &self.config
+    }
+
+    /// 获取工作空间
+    pub fn workspace(&self) -> Arc<Workspace> {
+        self.workspace.clone()
+    }
+
+    /// 获取运行状态
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    /// 获取连接状态
+    pub async fn connection_state(&self) -> crate::connection::ConnectionState {
+        self.connection.state().await
+    }
+
+    /// 获取待审批数量
+    pub async fn pending_approvals_count(&self) -> usize {
+        self.permission_manager.get_pending_approvals().await.len()
+    }
+
+    /// 获取运行任务数量
+    pub async fn running_tasks_count(&self) -> usize {
+        self.running_tasks.read().await.len()
+    }
+
+    /// 获取最近一次心跳快照
+    pub async fn heartbeat_snapshot(&self) -> Option<HeartbeatSnapshot> {
+        self.heartbeat_snapshot.read().await.clone()
     }
 
     /// 获取状态流
@@ -1483,6 +1556,40 @@ mod tests {
         assert!(running_tasks.read().await.is_empty());
         assert_eq!(metrics.read().await.total_executions, 1);
         assert_eq!(metrics.read().await.failed_executions, 1);
+    }
+
+    #[tokio::test]
+    async fn test_report_notification_event_nowait_enqueues_message() {
+        let temp = TempDir::new().unwrap();
+        let mut node = Node::new(NodeConfig {
+            workspace_path: temp.path().to_string_lossy().to_string(),
+            require_git_repo: false,
+            ..Default::default()
+        })
+        .unwrap();
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
+        node.running.store(true, Ordering::SeqCst);
+        node.outbound_tx = Some(outbound_tx);
+
+        node.report_notification_event_nowait(
+            NotificationEventKind::Info,
+            "标题",
+            "内容",
+            true,
+        )
+        .unwrap();
+
+        let outbound = outbound_rx.recv().await.unwrap();
+        match outbound {
+            NodeToHub::NotificationEvent { node_id, event, .. } => {
+                assert_eq!(node_id, *node.node_id());
+                assert_eq!(event.title, "标题");
+                assert_eq!(event.body, "内容");
+                assert!(event.details_included);
+                assert!(matches!(event.kind, NotificationEventKind::Info));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
     }
 
     #[tokio::test]

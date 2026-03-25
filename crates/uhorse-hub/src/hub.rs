@@ -7,6 +7,8 @@ use crate::message_router::MessageRouter;
 use crate::node_manager::{NodeManager, NodeManagerStats};
 use crate::security_integration::SecurityManager;
 use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskStatusInfo};
+use uhorse_channel::DingTalkChannel;
+use uhorse_config::DingTalkNotificationBinding;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -93,13 +95,23 @@ pub struct Hub {
 impl Hub {
     /// 创建新的 Hub
     pub fn new(config: HubConfig) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
-        Self::new_with_security(config, None)
+        Self::new_with_components(config, None, None, vec![])
     }
 
     /// 创建带安全配置的 Hub
     pub fn new_with_security(
         config: HubConfig,
         security_manager: Option<Arc<SecurityManager>>,
+    ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
+        Self::new_with_components(config, security_manager, None, vec![])
+    }
+
+    /// 创建带完整组件的 Hub
+    pub fn new_with_components(
+        config: HubConfig,
+        security_manager: Option<Arc<SecurityManager>>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        notification_bindings: Vec<DingTalkNotificationBinding>,
     ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
         let node_manager = Arc::new(NodeManager::new(
             config.max_nodes,
@@ -116,6 +128,8 @@ impl Hub {
         let message_router = Arc::new(MessageRouter::new(
             node_manager.clone(),
             task_scheduler.clone(),
+            dingtalk_channel,
+            notification_bindings,
         ));
 
         let (shutdown_tx, _) = broadcast::channel(1);
@@ -341,7 +355,15 @@ impl Hub {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
+    use tokio::sync::mpsc;
+    use tokio::time::timeout;
+    use uhorse_protocol::{
+        Command, FileCommand, MessageId, NotificationEvent, NotificationEventKind, SessionId,
+        TaskStatus, UserId,
+    };
 
     #[test]
     fn test_hub_config_default() {
@@ -356,5 +378,71 @@ mod tests {
         let config = HubConfig::default();
         let (hub, _rx) = Hub::new(config);
         assert_eq!(hub.hub_id(), "default-hub");
+    }
+
+    #[tokio::test]
+    async fn test_notification_event_does_not_dispatch_pending_tasks() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let node_id = NodeId::from_string("node-1");
+
+        hub.handle_node_connection(
+            node_id.clone(),
+            "Test Node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                name: "workspace".to_string(),
+                path: "/tmp/workspace".to_string(),
+                read_only: false,
+                allowed_patterns: vec![],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let task_id = hub
+            .submit_task(
+                Command::File(FileCommand::Exists {
+                    path: "/tmp/workspace/test.txt".to_string(),
+                }),
+                TaskContext::new(
+                    UserId::from_string("user-1"),
+                    SessionId::from_string("session-1"),
+                    "test",
+                ),
+                Priority::Normal,
+                None,
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = mpsc::channel(1);
+        hub.message_router()
+            .register_node_sender(node_id.clone(), tx)
+            .await;
+
+        hub.handle_node_message(
+            &node_id,
+            NodeToHub::NotificationEvent {
+                message_id: MessageId::new(),
+                node_id: node_id.clone(),
+                event: NotificationEvent::new(
+                    NotificationEventKind::Info,
+                    "Hub 同步通知",
+                    "测试通知内容",
+                    false,
+                ),
+            },
+        )
+        .await
+        .unwrap();
+
+        let status = hub.get_task_status(&task_id).await.unwrap();
+        assert!(matches!(status.status, TaskStatus::Queued));
+        assert!(timeout(Duration::from_millis(200), rx.recv()).await.is_err());
     }
 }
