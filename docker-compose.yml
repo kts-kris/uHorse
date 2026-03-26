@@ -9,13 +9,12 @@ services:
     container_name: uhorse_hub
     restart: unless-stopped
     ports:
-      - "8765:8765"  # HTTP API
+      - "8765:8765"
     environment:
       - RUST_LOG=info
     volumes:
       - uhorse_data:/app/data
       - uhorse_logs:/app/logs
-      - ./hub.toml:/app/config/hub.toml:ro
     networks:
       - uhorse_network
     healthcheck:
@@ -25,7 +24,6 @@ services:
       retries: 3
       start_period: 10s
 
-  # PostgreSQL（可选，用于生产环境）
   postgres:
     image: postgres:16-alpine
     container_name: uhorse_postgres
@@ -41,7 +39,6 @@ services:
     ports:
       - "5432:5432"
 
-  # Redis（可选，用于缓存和会话存储）
   redis:
     image: redis:7-alpine
     container_name: uhorse_redis
@@ -54,7 +51,6 @@ services:
     ports:
       - "6379:6379"
 
-  # Prometheus（监控）
   prometheus:
     image: prom/prometheus:latest
     container_name: uhorse_prometheus
@@ -74,7 +70,6 @@ services:
     networks:
       - uhorse_network
 
-  # Grafana（可视化）
   grafana:
     image: grafana/grafana:latest
     container_name: uhorse_grafana

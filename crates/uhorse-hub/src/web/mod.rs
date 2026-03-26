@@ -5,9 +5,10 @@
 pub mod ws;
 
 use axum::{
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Json},
+    extract::{MatchedPath, Path, Request, State},
+    http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -17,7 +18,7 @@ use std::collections::HashMap;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
 use uhorse_agent::{
     Agent, AgentManager, AgentScope, AgentScopeConfig, FileMemory, MemoryStore, SessionKey,
@@ -26,10 +27,10 @@ use uhorse_agent::{
 use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
 use uhorse_llm::{ChatMessage, LLMClient};
+use uhorse_observability::{HealthService, HealthStatus, MetricsCollector, MetricsExporter};
 use uhorse_protocol::{
-    Action, Command, CommandOutput, ExecutionError, FileCommand, HubToNode, MessageId,
-    PermissionRule as ProtocolPermissionRule, Priority, ResourcePattern as ProtocolResourcePattern,
-    SessionId, TaskContext, TaskId, UserId,
+    Command, CommandOutput, FileCommand, HubToNode, MessageId,
+    PermissionRule as ProtocolPermissionRule, Priority, SessionId, TaskContext, TaskId, UserId,
 };
 use uhorse_security::ApprovalRequest;
 
@@ -160,11 +161,16 @@ struct SessionMessageRecord {
     assistant_message: String,
 }
 
+/// Web Agent 运行时依赖集合
 #[derive(Clone)]
 pub struct WebAgentRuntime {
+    /// Agent 管理器
     pub agent_manager: Arc<AgentManager>,
+    /// 已注册 Agent 集合
     pub agents: Arc<HashMap<String, Agent>>,
+    /// Memory 存储
     pub memory_store: Arc<dyn MemoryStore>,
+    /// Skill 注册表
     pub skills: Arc<SkillRegistry>,
 }
 
@@ -173,6 +179,12 @@ pub struct WebAgentRuntime {
 pub struct WebState {
     /// Hub 引用
     pub hub: Arc<Hub>,
+    /// 健康检查服务
+    pub health_service: Arc<HealthService>,
+    /// Metrics 收集器
+    pub metrics_collector: Arc<MetricsCollector>,
+    /// Metrics 导出器
+    pub metrics_exporter: Arc<MetricsExporter>,
     /// DingTalk 通道
     pub dingtalk_channel: Option<Arc<DingTalkChannel>>,
     /// LLM 客户端
@@ -198,14 +210,41 @@ impl WebState {
         )
     }
 
+    /// 使用指定 Agent 运行时创建 Web 状态
     pub fn new_with_runtime(
         hub: Arc<Hub>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
         llm_client: Option<Arc<dyn LLMClient>>,
         agent_runtime: Arc<WebAgentRuntime>,
     ) -> Self {
+        let metrics_collector = Arc::new(MetricsCollector::default());
+        let metrics_exporter = Arc::new(MetricsExporter::new(Arc::clone(&metrics_collector)));
+        Self::new_with_runtime_and_health(
+            hub,
+            Arc::new(HealthService::new(env!("CARGO_PKG_VERSION").to_string())),
+            metrics_collector,
+            metrics_exporter,
+            dingtalk_channel,
+            llm_client,
+            agent_runtime,
+        )
+    }
+
+    /// 使用显式 health 与 metrics 依赖创建 Web 状态
+    pub fn new_with_runtime_and_health(
+        hub: Arc<Hub>,
+        health_service: Arc<HealthService>,
+        metrics_collector: Arc<MetricsCollector>,
+        metrics_exporter: Arc<MetricsExporter>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+        agent_runtime: Arc<WebAgentRuntime>,
+    ) -> Self {
         Self {
             hub,
+            health_service,
+            metrics_collector,
+            metrics_exporter,
             dingtalk_channel,
             llm_client,
             agent_runtime,
@@ -231,6 +270,7 @@ fn default_agent_runtime() -> WebAgentRuntime {
     }
 }
 
+/// 初始化默认 Web Agent 运行时
 pub async fn init_default_agent_runtime(
     base_dir: PathBuf,
 ) -> Result<WebAgentRuntime, Box<dyn std::error::Error + Send + Sync>> {
@@ -597,20 +637,6 @@ fn skill_to_detail(skill: &uhorse_agent::Skill) -> SkillRuntimeDetail {
     }
 }
 
-fn session_state_to_summary(session_state: &SessionState) -> SessionRuntimeSummary {
-    SessionRuntimeSummary {
-        session_id: session_state.session_id.clone(),
-        agent_id: session_state.metadata.get("current_agent").cloned(),
-        conversation_id: session_state.metadata.get("conversation_id").cloned(),
-        sender_user_id: session_state.metadata.get("sender_user_id").cloned(),
-        sender_staff_id: session_state.metadata.get("sender_staff_id").cloned(),
-        last_task_id: session_state.metadata.get("last_task_id").cloned(),
-        message_count: session_state.message_count,
-        created_at: session_state.created_at.to_rfc3339(),
-        last_active: session_state.last_active.to_rfc3339(),
-    }
-}
-
 fn session_state_to_detail(session_state: &SessionState) -> SessionRuntimeDetail {
     SessionRuntimeDetail {
         session_id: session_state.session_id.clone(),
@@ -790,6 +816,8 @@ impl<T: Serialize> ApiResponse<T> {
 
 /// 创建 Web 路由
 pub fn create_router(state: WebState) -> Router {
+    let shared_state = Arc::new(state);
+    let metrics_state = Arc::clone(&shared_state);
     let mut router = Router::new()
         // 页面路由
         .route("/", get(index_page))
@@ -819,6 +847,7 @@ pub fn create_router(state: WebState) -> Router {
         .route("/api/approvals/:request_id/reject", post(reject_approval))
         .route("/api/node-auth/token", post(issue_node_token))
         .route("/api/health", get(health_check))
+        .route("/metrics", get(metrics_handler))
         .route("/api/v1/agents", get(list_runtime_agents))
         .route("/api/v1/agents/:agent_id", get(get_runtime_agent))
         .route("/api/v1/skills", get(list_runtime_skills))
@@ -829,10 +858,16 @@ pub fn create_router(state: WebState) -> Router {
             "/api/v1/sessions/:session_id/messages",
             get(get_runtime_session_messages),
         )
-        .with_state(Arc::new(state));
+        .with_state(shared_state);
 
-    // 添加 CORS
-    router = router.layer(CorsLayer::permissive());
+    // 添加 CORS、HTTP tracing 与 metrics
+    router = router
+        .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn_with_state(
+            metrics_state,
+            track_api_metrics,
+        ));
 
     router
 }
@@ -946,6 +981,7 @@ async fn dingtalk_webhook_verify() -> &'static str {
     "DingTalk webhook endpoint is ready"
 }
 
+/// 将 DingTalk 入站消息转换为 Hub 任务并提交执行
 pub async fn submit_dingtalk_task(
     state: &Arc<WebState>,
     inbound: DingTalkInboundMessage,
@@ -1361,6 +1397,7 @@ fn normalize_relative_path(
     }
 }
 
+/// 将任务结果回传到对应的 DingTalk 会话
 pub async fn reply_task_result(
     state: Arc<WebState>,
     task_result: TaskResult,
@@ -1392,6 +1429,7 @@ pub async fn reply_task_result(
     Ok(())
 }
 
+/// 将任务提交阶段的错误回传到 DingTalk 会话
 pub async fn reply_dingtalk_error(
     state: &Arc<WebState>,
     inbound: &DingTalkInboundMessage,
@@ -1569,9 +1607,8 @@ fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String
 
 /// 获取统计信息
 async fn get_stats(State(state): State<Arc<WebState>>) -> Json<ApiResponse<HubStats>> {
-    match state.hub.get_stats().await {
-        stats => Json(ApiResponse::success(stats)),
-    }
+    let stats = state.hub.get_stats().await;
+    Json(ApiResponse::success(stats))
 }
 
 async fn list_runtime_agents(
@@ -2210,11 +2247,93 @@ async fn notify_node_approval_decision(
 }
 
 /// 健康检查
-async fn health_check() -> impl IntoResponse {
+async fn health_check(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let health = state.health_service.check().await;
+    let status = match health.status {
+        HealthStatus::Healthy => "healthy",
+        HealthStatus::Degraded => "degraded",
+        HealthStatus::Unhealthy => "unhealthy",
+    };
+
     Json(serde_json::json!({
-        "status": "healthy",
-        "version": env!("CARGO_PKG_VERSION")
+        "status": status,
+        "version": health.version,
     }))
+}
+
+async fn metrics_handler(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let mut body = state.metrics_exporter.export_metrics().await;
+    let stats = state.hub.get_stats().await;
+    body.push_str(&format_hub_metrics(&stats));
+    (
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    )
+}
+
+async fn track_api_metrics(
+    State(state): State<Arc<WebState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method().as_str().to_string();
+    let path = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or_else(|| request.uri().path())
+        .to_string();
+    let timer =
+        uhorse_observability::ApiTimer::new(path, method, Arc::clone(&state.metrics_collector));
+    let response = next.run(request).await;
+    let status = response.status().as_u16();
+    timer.complete_with_status(status).await;
+    response
+}
+
+fn format_hub_metrics(stats: &HubStats) -> String {
+    format!(
+        "# HELP uhorse_hub_uptime_seconds Hub uptime in seconds.\n\
+# TYPE uhorse_hub_uptime_seconds gauge\n\
+uhorse_hub_uptime_seconds {}\n\
+# HELP uhorse_hub_nodes_total Total number of registered nodes.\n\
+# TYPE uhorse_hub_nodes_total gauge\n\
+uhorse_hub_nodes_total {}\n\
+# HELP uhorse_hub_nodes_online Number of online nodes.\n\
+# TYPE uhorse_hub_nodes_online gauge\n\
+uhorse_hub_nodes_online {}\n\
+# HELP uhorse_hub_nodes_offline Number of offline nodes.\n\
+# TYPE uhorse_hub_nodes_offline gauge\n\
+uhorse_hub_nodes_offline {}\n\
+# HELP uhorse_hub_nodes_busy Number of busy nodes.\n\
+# TYPE uhorse_hub_nodes_busy gauge\n\
+uhorse_hub_nodes_busy {}\n\
+# HELP uhorse_hub_tasks_pending Number of pending tasks.\n\
+# TYPE uhorse_hub_tasks_pending gauge\n\
+uhorse_hub_tasks_pending {}\n\
+# HELP uhorse_hub_tasks_running Number of running tasks.\n\
+# TYPE uhorse_hub_tasks_running gauge\n\
+uhorse_hub_tasks_running {}\n\
+# HELP uhorse_hub_tasks_completed Number of completed tasks.\n\
+# TYPE uhorse_hub_tasks_completed gauge\n\
+uhorse_hub_tasks_completed {}\n\
+# HELP uhorse_hub_tasks_failed Number of failed tasks.\n\
+# TYPE uhorse_hub_tasks_failed gauge\n\
+uhorse_hub_tasks_failed {}\n",
+        stats.uptime_secs,
+        stats.nodes.total_nodes,
+        stats.nodes.online_nodes,
+        stats.nodes.offline_nodes,
+        stats.nodes.busy_nodes,
+        stats.scheduler.pending_tasks,
+        stats.scheduler.running_tasks,
+        stats.scheduler.completed_tasks,
+        stats.scheduler.failed_tasks,
+    )
 }
 
 /// 启动 Web 服务器
@@ -2246,16 +2365,16 @@ mod tests {
     use std::time::Duration;
     use tempfile::{tempdir, TempDir};
     use tower::util::ServiceExt;
-    use uhorse_node_runtime::{ConnectionConfig, Node, NodeConfig};
     use uhorse_protocol::{
-        Command, CommandOutput, CommandResult, ExecutionError, FileCommand, NodeCapabilities,
-        NodeId, Priority, ShellCommand, TaskStatus, WorkspaceInfo,
+        Action, Command, CommandOutput, CommandResult, ExecutionError, FileCommand,
+        NodeCapabilities, Priority, ResourcePattern as ProtocolResourcePattern, ShellCommand,
+        TaskStatus, WorkspaceInfo,
     };
 
     use crate::HubConfig;
 
     async fn create_test_runtime() -> Arc<WebAgentRuntime> {
-        let base_dir = tempdir().unwrap().into_path();
+        let base_dir = tempdir().unwrap().keep();
         Arc::new(
             init_default_agent_runtime(base_dir.join("agent-runtime"))
                 .await
@@ -2268,7 +2387,7 @@ mod tests {
         skill_toml: &str,
         llm_response: &str,
     ) -> (Arc<WebAgentRuntime>, Arc<WebState>) {
-        let base_dir = tempdir().unwrap().into_path();
+        let base_dir = tempdir().unwrap().keep();
         let runtime_root = base_dir.join("agent-runtime");
         let skill_dir = runtime_root.join("skills").join(skill_name);
         tokio::fs::create_dir_all(&skill_dir).await.unwrap();
@@ -2458,6 +2577,24 @@ mod tests {
         (status, json)
     }
 
+    async fn get_text(app: Router, path: &str) -> (StatusCode, String, Option<String>) {
+        let request = Request::builder()
+            .method("GET")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        (status, text, content_type)
+    }
+
     async fn create_pending_approval(
         state: &Arc<WebState>,
         node_id: &uhorse_protocol::NodeId,
@@ -2492,6 +2629,53 @@ mod tests {
         let config = WebConfig::default();
         assert_eq!(config.port, 3000);
         assert!(config.enable_cors);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_returns_current_health_payload() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = WebState::new(Arc::new(hub), None, None);
+        let (status, body) = get_json(create_router(state), "/api/health").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], json!("healthy"));
+        assert_eq!(body["version"], json!(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[tokio::test]
+    async fn test_metrics_endpoint_returns_prometheus_payload() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = WebState::new(Arc::new(hub), None, None);
+        let (status, body, content_type) = get_text(create_router(state), "/metrics").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            content_type.as_deref(),
+            Some("text/plain; version=0.0.4; charset=utf-8")
+        );
+        assert!(body.contains("# HELP uhorse_messages_received_total"));
+        assert!(body.contains("# TYPE uhorse_active_sessions gauge"));
+        assert!(body.contains("uhorse_api_requests_total 0"));
+        assert!(body.contains("uhorse_websocket_connections 0"));
+        assert!(body.contains("# HELP uhorse_hub_uptime_seconds"));
+        assert!(body.contains("uhorse_hub_nodes_total 0"));
+        assert!(body.contains("uhorse_hub_tasks_failed 0"));
+    }
+
+    #[tokio::test]
+    async fn test_api_metrics_middleware_tracks_success_and_error_requests() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new(Arc::new(hub), None, None));
+
+        let (health_status, _) = get_json(app.clone(), "/api/health").await;
+        let (missing_status, _, _) = get_text(app.clone(), "/api/does-not-exist").await;
+        let (metrics_status, body, _) = get_text(app, "/metrics").await;
+
+        assert_eq!(health_status, StatusCode::OK);
+        assert_eq!(missing_status, StatusCode::NOT_FOUND);
+        assert_eq!(metrics_status, StatusCode::OK);
+        assert!(body.contains("uhorse_api_requests_total 2"));
+        assert!(body.contains("uhorse_api_errors_total 1"));
     }
 
     #[test]

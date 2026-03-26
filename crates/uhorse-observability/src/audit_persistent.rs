@@ -3,13 +3,13 @@
 //! 审计日志持久化与完整性保护
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::{AuditCategory, AuditEvent, AuditLevel};
 
@@ -321,9 +321,10 @@ impl AuditStorage for InMemoryAuditStorage {
 
     async fn stats(&self) -> AuditStorageStats {
         let events = self.events.read().await;
-        let mut stats = AuditStorageStats::default();
-
-        stats.total_events = events.len() as u64;
+        let mut stats = AuditStorageStats {
+            total_events: events.len() as u64,
+            ..AuditStorageStats::default()
+        };
 
         if let Some(first) = events.front() {
             stats.earliest_timestamp = Some(first.signed_at);

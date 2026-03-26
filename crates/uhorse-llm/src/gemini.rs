@@ -5,7 +5,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 use tracing::{debug, instrument};
@@ -17,31 +17,21 @@ use crate::config::LLMConfig;
 #[derive(Debug, Deserialize)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
-    usage_metadata: Option<GeminiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GeminiCandidate {
     content: GeminiContent,
-    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GeminiContent {
     parts: Vec<GeminiPart>,
-    role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GeminiPart {
     text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GeminiUsage {
-    prompt_token_count: u32,
-    candidates_token_count: u32,
-    total_token_count: u32,
 }
 
 /// Google Gemini 客户端

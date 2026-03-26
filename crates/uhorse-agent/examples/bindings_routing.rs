@@ -5,8 +5,8 @@
 use anyhow::Result;
 use std::sync::Arc;
 use uhorse_agent::{
-    Agent, AgentBuilder, AgentManager, AgentScope, AgentScopeConfig, BindingBuilder,
-    BindingsConfig, BindingsRouter, ChannelType, SessionKey,
+    Agent, AgentManager, AgentScope, AgentScopeConfig, BindingBuilder, BindingsConfig,
+    BindingsRouter, SessionKey,
 };
 
 #[tokio::main]
@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
         is_default: true,
     })?);
     main_scope.init_workspace().await?;
-    agent_manager.register_scope(main_scope);
+    agent_manager.register_scope(main_scope)?;
 
     let _main_agent = Agent::builder()
         .agent_id("main")
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
         is_default: false,
     })?);
     coder_scope.init_workspace().await?;
-    agent_manager.register_scope(coder_scope);
+    agent_manager.register_scope(coder_scope)?;
 
     let _coder_agent = Agent::builder()
         .agent_id("coder")
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         is_default: false,
     })?);
     writer_scope.init_workspace().await?;
-    agent_manager.register_scope(writer_scope);
+    agent_manager.register_scope(writer_scope)?;
 
     let _writer_agent = Agent::builder()
         .agent_id("writer")

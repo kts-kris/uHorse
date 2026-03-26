@@ -5,8 +5,8 @@
 use anyhow::Result;
 use std::sync::Arc;
 use uhorse_agent::memory::FileMemory;
-use uhorse_agent::{Agent, AgentBuilder, Gateway, GatewayConfig};
-use uhorse_llm::{LLMClient, OpenAIClient};
+use uhorse_agent::{Agent, Gateway, GatewayConfig};
+use uhorse_llm::LLMClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 use uhorse_protocol::{CommandOutput, SkillCommand};
 
 /// 技能定义
@@ -155,7 +155,7 @@ impl SkillExecutor {
 
         // 验证输出
         if let Some(schema) = &skill.output_schema {
-            if let Some(ref output) = result.output.as_object() {
+            if let Some(output) = result.output.as_object() {
                 self.validate_output(output, schema)?;
             }
         }
@@ -339,14 +339,14 @@ impl SkillExecutor {
 
         // 简单解析 SKILL.md 格式
         let mut name = String::new();
-        let mut version = String::from("1.0.0");
-        let mut description = String::new();
+        let version = String::from("1.0.0");
+        let description = String::new();
         let mut executable = String::new();
 
         for line in content.lines() {
             let line = line.trim();
-            if line.starts_with("# ") {
-                name = line[2..].to_string();
+            if let Some(stripped) = line.strip_prefix("# ") {
+                name = stripped.to_string();
             } else if line.starts_with("## Version") {
                 // 下一行是版本
             } else if line.starts_with("## Description") {

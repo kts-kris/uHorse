@@ -184,12 +184,14 @@ auth_token = "<access_token>"
 
 ```bash
 curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/metrics
 ```
 
-当前实际对外健康检查路由是：
+当前实际对外健康检查与指标路由是：
 
 ```text
 /api/health
+/metrics
 ```
 
 不是旧文档里的 `/health/live` 或 `/health/ready`。

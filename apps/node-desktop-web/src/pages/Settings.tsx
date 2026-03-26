@@ -1,21 +1,363 @@
-import { Card, Descriptions, Tag } from 'antd';
+import { useEffect } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  Row,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { desktopApi } from '../services/desktopApi';
+import type { DesktopSettings } from '../types/desktop';
 
 const Settings: React.FC = () => {
+  const [form] = Form.useForm<DesktopSettings>();
+  const queryClient = useQueryClient();
+
+  const settingsQuery = useQuery({
+    queryKey: ['desktop-settings'],
+    queryFn: desktopApi.getSettings,
+  });
+
+  const defaultSettingsQuery = useQuery({
+    queryKey: ['desktop-default-settings'],
+    queryFn: desktopApi.getDefaultSettings,
+  });
+
+  const capabilityStatusQuery = useQuery({
+    queryKey: ['desktop-capability-status'],
+    queryFn: desktopApi.getCapabilityStatus,
+  });
+
+  const workspaceStatusQuery = useQuery({
+    queryKey: ['desktop-workspace-status'],
+    queryFn: desktopApi.getWorkspaceStatus,
+  });
+
+  const validateMutation = useMutation({
+    mutationFn: desktopApi.validateWorkspace,
+  });
+
+  const pickWorkspaceMutation = useMutation({
+    mutationFn: desktopApi.pickWorkspace,
+    onSuccess: ({ path }) => {
+      form.setFieldValue('workspace_path', path);
+      message.success('已选择工作区');
+    },
+  });
+
+  const notificationMutation = useMutation({
+    mutationFn: desktopApi.testNotification,
+    onSuccess: (text) => {
+      message.success(text);
+      void queryClient.invalidateQueries({ queryKey: ['desktop-capability-status'] });
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: desktopApi.saveSettings,
+    onSuccess: async (saved) => {
+      queryClient.setQueryData(['desktop-settings'], saved);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['desktop-workspace-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-runtime-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-version-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-capability-status'] }),
+      ]);
+      message.success('设置已保存');
+    },
+  });
+
+  useEffect(() => {
+    if (settingsQuery.data) {
+      form.setFieldsValue(settingsQuery.data);
+    }
+  }, [form, settingsQuery.data]);
+
+  if (settingsQuery.isLoading && !settingsQuery.data) {
+    return (
+      <div style={{ textAlign: 'center', padding: 48 }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (settingsQuery.error instanceof Error && !settingsQuery.data) {
+    return <Alert type="error" showIcon message="加载设置失败" description={settingsQuery.error.message} />;
+  }
+
+  const saving = saveMutation.isPending;
+  const validating = validateMutation.isPending;
+  const pickingWorkspace = pickWorkspaceMutation.isPending;
+  const sendingNotification = notificationMutation.isPending;
+  const workspaceStatus = workspaceStatusQuery.data;
+  const validation = validateMutation.data;
+  const defaults = defaultSettingsQuery.data;
+  const capabilityStatus = capabilityStatusQuery.data;
+
   return (
-    <Card title="设置">
-      <Descriptions bordered size="small" column={1}>
-        <Descriptions.Item label="桌面壳">待接入 Tauri 2.x</Descriptions.Item>
-        <Descriptions.Item label="自动更新">
-          <Tag color="default">未启用</Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="通知中心">
-          <Tag color="processing">后续接入</Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="版本管理后端">
-          <Tag color="green">VersionManager</Tag>
-        </Descriptions.Item>
-      </Descriptions>
-    </Card>
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      {settingsQuery.error instanceof Error ? (
+        <Alert type="error" showIcon message="刷新设置失败" description={settingsQuery.error.message} />
+      ) : null}
+      {defaultSettingsQuery.error instanceof Error ? (
+        <Alert type="error" showIcon message="加载默认值失败" description={defaultSettingsQuery.error.message} />
+      ) : null}
+      {capabilityStatusQuery.error instanceof Error ? (
+        <Alert type="error" showIcon message="加载桌面能力失败" description={capabilityStatusQuery.error.message} />
+      ) : null}
+      {workspaceStatusQuery.error instanceof Error ? (
+        <Alert
+          type="error"
+          showIcon
+          message="加载工作区状态失败"
+          description={workspaceStatusQuery.error.message}
+        />
+      ) : null}
+      {saveMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="保存设置失败" description={saveMutation.error.message} />
+      ) : null}
+      {validateMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="校验工作区失败" description={validateMutation.error.message} />
+      ) : null}
+      {pickWorkspaceMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="选择工作区失败" description={pickWorkspaceMutation.error.message} />
+      ) : null}
+      {notificationMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="发送测试通知失败" description={notificationMutation.error.message} />
+      ) : null}
+
+      <Typography.Title level={4} style={{ margin: 0 }}>
+        设置
+      </Typography.Title>
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={14}>
+          <Card title="Node 基础配置">
+            <Form
+              form={form}
+              layout="vertical"
+              initialValues={settingsQuery.data}
+              onFinish={(values) => saveMutation.mutate(values)}
+            >
+              <Form.Item
+                label="节点名称"
+                name="name"
+                rules={[{ required: true, message: '请输入节点名称' }]}
+                extra={defaults?.suggested_name ? `默认使用当前计算机名称：${defaults.suggested_name}` : undefined}
+              >
+                <Input
+                  placeholder={defaults?.suggested_name || '请输入节点名称'}
+                  addonAfter={
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => {
+                        if (defaults?.suggested_name) {
+                          form.setFieldValue('name', defaults.suggested_name);
+                        }
+                      }}
+                    >
+                      使用本机名称
+                    </Button>
+                  }
+                />
+              </Form.Item>
+
+              <Form.Item label="工作区路径" required>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item
+                    name="workspace_path"
+                    noStyle
+                    rules={[{ required: true, message: '请选择工作区路径' }]}
+                  >
+                    <Input placeholder="请选择工作区目录" readOnly />
+                  </Form.Item>
+                  <Button loading={pickingWorkspace} onClick={() => pickWorkspaceMutation.mutate()}>
+                    选择目录
+                  </Button>
+                </Space.Compact>
+              </Form.Item>
+
+              <Form.Item
+                label="Hub 地址"
+                name="hub_url"
+                rules={[{ required: true, message: '请输入 Hub 地址' }]}
+              >
+                <Input placeholder="ws://localhost:8765/ws" />
+              </Form.Item>
+
+              <Form.Item name="require_git_repo" valuePropName="checked">
+                <Checkbox>要求工作区必须是 Git 仓库</Checkbox>
+              </Form.Item>
+
+              <Form.Item name="watch_workspace" valuePropName="checked">
+                <Checkbox>监听工作区变更</Checkbox>
+              </Form.Item>
+
+              <Form.Item name="git_protection_enabled" valuePropName="checked">
+                <Checkbox>启用 Git 保护</Checkbox>
+              </Form.Item>
+
+              <Form.Item name="auto_git_add_new_files" valuePropName="checked">
+                <Checkbox>自动 git add 新文件</Checkbox>
+              </Form.Item>
+
+              <Typography.Title level={5} style={{ marginBottom: 12 }}>
+                通知
+              </Typography.Title>
+
+              <Form.Item name="notifications_enabled" valuePropName="checked">
+                <Checkbox>启用系统通知</Checkbox>
+              </Form.Item>
+
+              <Form.Item name="show_notification_details" valuePropName="checked">
+                <Checkbox>通知中显示详细内容</Checkbox>
+              </Form.Item>
+
+              <Form.Item
+                name="mirror_notifications_to_dingtalk"
+                valuePropName="checked"
+                extra="开启后，桌面通知会额外通过 Hub 同步到钉钉。"
+              >
+                <Checkbox>通过 Hub 同步通知到钉钉</Checkbox>
+              </Form.Item>
+
+              <Typography.Title level={5} style={{ marginBottom: 12 }}>
+                系统集成
+              </Typography.Title>
+
+              <Form.Item name="launch_at_login" valuePropName="checked">
+                <Checkbox>开机自动启动</Checkbox>
+              </Form.Item>
+
+              <Space wrap>
+                <Button
+                  onClick={async () => {
+                    const values = await form.validateFields();
+                    validateMutation.mutate({
+                      workspace_path: values.workspace_path,
+                      require_git_repo: values.require_git_repo,
+                    });
+                  }}
+                  loading={validating}
+                >
+                  校验工作区
+                </Button>
+                <Button onClick={() => notificationMutation.mutate()} loading={sendingNotification}>
+                  测试通知
+                </Button>
+                <Button type="primary" htmlType="submit" loading={saving}>
+                  保存设置
+                </Button>
+              </Space>
+            </Form>
+          </Card>
+        </Col>
+
+        <Col xs={24} xl={10}>
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Card title="当前工作区状态" extra={workspaceStatusQuery.isFetching ? '刷新中' : undefined}>
+              <Descriptions bordered size="small" column={1}>
+                <Descriptions.Item label="有效性">
+                  <Tag color={workspaceStatus?.valid ? 'success' : 'error'}>
+                    {workspaceStatus?.valid ? '有效' : '无效'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="名称">{workspaceStatus?.name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="路径">{workspaceStatus?.normalized_path || workspaceStatus?.path || '-'}</Descriptions.Item>
+                <Descriptions.Item label="Git 仓库">
+                  <Tag color={workspaceStatus?.git_repo ? 'success' : 'default'}>
+                    {workspaceStatus?.git_repo ? '是' : '否'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="只读">
+                  <Tag color={workspaceStatus?.read_only ? 'warning' : 'success'}>
+                    {workspaceStatus?.read_only ? '是' : '否'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="监听变更">
+                  {workspaceStatus?.watch_workspace ? '开启' : '关闭'}
+                </Descriptions.Item>
+                <Descriptions.Item label="Git 保护">
+                  {workspaceStatus?.git_protection_enabled ? '开启' : '关闭'}
+                </Descriptions.Item>
+                <Descriptions.Item label="自动 git add">
+                  {workspaceStatus?.auto_git_add_new_files ? '开启' : '关闭'}
+                </Descriptions.Item>
+                <Descriptions.Item label="内部目录">
+                  {workspaceStatus?.internal_work_dir || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="错误信息">{workspaceStatus?.error || '-'}</Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Card title="桌面能力状态" extra={capabilityStatusQuery.isFetching ? '刷新中' : undefined}>
+              <Descriptions bordered size="small" column={1}>
+                <Descriptions.Item label="建议节点名称">{defaults?.suggested_name || '-'}</Descriptions.Item>
+                <Descriptions.Item label="系统通知">
+                  <Tag color={capabilityStatus?.notifications_enabled ? 'success' : 'default'}>
+                    {capabilityStatus?.notifications_enabled ? '开启' : '关闭'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="通知详情">
+                  <Tag color={capabilityStatus?.show_notification_details ? 'processing' : 'default'}>
+                    {capabilityStatus?.show_notification_details ? '显示详情' : '仅标题'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="钉钉镜像">
+                  <Tag color={capabilityStatus?.mirror_notifications_to_dingtalk ? 'processing' : 'default'}>
+                    {capabilityStatus?.mirror_notifications_to_dingtalk ? '已开启' : '未开启'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="开机启动">
+                  <Tag color={capabilityStatus?.launch_at_login ? 'success' : 'default'}>
+                    {capabilityStatus?.launch_at_login ? '已开启' : '未开启'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="启动项文件">
+                  {capabilityStatus?.launch_agent_path || '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="启动项状态">
+                  <Tag color={capabilityStatus?.launch_agent_installed ? 'success' : 'default'}>
+                    {capabilityStatus?.launch_agent_installed ? '已写入' : '未写入'}
+                  </Tag>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Card title="最近一次校验">
+              {validation ? (
+                <Descriptions bordered size="small" column={1}>
+                  <Descriptions.Item label="结果">
+                    <Tag color={validation.valid ? 'success' : 'error'}>
+                      {validation.valid ? '通过' : '失败'}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="工作区名称">{validation.name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="规范路径">{validation.normalized_path || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="Git 仓库">
+                    {validation.git_repo ? '是' : '否'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="错误信息">{validation.error || '-'}</Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <Alert type="info" showIcon message="尚未执行工作区校验" />
+              )}
+            </Card>
+          </Space>
+        </Col>
+      </Row>
+    </Space>
   );
 };
 

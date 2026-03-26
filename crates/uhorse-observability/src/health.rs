@@ -5,7 +5,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// 健康状态
@@ -147,6 +146,7 @@ async fn check_disk(path: &str) -> CheckResult {
 /// 健康检查服务
 pub struct HealthService {
     start_time: std::time::Instant,
+    started_at: DateTime<Utc>,
     version: String,
     checkers: Vec<CheckerType>,
     status: Arc<RwLock<HealthStatus>>,
@@ -157,6 +157,7 @@ impl HealthService {
     pub fn new(version: String) -> Self {
         Self {
             start_time: std::time::Instant::now(),
+            started_at: Utc::now(),
             version,
             checkers: Vec::new(),
             status: Arc::new(RwLock::new(HealthStatus::Healthy)),
@@ -188,8 +189,7 @@ impl HealthService {
             status,
             timestamp: Utc::now(),
             version: self.version.clone(),
-            started_at: DateTime::from_timestamp(self.start_time.elapsed().as_secs() as i64, 0)
-                .unwrap_or(Utc::now()),
+            started_at: self.started_at,
             uptime_seconds: self.start_time.elapsed().as_secs(),
             checks,
         }

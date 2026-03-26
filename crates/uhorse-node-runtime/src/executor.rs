@@ -96,7 +96,7 @@ impl CommandExecutor {
                 ExecutionError::permission_denied(&reason),
             )),
             PermissionResult::RequiresApproval { request_id, reason } => {
-                let error = ExecutionError::permission_denied(&format!(
+                let error = ExecutionError::permission_denied(format!(
                     "Operation requires approval. Request ID: {}, Reason: {}",
                     request_id, reason
                 ))

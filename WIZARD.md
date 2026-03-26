@@ -2,7 +2,9 @@
 
 ## 概述
 
-uHorse 提供交互式配置向导，帮助您快速完成项目配置，无需手动编辑配置文件。
+uHorse 提供交互式配置向导，帮助您生成一份可用的初始配置，无需手动从零编辑文件。
+
+> 注意：本向导文档描述的是仓库中仍保留的旧单体 `uhorse` 配置入口，不是当前 Hub + Node 主线的默认联调路径。当前主线请优先参考 `LOCAL_SETUP.md`、`TESTING.md` 与 `README.md`。文中的示例已按当前仓库主线默认值统一到端口 `8765` 与健康检查路径 `/api/health`。本向导也不会覆盖 Node Desktop 本地偏好项，例如 `notifications_enabled`、`show_notification_details`、`mirror_notifications_to_dingtalk`、`launch_at_login`。
 
 ## 启动配置向导
 
@@ -24,21 +26,30 @@ cargo build --release
 
 ## 配置向导流程
 
-配置向导将引导您完成以下步骤：
+当前实现会依次执行以下步骤：
+
+1. 服务器配置
+2. 数据库配置
+3. 单次运行选择 1 个可选通道进行配置
+4. 可选的 LLM 配置
+5. 安全配置
+6. 配置验证
+7. 保存 `config.toml` 与 `.env`
+8. 输出后续操作提示
 
 ### 1. 服务器配置
 
-```
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   📡 服务器配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 监听地址 [127.0.0.1]:
-监听端口 [8080]:
+监听端口 [8765]:
 
 服务器配置:
   监听地址: 127.0.0.1
-  监听端口: 8080
+  监听端口: 8765
 
 是否正确?
   1. 确认
@@ -46,15 +57,9 @@ cargo build --release
 请选择 [1-2]:
 ```
 
-**配置项说明：**
-- **监听地址**: 服务器绑定的 IP 地址
-  - `127.0.0.1` - 仅本地访问（推荐用于开发）
-  - `0.0.0.0` - 允许所有网络接口访问（生产环境）
-- **监听端口**: 服务器监听端口（默认 8080）
-
 ### 2. 数据库配置
 
-```
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   💾 数据库配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -65,81 +70,59 @@ cargo build --release
 请选择 [1-2]:
 ```
 
-#### SQLite 配置（推荐）
+#### SQLite
 
-```
+```text
 数据库文件路径 [./data/uhorse.db]:
 ```
 
-**SQLite 特点：**
-- ✅ 零配置，开箱即用
-- ✅ 轻量级，适合小型部署
-- ✅ 无需额外服务
-- ⚠️ 不支持高并发写入
+#### PostgreSQL
 
-#### PostgreSQL 配置
-
-```
+```text
 连接 URL [postgresql://uhorse:password@localhost:5432/uhorse]:
 ```
 
-**PostgreSQL 特点：**
-- ✅ 支持高并发
-- ✅ 适合生产环境
-- ✅ 完整的 ACID 支持
-- ⚠️ 需要单独的数据库服务
+输入完成后，向导会打印当前数据库配置，并允许您确认或重新配置。
 
 ### 3. 通道配置
 
-```
+当前实现支持 `Telegram`、`Slack`、`Discord`、`WhatsApp`、`钉钉`、`飞书`、`企业微信`。
+
+> 当前限制：通道步骤虽然展示为编号菜单，但一次运行只会配置 1 个被选中的通道。如果您需要多通道配置，建议先用向导生成初始 `config.toml`，再手动补充其余通道配置段。
+
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   📱 通道配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-选择要启用的通道:
-
-  1. Telegram
+可选通道:
+  1. Telegram ⭐
   2. Slack
   3. Discord
   4. WhatsApp
-
-选择要配置的通道 (输入序号，多个用空格分隔):
-  1. 继续 (跳过通道配置)
-  2. 1
-  3. 2
-  4. 3
-  5. 4
-请选择 [1-5]:
+  5. 钉钉 ⭐
+  6. 飞书
+  7. 企业微信
+  8. 继续（跳过通道配置）
 ```
 
-#### Telegram 配置
+当前实现中的部分提示示例如下：
 
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Telegram 配置
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#### Telegram
 
+```text
 是否启用 Telegram?
   1. 是
   2. 否
 请选择 [1-2]:
 
 请输入 Bot Token:
+请输入 Webhook Secret (可选):
 ```
 
-**获取 Telegram Bot Token：**
-1. 在 Telegram 中搜索 [@BotFather](https://t.me/botfather)
-2. 发送 `/newbot` 创建新 Bot
-3. 按提示设置 Bot 名称和用户名
-4. 获得 Bot Token（格式：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`）
+#### Slack
 
-#### Slack 配置
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Slack 配置
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+```text
 是否启用 Slack?
   1. 是
   2. 否
@@ -149,19 +132,9 @@ cargo build --release
 请输入 Signing Secret:
 ```
 
-**获取 Slack 凭证：**
-1. 访问 https://api.slack.com/apps
-2. 创建新 App
-3. 配置 Bot Token Scopes 和 OAuth Scopes
-4. 安装到工作区
+#### Discord
 
-#### Discord 配置
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Discord 配置
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+```text
 是否启用 Discord?
   1. 是
   2. 否
@@ -171,38 +144,97 @@ cargo build --release
 请输入 Application ID:
 ```
 
-**获取 Discord 凭证：**
-1. 访问 https://discord.com/developers/applications
-2. 创建 Application
-3. 创建 Bot 并获取 Token
-4. 在 OAuth2 中生成邀请 URL
+#### 钉钉
 
-#### WhatsApp 配置
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  WhatsApp 配置
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-是否启用 WhatsApp?
+```text
+是否启用 钉钉?
   1. 是
   2. 否
 请选择 [1-2]:
 
-请输入 Phone Number ID:
-请输入 Business Account ID:
-请输入 Webhook Verify Token:
+请输入 App Key:
+请输入 App Secret:
+请输入 Agent ID:
 ```
 
-**获取 WhatsApp 凭证：**
-1. 访问 https://developers.facebook.com/apps
-2. 创建 Meta App
-3. 添加 WhatsApp 产品
-4. 配置 Webhook 并获取凭证
+> 当前限制：这里仅收集 DingTalk App 凭据，不会自动生成 `channels.dingtalk.notification_bindings`。如果要打通“节点通知 -> 钉钉用户”链路，仍需在 Hub 配置中手工补充 `node_id` 到 `user_id` 的映射。
 
-### 4. 安全配置
+#### 飞书
 
+```text
+是否启用 飞书?
+  1. 是
+  2. 否
+请选择 [1-2]:
+
+请输入 App ID:
+请输入 App Secret:
+请输入 Encrypt Key (可选):
+请输入 Verify Token (可选):
 ```
+
+#### 企业微信
+
+```text
+是否启用 企业微信?
+  1. 是
+  2. 否
+请选择 [1-2]:
+
+请输入 Corp ID:
+请输入 Secret:
+请输入 Agent ID:
+请输入 Token (可选):
+请输入 Encoding AES Key (可选):
+```
+
+### 4. LLM 配置
+
+通道配置后，向导会进入可选的 LLM 步骤。当前支持的服务商有：
+
+- `OpenAI`
+- `Azure OpenAI`
+- `Anthropic (Claude)`
+- `Google Gemini`
+- `自定义（OpenAI 兼容）`
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🤖 大语言模型配置
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+是否启用大语言模型功能?
+  1. 启用
+  2. 跳过
+
+选择 LLM 服务商:
+  1. OpenAI
+  2. Azure OpenAI
+  3. Anthropic (Claude)
+  4. Google Gemini
+  5. 自定义 (OpenAI 兼容)
+```
+
+典型后续提示：
+
+```text
+请输入 API Key:
+模型名称 [gpt-3.5-turbo]:
+Temperature [0.7]:
+最大 Tokens 数 [2000]:
+```
+
+当前实现中的 provider 默认值：
+
+- `OpenAI` → `base_url = https://api.openai.com/v1`，默认模型 `gpt-3.5-turbo`
+- `Azure OpenAI` → 先输入 Azure endpoint，再拼出 deployment base URL，默认模型 `gpt-35-turbo`
+- `Anthropic (Claude)` → `base_url = https://api.anthropic.com/v1`，默认模型 `claude-3-sonnet-20240229`
+- `Google Gemini` → `base_url = https://generativelanguage.googleapis.com/v1beta`，默认模型 `gemini-pro`
+- `自定义（OpenAI 兼容）` → 手动输入 API Base URL
+
+### 5. 安全配置
+
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   🔒 安全配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -214,25 +246,13 @@ JWT 密钥用于签名访问令牌。
   1. 自动生成
   2. 手动输入
 请选择 [1-2]:
-```
 
-**JWT 密钥说明：**
-- 用于签名访问令牌
-- 至少 32 个随机字符
-- 建议使用自动生成
-
-```
 访问令牌过期时间（秒）[86400]:
 ```
 
-**令牌过期时间说明：**
-- 默认 86400 秒（24 小时）
-- 可根据安全需求调整
-- 较短的过期时间更安全
+### 6. 配置验证
 
-### 5. 配置验证
-
-```
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   ✓ 配置验证
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -240,9 +260,15 @@ JWT 密钥用于签名访问令牌。
 ✓ 配置验证通过
 ```
 
-### 6. 保存配置
+当前验证逻辑会额外检查：
 
-```
+- 端口号不能小于 `1024`
+- SQLite 父目录不存在时会自动创建
+- JWT 密钥长度少于 `32` 字符时会发出警告并询问是否继续
+
+### 7. 保存配置
+
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   💾 保存配置
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -251,47 +277,58 @@ JWT 密钥用于签名访问令牌。
 ✓ 环境变量已保存到: ./.env
 ```
 
-### 7. 完成
+### 8. 完成
 
-```
+```text
 ╔════════════════════════════════════════════════╗
 ║                                                ║
-║     🎉 配置完成！                             ║
+║     🎉 配置完成！                              ║
 ║                                                ║
 ╚════════════════════════════════════════════════╝
 
 下一步操作:
-
-  1️⃣  启动 uHorse:
+  1. 启动 uHorse:
      ./start.sh
 
-  2️⃣  查看服务状态:
-     curl http://127.0.0.1:8080/health/live
+  2. 查看服务状态:
+     curl http://127.0.0.1:8765/api/health
 
-  3️⃣  配置通道 Webhook:
-     请参考 CHANNELS.md 配置各通道的 Webhook URL
-
-  4️⃣  查看配置:
-     cat config.toml
-
-📚 文档:
-  - 配置指南: CONFIG.md
-  - API 使用: API.md
-  - 通道集成: CHANNELS.md
-
-💡 提示:
-  - 配置文件已保存到项目根目录
-  - 可随时编辑 config.toml 或 .env 修改配置
-  - 重新运行向导: ./target/release/uhorse wizard
+> 补充说明：当前 Hub 还提供标准 Prometheus 指标端点 `/metrics`，但不属于该 legacy 向导生成内容。
 ```
 
-## 配置文件说明
+## 命令行选项
 
-配置向导会生成两个文件：
+```bash
+uhorse wizard --help
 
-### config.toml
+Options:
+  -d, --dir <PATH>    Target directory (default: current)
+  -h, --help          Show help message
+```
 
-主配置文件，包含所有配置项：
+当前向导只支持 `-d/--dir` 与 `-h/--help`。
+
+## 生成的文件
+
+向导会在目标目录写出 `config.toml` 与 `.env`，并覆盖同名现有文件。
+
+当前实现不会从环境变量中读取提示默认值。
+
+### 生成的 `.env`
+
+```bash
+# uHorse 环境变量
+# 由配置向导生成
+
+UHORSE_SERVER_HOST=127.0.0.1
+UHORSE_SERVER_PORT=8765
+UHORSE_TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
+RUST_LOG=info
+```
+
+### 生成的 `config.toml`
+
+典型输出如下：
 
 ```toml
 # uHorse 配置文件
@@ -299,13 +336,13 @@ JWT 密钥用于签名访问令牌。
 
 [server]
 host = "127.0.0.1"
-port = 8080
+port = 8765
 
 [channels]
 enabled = ["telegram"]
 
 [channels.telegram]
-bot_token = "YOUR_BOT_TOKEN"
+bot_token = "123456789:ABC..."
 
 [database]
 path = "./data/uhorse.db"
@@ -313,106 +350,62 @@ path = "./data/uhorse.db"
 [security]
 jwt_secret = "YOUR_JWT_SECRET"
 token_expiry = 86400
+
+[llm]
+enabled = true
+provider = "openai"
+api_key = "sk-..."
+base_url = "https://api.openai.com/v1"
+model = "gpt-3.5-turbo"
+temperature = 0.7
+max_tokens = 2000
 ```
 
-### .env
+## 下一步
 
-环境变量文件，用于覆盖配置：
+完成配置后：
 
 ```bash
-# uHorse 环境变量
-# 由配置向导生成
+# 使用仓库辅助脚本启动
+./start.sh
 
-UHORSE_SERVER_HOST=127.0.0.1
-UHORSE_SERVER_PORT=8080
-UHORSE_TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
-RUST_LOG=info
+# 检查健康状态
+curl http://127.0.0.1:8765/api/health
 ```
 
 ## 常见问题
 
-### Q: 如何重新配置？
+### 没有执行权限
 
 ```bash
-# 重新运行配置向导
-./target/release/uhorse wizard
+chmod +x ./target/release/uhorse
 ```
 
-### Q: 如何修改已有配置？
+### 重新运行会覆盖已有配置吗？
 
-有两种方式：
-
-**方式一：重新运行配置向导**
-```bash
-./target/release/uhorse wizard
-```
-
-**方式二：手动编辑配置文件**
-```bash
-# 编辑主配置文件
-vi config.toml
-
-# 或编辑环境变量文件
-vi .env
-```
-
-### Q: 配置向导会覆盖现有配置吗？
-
-是的，配置向导会覆盖现有的 `config.toml` 和 `.env` 文件。如果需要保留现有配置，请先备份：
+会。若需保留当前配置，请先备份：
 
 ```bash
 cp config.toml config.toml.bak
 cp .env .env.bak
 ```
 
-### Q: 如何只配置部分通道？
+### 系统里没有 `openssl` 怎么办？
 
-在通道配置步骤中，只输入需要配置的通道序号即可：
+自动生成 JWT 密钥依赖 `openssl rand -hex 32`。
 
-```
-选择要配置的通道 (输入序号，多个用空格分隔): 1 3
-```
+如果系统没有 `openssl`：
 
-这只会配置 Telegram（1）和 Discord（3）。
+- 安装 `openssl`；或
+- 在向导中选择手动输入 JWT 密钥
 
-### Q: 数据库配置支持其他类型吗？
+### 为什么低端口会校验失败？
 
-目前配置向导只支持 SQLite 和 PostgreSQL。如需使用其他数据库（如 MySQL），请手动编辑 `config.toml`。
+当前验证逻辑拒绝使用小于 `1024` 的端口。请改用 `8765` 这类非特权端口。
 
-### Q: 生成的 JWT 密钥安全吗？
+### 如何配置多个通道？
 
-配置向导使用 `openssl rand -hex 32` 生成 32 字节的随机密钥，非常安全。请确保生成的密钥不被泄露。
-
-## 高级用法
-
-### 在非交互模式下使用
-
-配置向导目前只支持交互模式。如需自动化配置，请：
-
-1. 使用模板配置文件
-2. 通过脚本修改配置
-3. 或等待后续版本的自动化配置功能
-
-### 配置模板
-
-创建配置模板：
-
-```bash
-# 使用默认配置启动
-./target/release/uhorse -c config.toml run
-```
-
-### 多环境配置
-
-为不同环境创建不同的配置文件：
-
-```bash
-# 开发环境
-./target/release/uhorse -c config.dev.toml run
-
-# 生产环境
-./target/release/uhorse -c config.prod.toml run
-```
+当前向导一次只会完成 1 个通道的交互配置。若需多通道，请先生成基础配置，再手动补充 `config.toml` 中的其他通道配置段。
 
 ## 相关文档
 

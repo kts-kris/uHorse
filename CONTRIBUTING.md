@@ -44,11 +44,12 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # 安装开发工具
 cargo install cargo-nextest cargo-audit
 
-# 编译项目
-cargo build
+# 编译当前主线二进制
+cargo build --release -p uhorse-hub -p uhorse-node
 
-# 运行测试
-cargo nextest run
+# 运行当前主线关键测试
+cargo test -p uhorse-node-runtime
+cargo test -p uhorse-hub
 ```
 
 #### 4. 编码规范
@@ -60,13 +61,14 @@ cargo fmt --all
 
 **Clippy 检查**:
 ```bash
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy -p uhorse-hub -p uhorse-node --all-targets -- -D warnings
 ```
 
 **测试**:
 ```bash
-cargo nextest run
-cargo test --doc
+cargo test -p uhorse-node-runtime
+cargo test -p uhorse-hub
+cargo test --workspace
 ```
 
 #### 5. 提交代码
@@ -124,19 +126,21 @@ git push origin feature/your-feature-name
 ```
 uhorse/
 ├── crates/
-│   ├── uhorse-core/         # 核心类型和 Trait
-│   ├── uhorse-gateway/      # HTTP/WebSocket 网关
-│   ├── uhorse-channel/      # 通道适配器
-│   ├── uhorse-agent/        # 智能体管理
-│   ├── uhorse-llm/          # LLM 抽象层
-│   ├── uhorse-tool/         # 工具执行
-│   ├── uhorse-storage/      # 存储层
-│   ├── uhorse-security/     # 安全层
-│   ├── uhorse-scheduler/    # 调度器
-│   ├── uhorse-config/       # 配置管理
-│   └── uhorse-bin/          # 二进制入口
-├── .github/                 # GitHub 配置
-└── docs/                    # 文档
+│   ├── uhorse-core/           # 核心类型和 Trait
+│   ├── uhorse-protocol/       # Hub ↔ Node 协议
+│   ├── uhorse-node-runtime/   # Node 本地运行时
+│   ├── uhorse-node/           # Node 二进制入口
+│   ├── uhorse-hub/            # Hub 二进制入口
+│   ├── uhorse-node-desktop/   # Node Desktop 宿主
+│   ├── uhorse-channel/        # 通道适配器
+│   ├── uhorse-agent/          # 智能体管理
+│   ├── uhorse-llm/            # LLM 抽象层
+│   ├── uhorse-tool/           # 工具执行
+│   ├── uhorse-security/       # 安全与审批
+│   └── uhorse-config/         # 统一配置管理
+├── .github/                   # GitHub 配置
+├── docs/                      # 文档
+└── scripts/                   # 本地联调与回归脚本
 ```
 
 ## 🔐 安全问题

@@ -207,7 +207,7 @@ impl std::fmt::Display for SkillVersion {
 }
 
 /// 优先级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {
     /// 后台任务（最低优先级）
@@ -215,6 +215,7 @@ pub enum Priority {
     /// 低优先级
     Low,
     /// 普通优先级
+    #[default]
     Normal,
     /// 高优先级
     High,
@@ -222,12 +223,6 @@ pub enum Priority {
     Urgent,
     /// 关键任务（最高优先级）
     Critical,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 impl std::fmt::Display for Priority {
@@ -499,7 +494,7 @@ impl TaskContext {
 }
 
 /// 执行指标
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExecutionMetrics {
     /// 执行时间 (ms)
     pub duration_ms: u64,
@@ -518,17 +513,4 @@ pub struct ExecutionMetrics {
 
     /// 网络请求数
     pub network_requests: u64,
-}
-
-impl Default for ExecutionMetrics {
-    fn default() -> Self {
-        Self {
-            duration_ms: 0,
-            cpu_time_ms: 0,
-            peak_memory_mb: 0,
-            bytes_read: 0,
-            bytes_written: 0,
-            network_requests: 0,
-        }
-    }
 }

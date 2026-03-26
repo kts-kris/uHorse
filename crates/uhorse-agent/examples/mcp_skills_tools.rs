@@ -6,10 +6,8 @@ use anyhow::Result;
 use std::sync::Arc;
 use uhorse_agent::{
     mcp::types::{McpContent, McpToolCall, McpToolResult},
-    skills::{
-        Skill, SkillConfig, SkillExecutor, SkillManifestParser, SkillPermission, SkillRegistry,
-    },
-    tools::{builtin_tools, Tool, ToolBuilder, ToolRegistry},
+    skills::{Skill, SkillConfig, SkillExecutor, SkillManifestParser, SkillRegistry},
+    tools::{builtin_tools, ToolBuilder, ToolRegistry},
     AgentError, AgentResult,
 };
 

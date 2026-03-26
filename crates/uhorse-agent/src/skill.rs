@@ -15,7 +15,7 @@
 use crate::error::{AgentError, AgentResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -208,7 +208,7 @@ impl SkillRegistry {
     }
 
     /// 从目录加载单个技能
-    async fn load_skill(dir: &PathBuf) -> AgentResult<Skill> {
+    async fn load_skill(dir: &Path) -> AgentResult<Skill> {
         // 读取 SKILL.md
         let skill_md_path = dir.join("SKILL.md");
         let skill_md_content = tokio::fs::read_to_string(&skill_md_path).await?;
@@ -373,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_skill_registry() {
-        let mut registry = SkillRegistry::new();
+        let registry = SkillRegistry::new();
         assert_eq!(registry.list_names().len(), 0);
     }
 

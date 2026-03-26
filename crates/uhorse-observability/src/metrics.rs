@@ -30,6 +30,18 @@ pub struct MetricsCollector {
     websocket_connections: Arc<RwLock<u64>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct MetricsSnapshot {
+    messages_received: u64,
+    messages_sent: u64,
+    tool_executions: u64,
+    tool_errors: u64,
+    active_sessions: u64,
+    api_requests: u64,
+    api_errors: u64,
+    websocket_connections: u64,
+}
+
 impl MetricsCollector {
     pub fn new() -> Self {
         Self {
@@ -162,6 +174,19 @@ impl MetricsCollector {
         histogram!("uhorse_db_query_duration_ms", "type" => query_type.to_string())
             .record(duration_ms as f64);
     }
+
+    async fn snapshot(&self) -> MetricsSnapshot {
+        MetricsSnapshot {
+            messages_received: self.messages_received.load(Ordering::Relaxed),
+            messages_sent: self.messages_sent.load(Ordering::Relaxed),
+            tool_executions: self.tool_executions.load(Ordering::Relaxed),
+            tool_errors: self.tool_errors.load(Ordering::Relaxed),
+            active_sessions: *self.active_sessions.read().await,
+            api_requests: self.api_requests.load(Ordering::Relaxed),
+            api_errors: self.api_errors.load(Ordering::Relaxed),
+            websocket_connections: *self.websocket_connections.read().await,
+        }
+    }
 }
 
 impl Default for MetricsCollector {
@@ -184,19 +209,41 @@ impl MetricsExporter {
 
     /// 导出 Prometheus 格式指标
     pub async fn export_metrics(&self) -> String {
-        // 简化实现：返回基本指标信息
+        let snapshot = self.collector.snapshot().await;
+
         format!(
-            "# uHorse Metrics\n\
-            # Messages Received: {}\n\
-            # Messages Sent: {}\n\
-            # Tool Executions: {}\n\
-            # Active Sessions: {}\n\
-            # WebSocket Connections: {}\n",
-            self.collector.messages_received.load(Ordering::Relaxed),
-            self.collector.messages_sent.load(Ordering::Relaxed),
-            self.collector.tool_executions.load(Ordering::Relaxed),
-            *self.collector.active_sessions.read().await,
-            *self.collector.websocket_connections.read().await,
+            "# HELP uhorse_messages_received_total Total number of messages received by the hub.\n\
+# TYPE uhorse_messages_received_total counter\n\
+uhorse_messages_received_total {}\n\
+# HELP uhorse_messages_sent_total Total number of messages sent by the hub.\n\
+# TYPE uhorse_messages_sent_total counter\n\
+uhorse_messages_sent_total {}\n\
+# HELP uhorse_tool_executions_total Total number of tool executions.\n\
+# TYPE uhorse_tool_executions_total counter\n\
+uhorse_tool_executions_total {}\n\
+# HELP uhorse_tool_errors_total Total number of tool execution errors.\n\
+# TYPE uhorse_tool_errors_total counter\n\
+uhorse_tool_errors_total {}\n\
+# HELP uhorse_active_sessions Current number of active sessions.\n\
+# TYPE uhorse_active_sessions gauge\n\
+uhorse_active_sessions {}\n\
+# HELP uhorse_api_requests_total Total number of API requests handled by the hub.\n\
+# TYPE uhorse_api_requests_total counter\n\
+uhorse_api_requests_total {}\n\
+# HELP uhorse_api_errors_total Total number of API requests that resulted in errors.\n\
+# TYPE uhorse_api_errors_total counter\n\
+uhorse_api_errors_total {}\n\
+# HELP uhorse_websocket_connections Current number of WebSocket connections.\n\
+# TYPE uhorse_websocket_connections gauge\n\
+uhorse_websocket_connections {}\n",
+            snapshot.messages_received,
+            snapshot.messages_sent,
+            snapshot.tool_executions,
+            snapshot.tool_errors,
+            snapshot.active_sessions,
+            snapshot.api_requests,
+            snapshot.api_errors,
+            snapshot.websocket_connections,
         )
     }
 }
@@ -266,6 +313,10 @@ pub struct Instrumented<T> {
 impl<T> Instrumented<T> {
     pub fn new(inner: T, collector: Arc<MetricsCollector>) -> Self {
         Self { inner, collector }
+    }
+
+    pub fn collector(&self) -> Arc<MetricsCollector> {
+        Arc::clone(&self.collector)
     }
 
     pub fn inner(&self) -> &T {
@@ -429,11 +480,9 @@ impl ExposeMetrics {
     }
 
     pub async fn export(&self) -> String {
-        format!(
-            "# uHorse Metrics\n\
-            # Messages Received: {}\n",
-            self.collector.messages_received.load(Ordering::Relaxed)
-        )
+        MetricsExporter::new(Arc::clone(&self.collector))
+            .export_metrics()
+            .await
     }
 }
 
@@ -491,6 +540,28 @@ mod tests {
         collector.inc_active_sessions().await;
 
         assert_eq!(*collector.active_sessions.read().await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_exporter_returns_prometheus_payload() {
+        let collector = Arc::new(MetricsCollector::new());
+        collector.inc_messages_received("telegram");
+        collector.inc_messages_sent("slack");
+        collector.inc_tool_executions("shell");
+        collector.inc_tool_errors("shell", "timeout");
+        collector.set_active_sessions(2).await;
+        collector.inc_api_requests("/api/health", "GET", 200);
+        collector.inc_api_errors("/api/health", "500");
+        collector.set_websocket_connections(3).await;
+
+        let output = MetricsExporter::new(collector).export_metrics().await;
+
+        assert!(output.contains("# HELP uhorse_messages_received_total"));
+        assert!(output.contains("uhorse_messages_received_total 1"));
+        assert!(output.contains("uhorse_tool_errors_total 1"));
+        assert!(output.contains("uhorse_active_sessions 2"));
+        assert!(output.contains("uhorse_api_requests_total 1"));
+        assert!(output.contains("uhorse_websocket_connections 3"));
     }
 
     #[test]

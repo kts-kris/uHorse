@@ -5,9 +5,7 @@
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
-use uhorse_core::{
-    Channel, ChannelError, ChannelType, Message, MessageContent, Result, UHorseError,
-};
+use uhorse_core::{Channel, ChannelError, ChannelType, Message, MessageContent, Result};
 
 /// 企业微信通道
 #[derive(Debug)]

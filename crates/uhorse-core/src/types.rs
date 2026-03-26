@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 // ============== 会话类型 ==============
 
@@ -18,10 +19,12 @@ impl SessionId {
         Self(uuid::Uuid::new_v4().to_string())
     }
 
-    pub fn from_string(s: String) -> Self {
-        Self(s)
+    /// 使用已有字符串创建会话 ID
+    pub fn from_string(s: impl Into<String>) -> Self {
+        Self(s.into())
     }
 
+    /// 获取内部字符串表示
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -107,27 +110,43 @@ impl Session {
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, strum::Display, strum::EnumIter,
 )]
 pub enum ChannelType {
+    /// Telegram 通道
     Telegram,
+    /// Slack 通道
     Slack,
+    /// Discord 通道
     Discord,
+    /// WhatsApp 通道
     WhatsApp,
+    /// DingTalk 通道
     DingTalk,
+    /// Feishu 通道
     Feishu,
+    /// WeWork 通道
     WeWork,
 }
 
 impl ChannelType {
     /// 从字符串解析
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
+        <Self as FromStr>::from_str(s).ok()
+    }
+}
+
+impl FromStr for ChannelType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "telegram" => Some(ChannelType::Telegram),
-            "slack" => Some(ChannelType::Slack),
-            "discord" => Some(ChannelType::Discord),
-            "whatsapp" => Some(ChannelType::WhatsApp),
-            "dingtalk" | "钉钉" => Some(ChannelType::DingTalk),
-            "feishu" | "飞书" => Some(ChannelType::Feishu),
-            "wework" | "企业微信" | "wecom" => Some(ChannelType::WeWork),
-            _ => None,
+            "telegram" => Ok(ChannelType::Telegram),
+            "slack" => Ok(ChannelType::Slack),
+            "discord" => Ok(ChannelType::Discord),
+            "whatsapp" => Ok(ChannelType::WhatsApp),
+            "dingtalk" | "钉钉" => Ok(ChannelType::DingTalk),
+            "feishu" | "飞书" => Ok(ChannelType::Feishu),
+            "wework" | "企业微信" | "wecom" => Ok(ChannelType::WeWork),
+            _ => Err(()),
         }
     }
 }
@@ -137,24 +156,36 @@ impl ChannelType {
 /// 消息角色
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageRole {
+    /// 用户消息
     User,
+    /// 助手消息
     Assistant,
+    /// 系统消息
     System,
+    /// 工具消息
     Tool,
 }
 
 /// 消息内容
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MessageContent {
+    /// 纯文本内容
     Text(String),
+    /// 图片内容
     Image {
+        /// 图片地址
         url: String,
+        /// 图片说明
         caption: Option<String>,
     },
+    /// 音频内容
     Audio {
+        /// 音频地址
         url: String,
+        /// 音频时长（秒）
         duration: Option<u32>,
     },
+    /// 结构化内容
     Structured(serde_json::Value),
 }
 
@@ -221,10 +252,12 @@ impl Message {
 pub struct ToolId(pub String);
 
 impl ToolId {
+    /// 使用指定字符串创建工具 ID
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
+    /// 获取内部字符串表示
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -281,6 +314,7 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
+    /// 创建新的工具调用请求
     pub fn new(tool_id: ToolId, params: serde_json::Value) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -290,6 +324,7 @@ impl ToolCall {
         }
     }
 
+    /// 设置幂等键
     pub fn with_idempotency(mut self, key: impl Into<String>) -> Self {
         self.idempotency_key = Some(key.into());
         self
@@ -319,6 +354,7 @@ pub struct ToolError {
 }
 
 impl ToolError {
+    /// 创建新的工具错误
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
@@ -327,6 +363,7 @@ impl ToolError {
         }
     }
 
+    /// 设置错误详情
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);
         self
@@ -334,7 +371,7 @@ impl ToolError {
 }
 
 /// 执行上下文
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExecutionContext {
     /// 会话 ID
     pub session_id: SessionId,
@@ -346,17 +383,6 @@ pub struct ExecutionContext {
     pub scopes: Vec<String>,
 }
 
-impl Default for ExecutionContext {
-    fn default() -> Self {
-        Self {
-            session_id: SessionId::default(),
-            user_id: None,
-            device_id: None,
-            scopes: Vec::new(),
-        }
-    }
-}
-
 // ============== 调度类型 ==============
 
 /// 调度任务 ID
@@ -364,10 +390,12 @@ impl Default for ExecutionContext {
 pub struct JobId(pub String);
 
 impl JobId {
+    /// 生成新的调度任务 ID
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
 
+    /// 获取内部字符串表示
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -389,11 +417,20 @@ impl Default for JobId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Schedule {
     /// 在指定时间执行一次
-    At { time: u64 },
+    At {
+        /// 执行时间（Unix 时间戳，秒）
+        time: u64,
+    },
     /// 每隔指定秒数执行
-    Every { duration_secs: u64 },
+    Every {
+        /// 执行间隔（秒）
+        duration_secs: u64,
+    },
     /// Cron 表达式
-    Cron { expression: String },
+    Cron {
+        /// Cron 表达式字符串
+        expression: String,
+    },
 }
 
 /// 调度目标
@@ -401,13 +438,18 @@ pub enum Schedule {
 pub enum JobTarget {
     /// 调用工具
     Tool {
+        /// 目标工具 ID
         id: ToolId,
+        /// 工具参数
         params: serde_json::Value,
     },
     /// 调用插件方法
     Plugin {
+        /// 插件名称
         name: String,
+        /// 插件方法名
         method: String,
+        /// 插件参数
         params: serde_json::Value,
     },
 }
@@ -438,14 +480,17 @@ pub struct ScheduledJob {
 pub struct DeviceId(pub String);
 
 impl DeviceId {
+    /// 生成新的设备 ID
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
 
-    pub fn from_string(s: String) -> Self {
-        Self(s)
+    /// 使用已有字符串创建设备 ID
+    pub fn from_string(s: impl Into<String>) -> Self {
+        Self(s.into())
     }
 
+    /// 获取内部字符串表示
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -525,39 +570,61 @@ pub struct AccessToken {
 #[repr(i32)]
 pub enum ErrorCode {
     // ============== 通用错误 (1-99) ==============
+    /// 未知错误
     Unknown = 1,
+    /// 内部错误
     InternalError = 2,
+    /// 功能尚未实现
     NotImplemented = 3,
 
     // ============== 协议错误 (100-199) ==============
+    /// 消息格式无效
     InvalidMessage = 100,
+    /// 协议版本不受支持
     UnsupportedVersion = 101,
+    /// 握手失败
     HandshakeFailed = 102,
 
     // ============== 认证错误 (200-299) ==============
+    /// 未授权访问
     Unauthorized = 200,
+    /// 令牌已过期
     TokenExpired = 201,
+    /// 令牌无效
     InvalidToken = 202,
+    /// 设备未配对
     DeviceNotPaired = 203,
 
     // ============== 会话错误 (300-399) ==============
+    /// 会话不存在
     SessionNotFound = 300,
+    /// 会话已过期
     SessionExpired = 301,
+    /// 会话已隔离
     SessionIsolated = 302,
 
     // ============== 工具错误 (400-499) ==============
+    /// 工具不存在
     ToolNotFound = 400,
+    /// 工具权限不足
     ToolPermissionDenied = 401,
+    /// 工具参数校验失败
     ToolValidationFailed = 402,
+    /// 工具执行失败
     ToolExecutionFailed = 403,
 
     // ============== 调度错误 (500-599) ==============
+    /// 调度任务不存在
     JobNotFound = 500,
+    /// 调度任务执行失败
     JobExecutionFailed = 501,
+    /// 调度规则冲突
     ScheduleConflict = 502,
 
     // ============== 幂等性错误 (600-699) ==============
+    /// 幂等键冲突
     IdempotencyConflict = 600,
+    /// 幂等键已过期
     IdempotencyKeyExpired = 601,
 }
 
@@ -616,11 +683,18 @@ impl ErrorCode {
 /// 错误类别
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCategory {
+    /// 通用错误
     General,
+    /// 协议错误
     Protocol,
+    /// 认证错误
     Auth,
+    /// 会话错误
     Session,
+    /// 工具错误
     Tool,
+    /// 调度错误
     Scheduler,
+    /// 幂等性错误
     Idempotency,
 }

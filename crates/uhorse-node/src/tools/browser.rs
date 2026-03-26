@@ -5,10 +5,15 @@
 use crate::error::{NodeError, NodeResult};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+#[cfg(feature = "browser")]
 use std::sync::Arc;
+#[cfg(feature = "browser")]
 use std::time::Duration;
+#[cfg(feature = "browser")]
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+#[cfg(feature = "browser")]
+use tracing::debug;
+use tracing::info;
 use uhorse_protocol::{BrowserCommand, CommandOutput};
 
 /// 浏览器配置

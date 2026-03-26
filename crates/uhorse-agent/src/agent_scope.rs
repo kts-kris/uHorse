@@ -368,6 +368,11 @@ impl AgentManager {
         })
     }
 
+    /// 获取基础目录。
+    pub fn base_dir(&self) -> &Path {
+        &self.base_dir
+    }
+
     /// 注册 Agent 作用域
     pub fn register_scope(&mut self, scope: Arc<AgentScope>) -> AgentResult<()> {
         let agent_id = scope.config().agent_id.clone();
@@ -407,8 +412,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn create_scope() -> AgentScope {
-        let tempdir = tempdir().unwrap();
-        let workspace_dir = tempdir.into_path();
+        let workspace_dir = tempdir().unwrap().keep();
 
         AgentScope::new(AgentScopeConfig {
             agent_id: "test".to_string(),

@@ -1,104 +1,67 @@
 #!/bin/bash
-# uHorse 简化启动脚本
-set -e
+set -euo pipefail
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-RED='\033[0;31m'
-NC='\033[0m'
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_ROOT"
 
-pass() { echo -e "${GREEN}✓${NC} $1"; }
-info() { echo -e "${YELLOW}→${NC} $1"; }
-fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
+PID_FILE=".uhorse-hub.pid"
+LOG_FILE="logs/uhorse-hub.log"
+HOST="${UHORSE_HUB_HOST:-127.0.0.1}"
+PORT="${UHORSE_HUB_PORT:-8765}"
+LOG_LEVEL="${UHORSE_HUB_LOG_LEVEL:-info}"
+HEALTH_URL="http://127.0.0.1:${PORT}/api/health"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  uHorse 一键启动"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
+pass() { echo "[ok] $1"; }
+info() { echo "[info] $1"; }
+fail() { echo "[error] $1"; exit 1; }
 
-# 1. 确保配置文件存在
-if [ ! -f config.toml ]; then
-    info "创建配置文件..."
-    cat > config.toml << 'EOF'
-[server]
-host = "127.0.0.1"
-port = 8080
+mkdir -p logs
 
-[channels]
-enabled = []
-
-[database]
-path = "./data/uhorse.db"
-
-[security]
-jwt_secret = "dev-secret"
-token_expiry = 86400
-EOF
-    pass "配置文件已创建"
+if [ -f "$PID_FILE" ]; then
+    PID="$(cat "$PID_FILE")"
+    if kill -0 "$PID" 2>/dev/null; then
+        pass "uHorse Hub 已在运行 (PID: $PID)"
+        info "健康检查：$HEALTH_URL"
+        exit 0
+    fi
+    rm -f "$PID_FILE"
 fi
 
-# 2. 确保数据目录存在
-mkdir -p data logs
-pass "数据目录已就绪"
-
-# 3. 检查二进制文件
-if [ ! -f target/release/uhorse ]; then
-    info "编译项目..."
-    cargo build --release 2>&1 | tail -3
+if [ ! -x "./target/release/uhorse-hub" ]; then
+    info "编译 uhorse-hub release 二进制..."
+    cargo build --release -p uhorse-hub
 fi
-pass "二进制文件就绪"
 
-# 4. 停止已有进程
-pkill -f "target/release/uhorse" 2>/dev/null || true
-sleep 1
+info "启动 uHorse Hub..."
+./target/release/uhorse-hub --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL" >"$LOG_FILE" 2>&1 &
+PID=$!
+echo "$PID" > "$PID_FILE"
 
-# 5. 启动服务
-info "启动 uHorse..."
-./target/release/uhorse > uhorse.log 2>&1 &
-UHORSE_PID=$!
-echo "  PID: $UHORSE_PID"
+if ! command -v curl >/dev/null 2>&1; then
+    pass "uHorse Hub 已启动 (PID: $PID)"
+    info "日志文件：$LOG_FILE"
+    info "健康检查：$HEALTH_URL"
+    exit 0
+fi
 
-# 6. 等待服务就绪
-info "等待服务启动..."
-for i in {1..15}; do
-    if curl -sf http://localhost:8080/health/live > /dev/null 2>&1; then
-        echo ""
-        pass "uHorse 启动成功！"
-        echo ""
-        break
+for _ in {1..20}; do
+    if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+        pass "uHorse Hub 已启动 (PID: $PID)"
+        info "日志文件：$LOG_FILE"
+        info "健康检查：$HEALTH_URL"
+        info "Node 连接地址：ws://127.0.0.1:${PORT}/ws"
+        exit 0
     fi
-    if [ $i -eq 15 ]; then
-        echo ""
-        fail "启动超时！查看日志:"
-        echo ""
-        tail -20 uhorse.log
+
+    if ! kill -0 "$PID" 2>/dev/null; then
+        rm -f "$PID_FILE"
+        tail -n 20 "$LOG_FILE" 2>/dev/null || true
+        fail "uHorse Hub 启动失败"
     fi
-    echo -n "."
+
     sleep 1
 done
 
-# 7. 显示状态
-echo -e "${CYAN}服务信息:${NC}"
-HEALTH=$(curl -s http://localhost:8080/health/live)
-echo "$HEALTH" | jq '.' 2>/dev/null || echo "$HEALTH"
-echo ""
-
-echo -e "${CYAN}服务地址:${NC}"
-echo "  🌐  API:       http://localhost:8080"
-echo "  ❤️  Health:    http://localhost:8080/health/live"
-echo "  📊 Metrics:   http://localhost:8080/metrics"
-echo "  🔌 WebSocket: ws://localhost:8080/ws"
-echo ""
-
-echo -e "${CYAN}常用命令:${NC}"
-echo "  查看日志:   tail -f uhorse.log"
-echo "  停止服务:   pkill -f uhorse"
-echo "  重启服务:   ./start.sh"
-echo "  前台运行:  ./run.sh"
-echo ""
-
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  🎉 uHorse 运行中 (PID: $UHORSE_PID)${NC}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
+tail -n 20 "$LOG_FILE" 2>/dev/null || true
+rm -f "$PID_FILE"
+fail "uHorse Hub 启动超时"

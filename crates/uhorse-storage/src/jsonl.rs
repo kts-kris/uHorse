@@ -5,7 +5,7 @@
 use std::path::Path;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tracing::{debug, instrument};
+use tracing::instrument;
 use uhorse_core::Result;
 
 /// JSONL 日志记录器

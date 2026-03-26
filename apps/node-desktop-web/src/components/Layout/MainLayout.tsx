@@ -65,7 +65,7 @@ const MainLayout: React.FC = () => {
         >
           <Space>
             <Typography.Title level={5} style={{ margin: 0 }}>
-              Node Desktop MVP
+              uHorse Node
             </Typography.Title>
             <Tag color="processing">预览</Tag>
           </Space>

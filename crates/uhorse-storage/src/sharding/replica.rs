@@ -1,6 +1,6 @@
 //! Read-write splitting and replica management
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -53,8 +53,6 @@ pub struct ReplicaManager {
     replicas: Arc<RwLock<Vec<ReplicaInfo>>>,
     /// Maximum allowed lag for reads (seconds)
     max_lag_seconds: f64,
-    /// Health check interval in seconds
-    health_check_interval: u64,
 }
 
 impl ReplicaManager {
@@ -73,7 +71,6 @@ impl ReplicaManager {
         Self {
             replicas: Arc::new(RwLock::new(replicas)),
             max_lag_seconds,
-            health_check_interval: 30,
         }
     }
 

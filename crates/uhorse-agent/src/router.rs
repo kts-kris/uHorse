@@ -2,9 +2,7 @@
 //!
 //! 负责将消息路由到正确的 Agent。
 
-use crate::error::{AgentError, AgentResult};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use crate::error::AgentResult;
 
 /// 路由目标
 #[derive(Debug, Clone)]
@@ -17,8 +15,11 @@ pub enum RouteTarget {
     Multiple(Vec<String>),
     /// 条件路由
     Conditional {
+        /// 条件表达式。
         condition: String,
+        /// 条件成立时的目标。
         then: String,
+        /// 条件不成立时的目标。
         r#else: String,
     },
 }
@@ -98,7 +99,7 @@ impl Router {
     pub async fn route_by_intent(
         &self,
         message: &str,
-        llm: Option<&dyn uhorse_llm::LLMClient>,
+        _llm: Option<&dyn uhorse_llm::LLMClient>,
     ) -> AgentResult<RouteTarget> {
         // 简化实现：检查是否有意图匹配的路由
         for route in &self.routes {

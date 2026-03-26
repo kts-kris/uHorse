@@ -74,11 +74,11 @@ impl DoctorCommand {
         // Check 6: Ports
         output::step("Checking port availability...");
         if Self::check_ports() {
-            output::success("Port 8080 is available");
+            output::success("Port 8765 is available");
             passed += 1;
         } else {
-            issues.push("Port 8080 is in use. Stop conflicting services or change port.");
-            output::warning("Port 8080 is in use");
+            issues.push("Port 8765 is in use. Stop conflicting services or change port.");
+            output::warning("Port 8765 is in use");
         }
 
         // Check 7: Write permissions
@@ -155,7 +155,7 @@ impl DoctorCommand {
 
     fn check_ports() -> bool {
         use std::net::TcpListener;
-        TcpListener::bind("127.0.0.1:8080").is_ok()
+        TcpListener::bind("127.0.0.1:8765").is_ok()
     }
 
     fn check_permissions() -> bool {
@@ -250,7 +250,12 @@ impl InitCommand {
         use std::fs;
         let config = r#"[server]
 host = "127.0.0.1"
-port = 8080
+port = 8765
+
+[server.health]
+enabled = true
+path = "/api/health"
+verbose = false
 
 [database]
 path = "./data/uhorse.db"
@@ -262,6 +267,9 @@ model = "gpt-4"
 
 [channels]
 enabled = []
+
+[observability]
+service_name = "uhorse-hub"
 "#;
         fs::write(format!("{}/config.toml", name), config)
     }
@@ -335,7 +343,7 @@ impl TutorialCommand {
         println!("  {} Quick Start:", "→".cyan());
         println!("    1. Run {} to configure", "uhorse wizard".yellow());
         println!("    2. Run {} to start", "uhorse start".yellow());
-        println!("    3. Test with {}", "curl http://localhost:8080/health".yellow());
+        println!("    3. Test with {}", "curl http://localhost:8765/api/health".yellow());
         println!();
 
         if interactive::confirm("Try it now?")? {

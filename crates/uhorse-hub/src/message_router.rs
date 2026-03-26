@@ -6,8 +6,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
+use uhorse_channel::DingTalkChannel;
+use uhorse_config::DingTalkNotificationBinding;
+use uhorse_core::{Channel, MessageContent};
 use uhorse_protocol::{
-    CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub, TaskId,
+    CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub,
+    NotificationEventKind, TaskId,
 };
 use uhorse_security::ApprovalLevel;
 
@@ -26,16 +30,32 @@ pub struct MessageRouter {
     node_manager: Arc<NodeManager>,
     /// 任务调度器
     task_scheduler: Arc<TaskScheduler>,
+    /// DingTalk 通道
+    dingtalk_channel: Option<Arc<DingTalkChannel>>,
+    /// 节点通知绑定
+    notification_bindings: Arc<HashMap<String, String>>,
     /// 节点消息发送器映射 (用于 WebSocket 连接)
     node_senders: Arc<RwLock<HashMap<NodeId, mpsc::Sender<HubToNode>>>>,
 }
 
 impl MessageRouter {
     /// 创建新的消息路由器
-    pub fn new(node_manager: Arc<NodeManager>, task_scheduler: Arc<TaskScheduler>) -> Self {
+    pub fn new(
+        node_manager: Arc<NodeManager>,
+        task_scheduler: Arc<TaskScheduler>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        notification_bindings: Vec<DingTalkNotificationBinding>,
+    ) -> Self {
         Self {
             node_manager,
             task_scheduler,
+            dingtalk_channel,
+            notification_bindings: Arc::new(
+                notification_bindings
+                    .into_iter()
+                    .map(|binding| (binding.node_id, binding.user_id))
+                    .collect(),
+            ),
             node_senders: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -192,6 +212,32 @@ impl MessageRouter {
                 );
             }
 
+            NodeToHub::NotificationEvent { event, .. } => {
+                let event_kind = Self::notification_kind_name(event.kind.clone());
+
+                let detail_mode = if event.details_included {
+                    "details_included"
+                } else {
+                    "summary_only"
+                };
+
+                let dedupe_key = event.dedupe_key.as_deref().unwrap_or("-");
+
+                if let Err(error) = self.forward_notification_to_dingtalk(node_id, &event).await {
+                    warn!(
+                        node_id = %node_id,
+                        event_id = %event.event_id,
+                        event_kind,
+                        detail_mode,
+                        dedupe_key,
+                        title = %event.title,
+                        body = %event.body,
+                        error = %error,
+                        "Failed to mirror node notification event to DingTalk"
+                    );
+                }
+            }
+
             NodeToHub::Unregister {
                 node_id: unregister_node_id,
                 reason,
@@ -233,6 +279,61 @@ impl MessageRouter {
             .to_std()
             .map(|duration| duration.as_secs().max(1))
             .unwrap_or(1)
+    }
+
+    fn notification_kind_name(kind: NotificationEventKind) -> &'static str {
+        match kind {
+            NotificationEventKind::Test => "test",
+            NotificationEventKind::Info => "info",
+            NotificationEventKind::Warn => "warn",
+            NotificationEventKind::Error => "error",
+        }
+    }
+
+    async fn forward_notification_to_dingtalk(
+        &self,
+        node_id: &NodeId,
+        event: &uhorse_protocol::NotificationEvent,
+    ) -> HubResult<()> {
+        let Some(channel) = self.dingtalk_channel.as_ref() else {
+            return Ok(());
+        };
+
+        let Some(user_id) = self.notification_bindings.get(node_id.as_str()) else {
+            warn!(
+                node_id = %node_id,
+                event_id = %event.event_id,
+                "Received node notification event but no Hub-side DingTalk recipient binding is configured yet"
+            );
+            return Ok(());
+        };
+
+        channel
+            .send_message(
+                user_id,
+                &MessageContent::Text(Self::render_notification_message(node_id, event)),
+            )
+            .await
+            .map_err(|error| {
+                HubError::Communication(format!("Failed to send DingTalk notification: {}", error))
+            })
+    }
+
+    fn render_notification_message(
+        node_id: &NodeId,
+        event: &uhorse_protocol::NotificationEvent,
+    ) -> String {
+        let kind = match event.kind {
+            NotificationEventKind::Test => "测试",
+            NotificationEventKind::Info => "信息",
+            NotificationEventKind::Warn => "警告",
+            NotificationEventKind::Error => "错误",
+        };
+
+        format!(
+            "[uHorse 节点通知]\n类型：{}\n节点：{}\n标题：{}\n内容：{}",
+            kind, node_id, event.title, event.body
+        )
     }
 
     /// 向节点发送消息
@@ -290,5 +391,45 @@ impl MessageRouter {
         self.task_scheduler.cancel_task(task_id).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uhorse_protocol::{MessageId, NotificationEvent};
+
+    #[test]
+    fn test_render_notification_message_includes_node_and_content() {
+        let node_id = NodeId::from_string("node-desktop-test");
+        let event = NotificationEvent::new(NotificationEventKind::Warn, "标题", "内容", true);
+
+        let message = MessageRouter::render_notification_message(&node_id, &event);
+        assert!(message.contains("node-desktop-test"));
+        assert!(message.contains("标题"));
+        assert!(message.contains("内容"));
+        assert!(message.contains("警告"));
+    }
+
+    #[tokio::test]
+    async fn test_notification_without_binding_is_ignored() {
+        let node_manager = Arc::new(NodeManager::new(10, 30));
+        let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
+        let router = MessageRouter::new(node_manager, Arc::new(task_scheduler), None, vec![]);
+        let node_id = NodeId::from_string("node-desktop-test");
+        let event = NotificationEvent::new(NotificationEventKind::Info, "标题", "内容", true);
+
+        router
+            .route_node_message(
+                &node_id,
+                NodeToHub::NotificationEvent {
+                    message_id: MessageId::new(),
+                    node_id: node_id.clone(),
+                    event,
+                },
+                None,
+            )
+            .await
+            .unwrap();
     }
 }

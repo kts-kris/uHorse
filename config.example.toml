@@ -1,66 +1,105 @@
-# uHorse AI Gateway 配置示例
+# uHorse Hub 统一配置示例
+# 当前主线路径：uhorse-hub + uhorse-node
+# 实际健康检查路由：GET /api/health
+# 实际 Prometheus 指标路由：GET /metrics
 
 [server]
 # 服务监听地址
 host = "0.0.0.0"
 # 服务监听端口
-port = 8080
+port = 8765
 # 最大连接数
 max_connections = 1000
-# WebSocket 超时时间（秒）
-websocket_timeout = 300
+# 请求超时（秒）
+request_timeout = 30
+# 读取超时（秒）
+read_timeout = 10
+# 写入超时（秒）
+write_timeout = 10
+
+[server.health]
+# 是否启用健康检查端点
+enabled = true
+# 当前主线统一使用 /api/health
+path = "/api/health"
+# 是否暴露详细状态
+verbose = false
 
 [database]
 # SQLite 数据库路径
 path = "./data/uhorse.db"
 # 连接池大小
 pool_size = 10
+# 连接超时（秒）
+conn_timeout = 30
+# 是否启用 WAL
+wal_enabled = true
+# 是否启用外键约束
+fk_enabled = true
 
 [channels]
-# 启用的通道
-enabled = ["telegram"]
+# 当前主线推荐使用 DingTalk Stream
+enabled = ["dingtalk"]
 
-# Telegram 配置
-[channels.telegram]
-# 从环境变量读取: TELEGRAM_BOT_TOKEN
-bot_token = "${TELEGRAM_BOT_TOKEN}"
-# Webhook URL（可选）
-webhook_url = "/webhook/telegram"
+[channels.dingtalk]
+app_key = "your-app-key"
+app_secret = "your-app-secret"
+agent_id = 123456789
+
+# 如果要把 Node Desktop 本地通知镜像到钉钉，
+# 还需要把稳定 node_id 绑定到 DingTalk user_id。
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 
 [security]
-# JWT 密钥（从环境变量读取）
-jwt_secret = "${JWT_SECRET:your-secret-key-change-this}"
-# 令牌过期时间（秒）
+# 生产环境请替换为至少 32 个字符的随机密钥
+jwt_secret = "replace-with-a-random-secret-at-least-32-chars"
+# Access token 过期时间（秒）
 token_expiry = 86400
-# 是否需要设备配对
-device_pairing_required = false
-# 幂等性 TTL（秒）
-idempotency_ttl = 3600
+# Refresh token 过期时间（秒），必须大于 token_expiry
+refresh_token_expiry = 2592000
+# 设备配对码过期时间（秒），建议不超过 600
+pairing_expiry = 300
+# 是否启用审批流程
+approval_enabled = true
+# 是否启用设备配对
+pairing_enabled = true
 
-[scheduler]
-# 是否启用调度器
-enabled = true
-# 最大并发任务数
-max_concurrent_jobs = 10
-# 任务超时时间（秒）
-job_timeout = 300
+[logging]
+level = "info"
+format = "pretty"
+output = "stdout"
+ansi = true
+file = true
+line = true
+target = true
 
 [observability]
-# 日志级别: trace, debug, info, warn, error
-log_level = "info"
-# 是否启用 tracing
-tracing_enabled = false
-# tracing 端点（可选）
-# tracing_endpoint = "http://jaeger:4318"
-# 是否启用 metrics
-metrics_enabled = false
-# metrics 端口
-# metrics_port = 9090
+service_name = "uhorse-hub"
+tracing_enabled = true
+metrics_enabled = true
+# 可选：启用 OTLP 导出时再取消注释
+# otlp_endpoint = "http://127.0.0.1:4317"
+# 注意：当前 Hub 仍通过主 HTTP 端口上的 /metrics 暴露 Prometheus 指标。
+metrics_port = 9090
 
-[plugins]
-# 插件目录
-plugin_dir = "./plugins"
-# 进程插件超时（秒）
-process_timeout = 30
-# 是否启用 WASM 插件
-wasm_enabled = false
+[scheduler]
+enabled = true
+threads = 2
+max_concurrent_jobs = 100
+
+[tools]
+sandbox_enabled = true
+sandbox_timeout = 30
+sandbox_max_memory = 512
+
+[llm]
+enabled = false
+provider = "openai"
+api_key = ""
+base_url = "https://api.openai.com/v1"
+model = "gpt-3.5-turbo"
+temperature = 0.7
+max_tokens = 2000
+system_prompt = "You are a helpful AI assistant for uHorse, a multi-channel AI gateway."

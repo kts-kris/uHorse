@@ -189,7 +189,6 @@ impl MigrationManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sharding::strategy::ShardingConfig;
 
     #[tokio::test]
     async fn test_migration_step_creation() {

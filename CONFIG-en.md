@@ -98,7 +98,7 @@ write_timeout = 10
 
 [server.health]
 enabled = true
-path = "/health"
+path = "/api/health"
 verbose = false
 
 [database]
@@ -115,6 +115,10 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 
 [security]
 jwt_secret = "replace-with-random-secret"
@@ -137,7 +141,7 @@ target = true
 service_name = "uhorse-hub"
 tracing_enabled = true
 metrics_enabled = true
-otlp_endpoint = ""
+# otlp_endpoint = "http://127.0.0.1:4317"
 metrics_port = 9090
 
 [scheduler]
@@ -290,12 +294,17 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 ```
 
 ### Notes
 
 - The main runtime path is **Stream mode** and does not depend on a public webhook to receive inbound messages.
 - Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
+- To mirror Node Desktop local notifications to DingTalk, also configure a stable `node_id` to DingTalk `user_id` mapping in `channels.dingtalk.notification_bindings`.
 - DingTalk text is first planned by the LLM into a single `FileCommand` or `ShellCommand`.
 - Hub validates path scope locally before dispatch and rejects dangerous git commands.
 

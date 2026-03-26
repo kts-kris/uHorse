@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 use uhorse_core::{DeviceId, DeviceInfo, DeviceManager, Result, UHorseError};
 use uuid::Uuid;
 
@@ -146,7 +146,7 @@ impl DevicePairingManager {
         device_name: String,
         device_type: String,
     ) -> Result<PairingRequest> {
-        let mut request = PairingRequest::new(device_id.clone(), device_name, device_type);
+        let request = PairingRequest::new(device_id.clone(), device_name, device_type);
 
         // 先注册设备
         let device_info = DeviceInfo {
@@ -200,7 +200,7 @@ impl DevicePairingManager {
             }
 
             // 过期后清理
-            if let Some(mut req) = requests.write().await.get_mut(&req_id) {
+            if let Some(req) = requests.write().await.get_mut(&req_id) {
                 if req.status == PairingStatus::Pending
                     || req.status == PairingStatus::AwaitingConfirmation
                 {
@@ -268,7 +268,6 @@ impl DevicePairingManager {
             );
 
             // 清理配对请求
-            codes.clone(); // 释放锁
             drop(codes);
             self.code_to_request.write().await.remove(code);
 
@@ -400,6 +399,81 @@ impl DevicePairingManager {
 impl Default for DevicePairingManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl DeviceManager for DevicePairingManager {
+    async fn register_device(&self, device: &DeviceInfo) -> Result<()> {
+        self.devices
+            .write()
+            .await
+            .insert(device.id.clone(), device.clone());
+        Ok(())
+    }
+
+    async fn get_device(&self, id: &DeviceId) -> Result<Option<DeviceInfo>> {
+        Ok(self.devices.read().await.get(id).cloned())
+    }
+
+    async fn update_device(&self, device: &DeviceInfo) -> Result<()> {
+        self.devices
+            .write()
+            .await
+            .insert(device.id.clone(), device.clone());
+        Ok(())
+    }
+
+    async fn delete_device(&self, id: &DeviceId) -> Result<()> {
+        self.devices.write().await.remove(id);
+        Ok(())
+    }
+
+    async fn pair_device(&self, id: &DeviceId) -> Result<()> {
+        let mut devices = self.devices.write().await;
+        if let Some(device) = devices.get_mut(id) {
+            let mut updated = device.clone();
+            updated.paired = true;
+            updated.paired_at = Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
+            *device = updated;
+            info!("Device paired via direct pair: {}", id.0);
+            Ok(())
+        } else {
+            Err(UHorseError::DeviceNotPaired(id.clone()))
+        }
+    }
+
+    async fn unpair_device(&self, id: &DeviceId) -> Result<()> {
+        let mut devices = self.devices.write().await;
+        if let Some(device) = devices.get_mut(id) {
+            let mut updated = device.clone();
+            updated.paired = false;
+            updated.paired_at = None;
+            *device = updated;
+            info!("Device unpaired: {}", id.0);
+            Ok(())
+        } else {
+            Err(UHorseError::DeviceNotPaired(id.clone()))
+        }
+    }
+
+    async fn update_last_seen(&self, id: &DeviceId, timestamp: u64) -> Result<()> {
+        let mut devices = self.devices.write().await;
+        if let Some(device) = devices.get_mut(id) {
+            let mut updated = device.clone();
+            updated.last_seen = timestamp;
+            *device = updated;
+        }
+        Ok(())
+    }
+
+    async fn list_devices(&self) -> Result<Vec<DeviceInfo>> {
+        Ok(self.devices.read().await.values().cloned().collect())
     }
 }
 
@@ -667,80 +741,5 @@ mod tests {
 
         let paired = manager.get_device(&device_id).await.unwrap().unwrap();
         assert!(paired.paired);
-    }
-}
-
-#[async_trait::async_trait]
-impl DeviceManager for DevicePairingManager {
-    async fn register_device(&self, device: &DeviceInfo) -> Result<()> {
-        self.devices
-            .write()
-            .await
-            .insert(device.id.clone(), device.clone());
-        Ok(())
-    }
-
-    async fn get_device(&self, id: &DeviceId) -> Result<Option<DeviceInfo>> {
-        Ok(self.devices.read().await.get(id).cloned())
-    }
-
-    async fn update_device(&self, device: &DeviceInfo) -> Result<()> {
-        self.devices
-            .write()
-            .await
-            .insert(device.id.clone(), device.clone());
-        Ok(())
-    }
-
-    async fn delete_device(&self, id: &DeviceId) -> Result<()> {
-        self.devices.write().await.remove(id);
-        Ok(())
-    }
-
-    async fn pair_device(&self, id: &DeviceId) -> Result<()> {
-        let mut devices = self.devices.write().await;
-        if let Some(device) = devices.get_mut(id) {
-            let mut updated = device.clone();
-            updated.paired = true;
-            updated.paired_at = Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            );
-            *device = updated;
-            info!("Device paired via direct pair: {}", id.0);
-            Ok(())
-        } else {
-            Err(UHorseError::DeviceNotPaired(id.clone()))
-        }
-    }
-
-    async fn unpair_device(&self, id: &DeviceId) -> Result<()> {
-        let mut devices = self.devices.write().await;
-        if let Some(device) = devices.get_mut(id) {
-            let mut updated = device.clone();
-            updated.paired = false;
-            updated.paired_at = None;
-            *device = updated;
-            info!("Device unpaired: {}", id.0);
-            Ok(())
-        } else {
-            Err(UHorseError::DeviceNotPaired(id.clone()))
-        }
-    }
-
-    async fn update_last_seen(&self, id: &DeviceId, timestamp: u64) -> Result<()> {
-        let mut devices = self.devices.write().await;
-        if let Some(device) = devices.get_mut(id) {
-            let mut updated = device.clone();
-            updated.last_seen = timestamp;
-            *device = updated;
-        }
-        Ok(())
-    }
-
-    async fn list_devices(&self) -> Result<Vec<DeviceInfo>> {
-        Ok(self.devices.read().await.values().cloned().collect())
     }
 }

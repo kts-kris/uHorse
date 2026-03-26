@@ -1,45 +1,42 @@
 #!/bin/bash
-# uHorse 停止脚本
+set -euo pipefail
 
-set -e
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_ROOT"
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+PID_FILE=".uhorse-hub.pid"
 
-pass() { echo -e "${GREEN}✓${NC} $1"; }
-fail() { echo -e "${RED}✗${NC} $1"; }
-info() { echo -e "${YELLOW}→${NC} $1"; }
+stop_pid() {
+    local pid="$1"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  停止 uHorse 服务"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
+    if ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
 
-# 停止应用进程
-info "查找 uHorse 进程..."
-UHORSE_PID=$(pgrep -f "uhorse" | grep -v "grep\|start.sh" | head -1 || true)
+    kill "$pid"
+    for _ in {1..10}; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
 
-if [ -n "$UHORSE_PID" ]; then
-    info "停止 uHorse (PID: $UHORSE_PID)..."
-    kill $UHORSE_PID
-    pass "uHorse 已停止"
-else
-    info "未找到运行中的 uHorse 进程"
+    kill -9 "$pid" 2>/dev/null || true
+}
+
+if [ -f "$PID_FILE" ]; then
+    PID="$(cat "$PID_FILE")"
+    stop_pid "$PID"
+    rm -f "$PID_FILE"
+    echo "[ok] 已停止 uHorse Hub (PID: $PID)"
+    exit 0
 fi
 
-# 停止依赖服务（可选）
-echo ""
-read -p "是否停止 PostgreSQL 和 Redis? [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    info "停止依赖服务..."
-    docker-compose down
-    pass "依赖服务已停止"
-else
-    info "保持依赖服务运行"
+PID="$(pgrep -f "target/release/uhorse-hub|cargo run --release -p uhorse-hub" | head -n 1 || true)"
+if [ -n "$PID" ]; then
+    stop_pid "$PID"
+    echo "[ok] 已停止 uHorse Hub (PID: $PID)"
+    exit 0
 fi
 
-echo ""
-pass "操作完成"
+echo "[info] 未找到运行中的 uHorse Hub"

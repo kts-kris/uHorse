@@ -2,14 +2,14 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Sharding strategy types
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ShardingStrategy {
     /// Shard by tenant ID
     /// Each tenant's data is stored in a specific shard
+    #[default]
     TenantBased,
     /// Shard by hash of user ID
     /// Distributes data evenly across shards using consistent hashing
@@ -17,12 +17,6 @@ pub enum ShardingStrategy {
     /// Shard by time range
     /// Useful for time-series data or log-based storage
     RangeBased,
-}
-
-impl Default for ShardingStrategy {
-    fn default() -> Self {
-        Self::TenantBased
-    }
 }
 
 impl std::str::FromStr for ShardingStrategy {

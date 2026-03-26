@@ -27,18 +27,13 @@ pub struct TlsConfig {
 }
 
 /// TLS version
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TlsVersion {
     /// TLS 1.2
     V1_2,
     /// TLS 1.3
+    #[default]
     V1_3,
-}
-
-impl Default for TlsVersion {
-    fn default() -> Self {
-        Self::V1_3
-    }
 }
 
 /// Cipher suite configuration

@@ -98,7 +98,7 @@ write_timeout = 10
 
 [server.health]
 enabled = true
-path = "/health"
+path = "/api/health"
 verbose = false
 
 [database]
@@ -115,6 +115,10 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 
 [security]
 jwt_secret = "replace-with-random-secret"
@@ -137,7 +141,7 @@ target = true
 service_name = "uhorse-hub"
 tracing_enabled = true
 metrics_enabled = true
-otlp_endpoint = ""
+# otlp_endpoint = "http://127.0.0.1:4317"
 metrics_port = 9090
 
 [scheduler]
@@ -290,12 +294,17 @@ enabled = ["dingtalk"]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 ```
 
 ### 说明
 
 - 当前主路径是 **Stream 模式**，不依赖公网 webhook 才能接收消息。
 - Hub 仍保留 `GET/POST /api/v1/channels/dingtalk/webhook` 路由，用于兼容或辅助测试。
+- 若要镜像 Node Desktop 本地通知到钉钉，还需要在 `channels.dingtalk.notification_bindings` 中配置稳定 `node_id` 到 DingTalk `user_id` 的映射。
 - DingTalk 文本会先经过 LLM 规划，再转换为单个 `FileCommand` 或 `ShellCommand`。
 - Hub 会在本地下发前校验路径范围，并拒绝危险 git 命令。
 

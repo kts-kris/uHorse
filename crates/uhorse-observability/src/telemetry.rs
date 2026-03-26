@@ -2,7 +2,6 @@
 //!
 //! 完整的分布式追踪、metrics 和日志集成。
 
-use std::io;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// OpenTelemetry 配置
@@ -67,13 +66,16 @@ impl OtelConfig {
 
 /// 初始化 OpenTelemetry
 pub fn init_observability(config: OtelConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let env_filter = EnvFilter::new(&config.env_filter);
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.env_filter));
 
     // 创建格式化层
     let fmt_layer = fmt::layer()
         .with_target(true)
         .with_thread_ids(true)
-        .with_level(true);
+        .with_level(true)
+        .with_file(true)
+        .with_line_number(true);
 
     // 创建 subscriber
     tracing_subscriber::registry()

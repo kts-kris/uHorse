@@ -9,7 +9,6 @@
 use crate::error::{AgentError, AgentResult};
 use crate::mcp::types::{McpContent, McpTool, McpToolCall, McpToolResult};
 use crate::skills::{Skill, SkillRegistry};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;

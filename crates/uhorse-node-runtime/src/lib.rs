@@ -20,6 +20,7 @@ pub use executor::{CommandExecutor, ExecutionContext};
 pub use node::{Node, NodeConfig};
 pub use permission::{PermissionManager, PermissionResult, PermissionRule};
 pub use status::{Metrics, StatusReporter};
+pub use uhorse_protocol::{NodeId, NotificationEvent, NotificationEventKind};
 pub use versioning::{
     CheckpointRecord, DiffTarget, FileChangeKind, RestorePreview, RestoreResult, VersionManager,
     VersionStatusEntry, WorkspaceDiff, WorkspaceVersionStatus,

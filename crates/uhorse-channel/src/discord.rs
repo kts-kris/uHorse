@@ -7,18 +7,14 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, instrument, warn};
-use uhorse_core::{
-    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    SessionId, UHorseError,
-};
+use tracing::{debug, info, instrument};
+use uhorse_core::{Channel, ChannelError, ChannelType, MessageContent, Result, UHorseError};
 
 /// Discord 通道
 #[derive(Debug, Clone)]
 pub struct DiscordChannel {
     bot_token: String,
     client: Client,
-    application_id: Option<String>,
     running: Arc<RwLock<bool>>,
 }
 
@@ -28,7 +24,6 @@ impl DiscordChannel {
         Self {
             bot_token,
             client: Client::new(),
-            application_id: None,
             running: Arc::new(RwLock::new(false)),
         }
     }
@@ -70,38 +65,6 @@ impl DiscordChannel {
             .post(&url)
             .header("Authorization", format!("Bot {}", self.bot_token))
             .json(&SendMessage { content })
-            .send()
-            .await
-            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(ChannelError::SendFailed(format!(
-                "Discord API error: {}",
-                error_text
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// 发送嵌入消息
-    async fn send_embed(&self, channel_id: &str, embed: &DiscordEmbed) -> Result<(), ChannelError> {
-        let url = format!(
-            "https://discord.com/api/v10/channels/{}/messages",
-            channel_id
-        );
-
-        #[derive(Serialize)]
-        struct SendMessage<'a> {
-            embed: &'a DiscordEmbed,
-        }
-
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bot {}", self.bot_token))
-            .json(&SendMessage { embed })
             .send()
             .await
             .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;

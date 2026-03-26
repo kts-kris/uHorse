@@ -3,7 +3,6 @@
 //! 基于 MCP (Model Context Protocol) 规范的类型定义。
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// MCP 工具定义
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,13 +43,26 @@ pub struct McpToolResult {
 pub enum McpContent {
     /// 文本内容
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        /// 文本正文。
+        text: String,
+    },
     /// 图片内容
     #[serde(rename = "image")]
-    Image { data: String, mime_type: String },
+    Image {
+        /// 图片数据。
+        data: String,
+        /// 图片 MIME 类型。
+        mime_type: String,
+    },
     /// 资源内容
     #[serde(rename = "resource")]
-    Resource { uri: String, contents: String },
+    Resource {
+        /// 资源 URI。
+        uri: String,
+        /// 资源内容。
+        contents: String,
+    },
 }
 
 /// MCP 资源定义

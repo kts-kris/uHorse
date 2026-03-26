@@ -1,61 +1,65 @@
 #!/bin/bash
-# 快速测试脚本 - 验证基础功能
+set -euo pipefail
 
-set -e
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+HEALTH_URL="http://127.0.0.1:8765/api/health"
+NODES_URL="http://127.0.0.1:8765/api/nodes"
 
-pass() { echo -e "${GREEN}✓${NC} $1"; }
-fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
-info() { echo -e "${YELLOW}→${NC} $1"; }
+pass() { echo "[ok] $1"; }
+info() { echo "[info] $1"; }
+fail() { echo "[error] $1"; exit 1; }
 
-echo "=== uHorse 快速测试 ==="
+command -v docker >/dev/null 2>&1 || fail "Docker 未安装"
+command -v docker compose >/dev/null 2>&1 || fail "docker compose 未安装"
+docker info >/dev/null 2>&1 || fail "Docker daemon 未运行"
 
-# 1. 编译
-info "编译项目..."
-cargo build --release --quiet 2>&1 | tail -n 3
-pass "编译成功"
+cleanup() {
+    docker compose stop uhorse-hub >/dev/null 2>&1 || true
+    docker compose rm -f uhorse-hub >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
-# 2. 单元测试
-info "运行单元测试..."
-cargo test --quiet 2>&1 | tail -n 3
-pass "单元测试通过"
+info "编译当前主线 Hub + Node..."
+cargo build --release -p uhorse-hub -p uhorse-node >/tmp/uhorse-quick-build.log 2>&1
+pass "编译完成"
 
-# 3. Docker 构建
-info "构建 Docker 镜像..."
-docker build -t uhorse:latest -q . 2>&1 | tail -n 3
-pass "Docker 镜像构建成功"
+info "运行真实 roundtrip 回归..."
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture >/tmp/uhorse-quick-roundtrip.log 2>&1
+pass "roundtrip 回归通过"
 
-# 4. 启动服务
-info "启动服务..."
-docker-compose up -d postgres redis uhorse --quiet
-sleep 5
+info "检查当前 workspace 是否可作为 Node 工作区..."
+cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-quick-node-check.log 2>&1
+pass "Node workspace 检查通过"
 
-# 5. 健康检查
-info "健康检查..."
-if curl -sf http://localhost:8080/health/live | grep -q "healthy"; then
-    pass "健康检查通过"
-else
-    fail "健康检查失败"
+info "构建 Hub Docker 镜像..."
+docker build -t uhorse-hub:latest -f Dockerfile . >/tmp/uhorse-quick-docker.log 2>&1
+pass "Docker 镜像构建完成"
+
+info "启动 Docker Hub smoke 环境..."
+docker compose up -d uhorse-hub >/tmp/uhorse-quick-compose.log 2>&1
+
+for _ in {1..20}; do
+    if curl -sf "$HEALTH_URL" | grep -q 'healthy'; then
+        pass "Hub /api/health 可访问"
+        break
+    fi
+    sleep 1
+done
+
+if ! curl -sf "$HEALTH_URL" | grep -q 'healthy'; then
+    docker compose logs --no-log-prefix uhorse-hub | tail -n 50 || true
+    fail "Hub /api/health 检查失败"
 fi
 
-# 6. 指标检查
-info "指标检查..."
-if curl -sf http://localhost:8080/metrics | grep -q "uhorse_"; then
-    pass "指标端点正常"
-else
-    fail "指标端点异常"
-fi
+curl -sf "$NODES_URL" >/tmp/uhorse-quick-nodes.json 2>&1
+pass "Hub /api/nodes 可访问"
 
 echo ""
-echo "=== 快速测试完成 ✓ ==="
-echo ""
-echo "服务运行中:"
-echo "  - API: http://localhost:8080"
-echo "  - Metrics: http://localhost:8080/metrics"
-echo "  - WebSocket: ws://localhost:8080/ws"
-echo ""
-echo "停止服务: docker-compose down"
+echo "快速测试完成。关键日志："
+echo "  /tmp/uhorse-quick-build.log"
+echo "  /tmp/uhorse-quick-roundtrip.log"
+echo "  /tmp/uhorse-quick-node-check.log"
+echo "  /tmp/uhorse-quick-docker.log"
+echo "  /tmp/uhorse-quick-compose.log"

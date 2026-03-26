@@ -8,7 +8,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+#[cfg(any(
+    feature = "database-sqlite",
+    feature = "database-postgres",
+    feature = "database-mysql",
+    feature = "database-mongodb",
+    feature = "database-redis"
+))]
+use tracing::debug;
+use tracing::info;
 use uhorse_protocol::{CommandOutput, DatabaseCommand, DatabaseType};
 
 /// 数据库连接配置

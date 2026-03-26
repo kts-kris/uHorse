@@ -94,7 +94,7 @@ impl SessionManager {
     /// 创建新会话
     #[instrument(skip(self))]
     pub async fn create(&self, channel: ChannelType, channel_user_id: String) -> Result<Session> {
-        let mut session = Session::new(channel, channel_user_id);
+        let session = Session::new(channel, channel_user_id);
 
         self.store.create_session(&session).await?;
 

@@ -13,8 +13,7 @@
 //! └── TODO.md           # 任务列表
 //! ```
 
-use crate::error::{AgentError, AgentResult};
-use serde::{Deserialize, Serialize};
+use crate::error::AgentResult;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use uhorse_core::SessionId;
@@ -113,74 +112,6 @@ impl FileMemory {
     pub async fn read_user_md(&self) -> AgentResult<String> {
         let path = self.workspace_dir.join("USER.md");
         Ok(tokio::fs::read_to_string(&path).await?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    fn create_memory() -> FileMemory {
-        let workspace_dir = tempdir().unwrap().into_path();
-        FileMemory::new(workspace_dir)
-    }
-
-    #[tokio::test]
-    async fn test_store_message_appends_history() {
-        let memory = create_memory();
-        let session_id = SessionId::from_string("session-1".to_string());
-
-        memory
-            .store_message(&session_id, "hello", "world")
-            .await
-            .unwrap();
-        memory
-            .store_message(&session_id, "again", "done")
-            .await
-            .unwrap();
-
-        let history = tokio::fs::read_to_string(memory.session_dir(&session_id).join("history.md"))
-            .await
-            .unwrap();
-
-        assert!(history.contains("**User:** hello"));
-        assert!(history.contains("**Assistant:** world"));
-        assert!(history.contains("**User:** again"));
-        assert!(history.contains("**Assistant:** done"));
-    }
-
-    #[tokio::test]
-    async fn test_get_context_combines_global_memory_and_session_history() {
-        let memory = create_memory();
-        memory.init_workspace().await.unwrap();
-
-        tokio::fs::write(memory.workspace_dir.join("MEMORY.md"), "global facts")
-            .await
-            .unwrap();
-
-        let session_id = SessionId::from_string("session-1".to_string());
-        memory
-            .store_message(&session_id, "hello", "world")
-            .await
-            .unwrap();
-
-        let context = memory.get_context(&session_id).await.unwrap();
-        assert!(context.contains("=== Global Memory ==="));
-        assert!(context.contains("global facts"));
-        assert!(context.contains("=== Session History ==="));
-        assert!(context.contains("**User:** hello"));
-    }
-
-    #[tokio::test]
-    async fn test_store_and_get_kv_round_trip() {
-        let memory = create_memory();
-        let session_id = SessionId::from_string("session-1".to_string());
-
-        memory.store_kv(&session_id, "agent", "main").await.unwrap();
-        let value = memory.get_kv(&session_id, "agent").await.unwrap();
-
-        assert_eq!(value.as_deref(), Some("main"));
     }
 }
 
@@ -283,5 +214,73 @@ impl MemoryStore for FileMemory {
         let kvs: HashMap<String, String> = serde_json::from_str(&content)?;
 
         Ok(kvs.get(key).cloned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn create_memory() -> FileMemory {
+        let workspace_dir = tempdir().unwrap().keep();
+        FileMemory::new(workspace_dir)
+    }
+
+    #[tokio::test]
+    async fn test_store_message_appends_history() {
+        let memory = create_memory();
+        let session_id = SessionId::from_string("session-1".to_string());
+
+        memory
+            .store_message(&session_id, "hello", "world")
+            .await
+            .unwrap();
+        memory
+            .store_message(&session_id, "again", "done")
+            .await
+            .unwrap();
+
+        let history = tokio::fs::read_to_string(memory.session_dir(&session_id).join("history.md"))
+            .await
+            .unwrap();
+
+        assert!(history.contains("**User:** hello"));
+        assert!(history.contains("**Assistant:** world"));
+        assert!(history.contains("**User:** again"));
+        assert!(history.contains("**Assistant:** done"));
+    }
+
+    #[tokio::test]
+    async fn test_get_context_combines_global_memory_and_session_history() {
+        let memory = create_memory();
+        memory.init_workspace().await.unwrap();
+
+        tokio::fs::write(memory.workspace_dir.join("MEMORY.md"), "global facts")
+            .await
+            .unwrap();
+
+        let session_id = SessionId::from_string("session-1".to_string());
+        memory
+            .store_message(&session_id, "hello", "world")
+            .await
+            .unwrap();
+
+        let context = memory.get_context(&session_id).await.unwrap();
+        assert!(context.contains("=== Global Memory ==="));
+        assert!(context.contains("global facts"));
+        assert!(context.contains("=== Session History ==="));
+        assert!(context.contains("**User:** hello"));
+    }
+
+    #[tokio::test]
+    async fn test_store_and_get_kv_round_trip() {
+        let memory = create_memory();
+        let session_id = SessionId::from_string("session-1".to_string());
+
+        memory.store_kv(&session_id, "agent", "main").await.unwrap();
+        let value = memory.get_kv(&session_id, "agent").await.unwrap();
+
+        assert_eq!(value.as_deref(), Some("main"));
     }
 }

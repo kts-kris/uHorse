@@ -3,6 +3,7 @@
 > **版本**: 3.0.0
 > **更新日期**: 2025-03-13
 > **适用对象**: 企业架构师、技术决策者、运维团队
+> **说明**: 若示例涉及当前主线默认监听配置，统一按端口 `8765` 与健康检查路径 `/api/health` 表达。
 
 ---
 
@@ -164,7 +165,7 @@
 
 [server]
 host = "0.0.0.0"
-port = 8080
+port = 8765
 
 [channels]
 enabled = ["dingtalk", "feishu", "wecom"]
@@ -759,7 +760,7 @@ services:
     container_name: uhorse
     restart: unless-stopped
     ports:
-      - "8080:8080"   # HTTP API
+      - "8765:8765"   # HTTP API
       - "9090:9090"   # Metrics
     environment:
       - RUST_LOG=info
@@ -774,7 +775,7 @@ services:
       - redis
       - nats
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:8765/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -892,7 +893,7 @@ spec:
       - name: uhorse
         image: uhorse/uhorse:3.0.0
         ports:
-        - containerPort: 8080
+        - containerPort: 8765
         - containerPort: 9090
         env:
         - name: RUST_LOG
@@ -908,14 +909,14 @@ spec:
             cpu: "500m"
         livenessProbe:
           httpGet:
-            path: /health/live
-            port: 8080
+            path: /api/health
+            port: 8765
           initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health/ready
-            port: 8080
+            path: /api/health
+            port: 8765
           initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
@@ -940,8 +941,8 @@ spec:
   selector:
     app: uhorse
   ports:
-  - port: 8080
-    targetPort: 8080
+  - port: 8765
+    targetPort: 8765
     name: http
   - port: 9090
     targetPort: 9090
@@ -1181,7 +1182,7 @@ cargo build --release
 ./target/release/uhorse run
 
 # 5. 健康检查
-curl http://localhost:8080/health/live
+curl http://localhost:8765/api/health
 ```
 
 ### B. 参考链接

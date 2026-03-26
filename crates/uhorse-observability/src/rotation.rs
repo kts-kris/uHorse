@@ -2,10 +2,10 @@
 //!
 //! 提供日志文件轮转和管理功能。
 
-use chrono::{DateTime, Duration, Utc};
-use std::path::{Path, PathBuf};
+use chrono::{DateTime, Utc};
+use std::path::PathBuf;
 use tokio::fs;
-use tracing::{info, warn};
+use tracing::info;
 
 /// 轮转策略
 #[derive(Debug, Clone, Copy)]

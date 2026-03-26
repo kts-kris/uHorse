@@ -11,7 +11,6 @@ use crate::permission::{
 };
 use crate::status::{HeartbeatSnapshot, Metrics, StatusReporter};
 use crate::workspace::Workspace;
-use chrono::{DateTime, Utc};
 use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
@@ -26,8 +25,8 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use uhorse_protocol::{
-    Command, CommandResult, ErrorSource, ExecutionError, ExecutionMetrics, HubToNode,
-    NodeCapabilities, NodeId, NodeStatus, NodeToHub, TaskContext, TaskId,
+    CommandResult, ErrorSource, ExecutionError, ExecutionMetrics, HubToNode, NodeCapabilities,
+    NodeId, NodeStatus, NodeToHub, NotificationEvent, NotificationEventKind, TaskId,
 };
 
 /// 节点配置
@@ -124,45 +123,70 @@ fn default_internal_work_dir() -> String {
     ".uhorse".to_string()
 }
 
+/// 权限规则配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRuleConfig {
+    /// 规则 ID
     pub id: String,
+    /// 规则名称
     pub name: String,
+    /// 规则描述
     #[serde(default)]
     pub description: Option<String>,
+    /// 资源配置
     pub resource: PermissionResourceConfig,
+    /// 允许的操作
     pub actions: Vec<Action>,
+    /// 是否需要审批
     #[serde(default)]
     pub require_approval: bool,
+    /// 规则优先级
     #[serde(default)]
     pub priority: i32,
+    /// 是否启用
     #[serde(default = "default_permission_rule_enabled")]
     pub enabled: bool,
 }
 
+/// 权限资源配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PermissionResourceConfig {
+    /// 允许所有资源
     AllowAll,
+    /// 精确路径
     ExactPath {
+        /// 路径
         path: String,
     },
+    /// 路径前缀
     PathPrefix {
+        /// 前缀
         prefix: String,
     },
+    /// Glob 模式
     Glob {
+        /// 模式
         pattern: String,
     },
+    /// 正则表达式
     Regex {
+        /// 表达式
         pattern: String,
     },
+    /// 命令类型集合
     CommandType {
+        /// 类型列表
         types: Vec<String>,
     },
+    /// 全部匹配
     All {
+        /// 子模式列表
         patterns: Vec<PermissionResourceConfig>,
     },
+    /// 任一匹配
     Any {
+        /// 子模式列表
         patterns: Vec<PermissionResourceConfig>,
     },
 }
@@ -268,23 +292,14 @@ pub struct Node {
 
     /// 工作区 watcher
     workspace_watcher: Option<RecommendedWatcher>,
+
+    /// 业务出站消息发送器
+    outbound_tx: Option<mpsc::Sender<NodeToHub>>,
 }
 
 /// 运行中的任务
 #[derive(Debug)]
 struct RunningTask {
-    /// 任务 ID
-    task_id: TaskId,
-
-    /// 命令
-    command: Command,
-
-    /// 上下文
-    context: TaskContext,
-
-    /// 开始时间
-    started_at: DateTime<Utc>,
-
     /// 取消信号
     cancel_tx: mpsc::Sender<()>,
 }
@@ -352,7 +367,7 @@ impl Node {
         ));
 
         // 创建节点 ID
-        let node_id = config.node_id.clone().unwrap_or_else(NodeId::new);
+        let node_id = config.node_id.clone().unwrap_or_default();
 
         // 创建状态报告器
         let status_reporter = Arc::new(
@@ -388,6 +403,7 @@ impl Node {
             status_tx,
             heartbeat_snapshot,
             workspace_watcher: None,
+            outbound_tx: None,
         })
     }
 
@@ -417,6 +433,7 @@ impl Node {
         }
 
         // 3. 启动后台任务
+        self.outbound_tx = Some(outbound_tx.clone());
         self.start_status_task();
         self.start_message_handler(hub_rx, outbound_tx);
 
@@ -671,16 +688,7 @@ impl Node {
                 let (cancel_tx, _cancel_rx) = mpsc::channel(1);
                 {
                     let mut tasks = running_tasks.write().await;
-                    tasks.insert(
-                        task_id.clone(),
-                        RunningTask {
-                            task_id: task_id.clone(),
-                            command: command.clone(),
-                            context: context.clone(),
-                            started_at: Utc::now(),
-                            cancel_tx,
-                        },
-                    );
+                    tasks.insert(task_id.clone(), RunningTask { cancel_tx });
                 }
 
                 match permission_manager.check(command, context).await {
@@ -858,16 +866,7 @@ impl Node {
                         let (cancel_tx, _cancel_rx) = mpsc::channel(1);
                         {
                             let mut tasks = running_tasks.write().await;
-                            tasks.insert(
-                                task_id.clone(),
-                                RunningTask {
-                                    task_id: task_id.clone(),
-                                    command: request.command.clone(),
-                                    context: request.context.clone(),
-                                    started_at: Utc::now(),
-                                    cancel_tx,
-                                },
-                            );
+                            tasks.insert(task_id.clone(), RunningTask { cancel_tx });
                         }
 
                         let started_at = Instant::now();
@@ -987,6 +986,38 @@ impl Node {
         CommandResult::failure(execution_error).with_duration(duration_ms)
     }
 
+    /// 立即上报通知事件到 Hub
+    pub fn report_notification_nowait(&self, event: NotificationEvent) -> NodeResult<()> {
+        if !self.running.load(Ordering::SeqCst) {
+            return Err(NodeError::Connection("Node is not running".to_string()));
+        }
+
+        let outbound_tx = self.outbound_tx.as_ref().ok_or_else(|| {
+            NodeError::Connection("Outbound channel is not available".to_string())
+        })?;
+
+        outbound_tx
+            .try_send(NodeToHub::NotificationEvent {
+                message_id: uhorse_protocol::MessageId::new(),
+                node_id: self.node_id.clone(),
+                event,
+            })
+            .map_err(|error| {
+                NodeError::Connection(format!("Failed to send notification event: {}", error))
+            })
+    }
+
+    /// 以简化参数立即上报通知事件到 Hub
+    pub fn report_notification_event_nowait(
+        &self,
+        kind: NotificationEventKind,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        details_included: bool,
+    ) -> NodeResult<()> {
+        self.report_notification_nowait(NotificationEvent::new(kind, title, body, details_included))
+    }
+
     /// 停止节点
     pub async fn stop(&mut self) -> NodeResult<()> {
         if !self
@@ -1002,6 +1033,7 @@ impl Node {
         let _ = self.stop_signal.send(());
 
         self.workspace_watcher = None;
+        self.outbound_tx = None;
 
         // 停止连接
         self.connection.stop().await;
@@ -1013,6 +1045,41 @@ impl Node {
     /// 获取节点 ID
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
+    }
+
+    /// 获取配置
+    pub fn config(&self) -> &NodeConfig {
+        &self.config
+    }
+
+    /// 获取工作空间
+    pub fn workspace(&self) -> Arc<Workspace> {
+        self.workspace.clone()
+    }
+
+    /// 获取运行状态
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    /// 获取连接状态
+    pub async fn connection_state(&self) -> crate::connection::ConnectionState {
+        self.connection.state().await
+    }
+
+    /// 获取待审批数量
+    pub async fn pending_approvals_count(&self) -> usize {
+        self.permission_manager.get_pending_approvals().await.len()
+    }
+
+    /// 获取运行任务数量
+    pub async fn running_tasks_count(&self) -> usize {
+        self.running_tasks.read().await.len()
+    }
+
+    /// 获取最近一次心跳快照
+    pub async fn heartbeat_snapshot(&self) -> Option<HeartbeatSnapshot> {
+        self.heartbeat_snapshot.read().await.clone()
     }
 
     /// 获取状态流
@@ -1037,10 +1104,11 @@ impl Drop for Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use notify::event::{CreateKind, EventAttributes, ModifyKind};
     use std::path::PathBuf;
     use tempfile::TempDir;
-    use uhorse_protocol::MessageId;
+    use uhorse_protocol::{Command, MessageId, TaskContext};
 
     #[test]
     fn test_node_config_default() {
@@ -1486,6 +1554,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_report_notification_event_nowait_enqueues_message() {
+        let temp = TempDir::new().unwrap();
+        let mut node = Node::new(NodeConfig {
+            workspace_path: temp.path().to_string_lossy().to_string(),
+            require_git_repo: false,
+            ..Default::default()
+        })
+        .unwrap();
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
+        node.running.store(true, Ordering::SeqCst);
+        node.outbound_tx = Some(outbound_tx);
+
+        node.report_notification_event_nowait(NotificationEventKind::Info, "标题", "内容", true)
+            .unwrap();
+
+        let outbound = outbound_rx.recv().await.unwrap();
+        match outbound {
+            NodeToHub::NotificationEvent { node_id, event, .. } => {
+                assert_eq!(node_id, *node.node_id());
+                assert_eq!(event.title, "标题");
+                assert_eq!(event.body, "内容");
+                assert!(event.details_included);
+                assert!(matches!(event.kind, NotificationEventKind::Info));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
     async fn test_collect_heartbeat_snapshot_uses_running_task_count() {
         let temp = TempDir::new().unwrap();
         let node = Node::new(NodeConfig {
@@ -1497,22 +1594,11 @@ mod tests {
         .unwrap();
 
         let task_id = TaskId::from_string("task-running");
-        let context = TaskContext::new(
-            uhorse_protocol::UserId::from_string("test-user"),
-            uhorse_protocol::SessionId::new(),
-            "test-channel",
-        );
         let (cancel_tx, _cancel_rx) = mpsc::channel(1);
-        node.running_tasks.write().await.insert(
-            task_id.clone(),
-            RunningTask {
-                task_id,
-                command: Command::Shell(uhorse_protocol::ShellCommand::new("pwd")),
-                context,
-                started_at: Utc::now(),
-                cancel_tx,
-            },
-        );
+        node.running_tasks
+            .write()
+            .await
+            .insert(task_id.clone(), RunningTask { cancel_tx });
 
         let snapshot = Node::collect_heartbeat_snapshot(
             &node.status_reporter,

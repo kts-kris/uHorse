@@ -5,7 +5,7 @@
 use sqlx::{sqlite::SqliteConnectOptions, Pool, Row, SqlitePool};
 use tracing::{debug, info, instrument};
 use uhorse_core::types::{ChannelType, Message, MessageContent, MessageRole, Session, SessionId};
-use uhorse_core::{ConversationStore, Result, SessionStore, StorageError, UHorseError};
+use uhorse_core::{ConversationStore, Result, SessionStore, StorageError};
 
 /// SQLite 存储实现
 #[derive(Debug, Clone)]
