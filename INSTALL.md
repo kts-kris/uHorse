@@ -103,7 +103,11 @@ cargo build --release -p uhorse-hub -p uhorse-node
 
 ## 可选：打包 Node Desktop
 
-如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本：
+如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本。
+
+4.1 当前已经固定的交付边界是：**`bin + web` archive、`desktop-smoke.sh`、CI / release artifact**。这表示当前仓库主线已经覆盖可分发 archive 与 smoke 验证，但**不包含**原生 `.app/.dmg`、签名、公证、安装器。
+
+可以直接使用仓库内置脚本：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -120,6 +124,14 @@ cargo build --release -p uhorse-hub -p uhorse-node
 ```bash
 ./scripts/desktop-smoke.sh
 ```
+
+这条 smoke 当前覆盖的是：
+
+- Node Desktop 宿主 API
+- 前端静态资源可访问性
+- SPA 路由回退
+
+它不代表原生安装器、系统级桌面分发或平台签名链路已经完成。
 
 ---
 
@@ -174,6 +186,17 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 - WebSocket 服务
 - Node
 - 一个文件存在性命令 roundtrip
+
+### 5. 验证 Node Desktop 4.1 archive 边界
+
+如果你正在验收 4.1 的 Node Desktop 交付件，请额外执行：
+
+```bash
+./scripts/package-node-desktop.sh
+./scripts/desktop-smoke.sh
+```
+
+验收标准是 archive 可生成、宿主 API 与静态资源 smoke 通过，而不是 `.app/.dmg` 或原生安装器存在。
 
 ---
 

@@ -107,6 +107,19 @@ DingTalk inbound message
 
 这意味着 DingTalk 消息不是在通道层本地直接处理，而是会先进入 LLM 规划，再进入 Hub-Node 任务执行链路。
 
+## 4.1 来源感知运行时
+
+在当前 4.1 口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
+
+这里的目标不是把 DingTalk 变成 `memory / agent / skill` 管理入口，而是让运行时能够区分资源来自哪里、应该按什么边界共享或隔离。
+
+可对外说明的最小语义是：
+
+- `source_layer`：区分来源层级，例如全局、租户、用户等来源层。
+- `source_scope`：区分来源作用域，用于表达共享 / 隔离边界。
+
+这层语义服务于当前主线里的 source-aware runtime / UI 展示，不改变 DingTalk 作为通道入口与结果回传出口的职责。
+
 ---
 
 ## DingTalk 自然语言规划与本地校验
@@ -124,6 +137,8 @@ DingTalk inbound message
 ---
 
 ## 消息回传
+
+如果同时启用了 Node Desktop 本地通知镜像，当前主线还支持通过 `channels.dingtalk.notification_bindings` 把稳定 `node_id` 绑定到 DingTalk `user_id`，用于补充“节点通知 -> 钉钉用户”的回传路径。
 
 当前结果回传逻辑会保留任务的完整执行结果，并按以下顺序尝试回到原 DingTalk 会话：
 

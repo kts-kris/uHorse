@@ -107,6 +107,19 @@ DingTalk inbound message
 
 So DingTalk messages do not stop at the channel layer. They first go through LLM planning, then enter the Hub-Node execution pipeline.
 
+## 4.1 Source-aware runtime
+
+Under the current 4.1 wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
+
+The goal is not to turn DingTalk into a management surface for `memory / agent / skill`, but to let the runtime distinguish where a resource came from and what sharing or isolation boundary it should follow.
+
+The minimum public-facing semantics are:
+
+- `source_layer`: identifies the source layer.
+- `source_scope`: identifies the source scope and its sharing / isolation boundary.
+
+This supports the current source-aware runtime / UI behavior without changing DingTalk's role as the channel entrypoint and result return path.
+
 ---
 
 ## DingTalk natural-language planning and local validation
@@ -124,6 +137,8 @@ If the LLM returns invalid JSON, an out-of-workspace path, or a dangerous comman
 ---
 
 ## Reply path
+
+If Node Desktop local notification mirroring is enabled, the current mainline also supports a `channels.dingtalk.notification_bindings` mapping from stable `node_id` values to DingTalk `user_id` values so the “node notification -> DingTalk user” path can be completed.
 
 The current result handling keeps the full execution result and tries to get back to the original DingTalk session in this order:
 

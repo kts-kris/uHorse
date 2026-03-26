@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>v4.0 Hub-Node Distributed AI Execution Platform</strong>
+  <strong>v4.0 Hub-Node mainline with landed 4.1 runtime increments</strong>
 </p>
 
 <p align="center">
-  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results.</em>
+  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; these docs also cover the landed 4.1 layered runtime and Node Desktop packaging boundary.</em>
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 
 ## Overview
 
-The current mainline is the **v4.0 Hub-Node architecture**:
+The current mainline is the **v4.0 Hub-Node architecture**, with several 4.1 increments already landed:
 
 - `uhorse-hub`: cloud-side control plane for Node access, task scheduling, Web API, approval endpoints, and DingTalk Stream intake.
 - `uhorse-node`: local execution node binary.
@@ -43,7 +43,13 @@ The current mainline is the **v4.0 Hub-Node architecture**:
 - `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
 - `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
-These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline.
+The landed 4.1-facing capabilities that are already visible in the repository are:
+
+- `memory / agent / skill` support layered sharing and isolation across `global / tenant / user` scopes.
+- the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
+- Node Desktop is currently delivered as a `bin/ + web/` archive validated by `desktop-smoke.sh` and CI / release artifacts, not as native `.app/.dmg`, code signing, notarization, or installers.
+
+These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe 4.1 as a return to the old monolithic Agent platform.
 
 ## Current Status
 
@@ -56,6 +62,9 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Node → Hub result return | ✅ | Node sends full `NodeToHub::TaskResult` |
 | Approval loop | ✅ | `ApprovalRequest -> /api/approvals -> ApprovalResponse -> TaskResult` |
 | Node reconnect after Hub restart | ✅ | Node reconnects and re-registers automatically |
+| Layered `memory / agent / skill` scopes | ✅ | the runtime now organizes sharing and isolation across `global / tenant / user` scopes |
+| Source-aware runtime / UI | ✅ | runtime pages such as Skills and Settings expose `source_layer` and `source_scope` so same-name multi-source resources can be distinguished |
+| Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive with `desktop-smoke.sh`; `.app/.dmg` is not part of the current boundary |
 | Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` covers a real Hub + Node + WebSocket roundtrip |
 | Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
 | DingTalk Stream integration | ✅ | Stream mode is the recommended path; mirroring Node Desktop notifications also requires `channels.dingtalk.notification_bindings` |
@@ -240,10 +249,13 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 
 | Document | Description |
 |----------|-------------|
+| [CHANGELOG-en.md](CHANGELOG-en.md) | 4.1-facing change facts, documentation sync notes, and explicit non-goals |
+| [INSTALL-en.md](INSTALL-en.md) | current Hub-Node install path plus the Node Desktop archive / smoke boundary |
 | [API-en.md](API-en.md) | current implemented Hub-Node API surface |
 | [LOCAL_SETUP.md](LOCAL_SETUP.md) | local dual-process setup, JWT bootstrap, approval, and reconnect regression |
 | [CONFIG-en.md](CONFIG-en.md) | unified config, legacy HubConfig, NodeConfig, and permission rules |
-| [CHANNELS-en.md](CHANNELS-en.md) | current channel status, focused on DingTalk Stream |
+| [CHANNELS-en.md](CHANNELS-en.md) | current channel status, DingTalk Stream, source-aware runtime entry, and notification mirroring |
+| [scripts/README.md](scripts/README.md) | mainline scripts, including Node Desktop package / smoke and CI-aligned usage |
 | [TESTING.md](TESTING.md) | package tests, workspace tests, and manual regression order |
 | [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4.0 Hub-Node deployment guide |
 | [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4.0 architecture details |

@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Daily build workflow with smart change detection
 - Nightly release channel for development builds
+- 4.1 文档入口已补齐：README / INSTALL / CHANNELS / scripts/README / CHANGELOG 统一对齐当前主线事实
+- `memory / agent / skill` 的 4.1 叙事已明确为 `global / tenant / user` 分层共享与隔离，而不是旧单体 Agent 平台回归
+- runtime API 与 Web UI 已以 `source_layer`、`source_scope` 暴露来源感知信息，便于区分同名多来源资源
+- Node Desktop 4.1 交付边界已固定为 `bin + web` archive、`desktop-smoke.sh` 与 CI / release artifact
+
+### Changed
+
+- GitHub 首页与安装文档已同步到当前已落地的 4.1 增量能力，并补充对应导流
+- 通道文档已补充来源感知 runtime 的文档落点，以及 Node Desktop 通知镜像到 DingTalk 的 4.1 口径
+
+### Not Included
+
+- 4.1 不包含原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
+- 4.1 不表示旧时代 `agent / skill / memory` 独立平台全面回归；当前文档只描述现有 Hub-Node 主线里的分层 runtime 能力
 
 ## [4.0.0] - 2026-03-18
 

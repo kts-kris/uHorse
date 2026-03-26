@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Daily build workflow with smart change detection
 - Nightly release channel for development builds
+- 4.1-facing documentation entrypoints are now aligned across README / INSTALL / CHANNELS / scripts/README / CHANGELOG
+- the 4.1 `memory / agent / skill` narrative is now explicitly documented as layered sharing and isolation across `global / tenant / user` scopes, not as a return to the old monolithic Agent platform
+- the runtime API and Web UI now expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished
+- the Node Desktop 4.1 delivery boundary is now explicitly documented as `bin + web` archive delivery with `desktop-smoke.sh` and CI / release artifacts
+
+### Changed
+
+- the GitHub-facing README and install docs now point to the landed 4.1 increments and their supporting documents
+- the channel docs now define where source-aware runtime semantics live and how Node Desktop notification mirroring to DingTalk fits into the 4.1 flow
+
+### Not Included
+
+- 4.1 does not include native `.app/.dmg` packaging, code signing, notarization, installers, or drag-and-drop desktop distribution
+- 4.1 does not mean a full return of the old standalone `agent / skill / memory` platform; the docs only describe the layered runtime capabilities that exist in the current Hub-Node mainline
 
 ## [4.0.0] - 2026-03-18
 

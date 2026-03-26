@@ -103,7 +103,11 @@ Terminal 2:
 
 ## Optional: package Node Desktop
 
-If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script:
+If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script.
+
+The fixed 4.1 delivery boundary is: **`bin + web` archive delivery, `desktop-smoke.sh`, and CI / release artifacts**. This means the current mainline already covers archive packaging and smoke validation, but it does **not** include native `.app/.dmg`, code signing, notarization, or installers.
+
+Use the built-in packaging script:
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -120,6 +124,14 @@ To verify the packaged host API and static assets together, run:
 ```bash
 ./scripts/desktop-smoke.sh
 ```
+
+This smoke currently validates:
+
+- the Node Desktop host API
+- static asset serving
+- SPA route fallback
+
+It does not imply that native installers, platform distribution, or signing pipelines are complete.
 
 ---
 
@@ -174,6 +186,17 @@ This test starts a real:
 - WebSocket server
 - Node
 - file existence roundtrip task
+
+### 5. Verify the Node Desktop 4.1 archive boundary
+
+If you are validating the 4.1 Node Desktop deliverable, also run:
+
+```bash
+./scripts/package-node-desktop.sh
+./scripts/desktop-smoke.sh
+```
+
+The acceptance bar is that the archive can be produced and the host API / static asset smoke passes, not that a native `.app/.dmg` or installer exists.
 
 ---
 

@@ -63,7 +63,9 @@
 
 ### `package-node-desktop.sh`
 
-打包 Node Desktop 宿主与前端静态资源：
+打包 Node Desktop 宿主与前端静态资源。
+
+这是当前 4.1 Node Desktop 交付链路里的正式打包入口，交付形态是 `bin + web` archive，而不是原生 `.app/.dmg`、签名、公证或安装器：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -76,9 +78,13 @@
 - 生成 `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/`
 - 输出对应压缩包
 
+对应 release workflow 中的 Node Desktop artifact 也是这一路 archive 布局。
+
 ### `desktop-smoke.sh`
 
-运行 Node Desktop 宿主 API + 静态资源 smoke：
+运行 Node Desktop 宿主 API + 静态资源 smoke。
+
+这是当前 4.1 Node Desktop 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
 
 ```bash
 ./scripts/desktop-smoke.sh
@@ -94,6 +100,8 @@
 - `GET /api/runtime/status`
 - `GET /api/versioning/summary`
 - `/` 与前端路由回退静态资源可访问
+
+它不覆盖原生安装器、桌面发行、签名、公证或系统级集成验收。
 
 ## 推荐搭配
 
