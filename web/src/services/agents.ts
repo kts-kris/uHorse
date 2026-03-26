@@ -43,9 +43,18 @@ export const skillService = {
     throw new Error(getApiErrorMessage(data.error, '获取 Skill 列表失败'));
   },
 
-  async get(skillName: string): Promise<SkillRuntimeDetail> {
+  async get(
+    skillName: string,
+    options?: { source_layer?: string; source_scope?: string | null }
+  ): Promise<SkillRuntimeDetail> {
     const { data } = await client.get<ApiResponse<SkillRuntimeDetail>>(
-      `/api/v1/skills/${encodeURIComponent(skillName)}`
+      `/api/v1/skills/${encodeURIComponent(skillName)}`,
+      {
+        params: {
+          source_layer: options?.source_layer,
+          source_scope: options?.source_scope ?? undefined,
+        },
+      }
     );
     if (data.success && data.data !== null) return data.data;
     throw new Error(getApiErrorMessage(data.error, '获取 Skill 详情失败'));

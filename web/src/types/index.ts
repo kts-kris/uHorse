@@ -25,6 +25,8 @@ export interface SkillRuntimeSummary {
   args: string[];
   permissions: string[];
   execution_mode: string;
+  source_layer: string;
+  source_scope: string | null;
 }
 
 export interface SkillRuntimeDetail extends SkillRuntimeSummary {

@@ -26,8 +26,21 @@ import type { ColumnsType } from 'antd/es/table';
 import type { SkillRuntimeSummary } from '../types';
 import { skillService } from '../services/agents';
 
+const sourceLayerColorMap: Record<string, string> = {
+  global: 'default',
+  tenant: 'purple',
+  user: 'cyan',
+};
+
+function formatSkillSource(sourceLayer: string, sourceScope: string | null): string {
+  if (!sourceScope) {
+    return sourceLayer;
+  }
+  return `${sourceLayer} · ${sourceScope}`;
+}
+
 const Skills: React.FC = () => {
-  const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
+  const [selectedSkill, setSelectedSkill] = useState<SkillRuntimeSummary | null>(null);
 
   const {
     data: skills = [],
@@ -45,9 +58,18 @@ const Skills: React.FC = () => {
     isLoading: isDetailLoading,
     error: detailError,
   } = useQuery({
-    queryKey: ['skill-runtime', selectedSkillName],
-    queryFn: () => skillService.get(selectedSkillName!),
-    enabled: selectedSkillName !== null,
+    queryKey: [
+      'skill-runtime',
+      selectedSkill?.name,
+      selectedSkill?.source_layer,
+      selectedSkill?.source_scope,
+    ],
+    queryFn: () =>
+      skillService.get(selectedSkill!.name, {
+        source_layer: selectedSkill!.source_layer,
+        source_scope: selectedSkill!.source_scope,
+      }),
+    enabled: selectedSkill !== null,
   });
 
   const stats = useMemo(() => {
@@ -93,6 +115,16 @@ const Skills: React.FC = () => {
       render: (value: string) => <Tag color={value === 'process' ? 'blue' : 'default'}>{value}</Tag>,
     },
     {
+      title: '来源',
+      key: 'source',
+      width: 220,
+      render: (_, record) => (
+        <Tag color={sourceLayerColorMap[record.source_layer] ?? 'default'}>
+          {formatSkillSource(record.source_layer, record.source_scope)}
+        </Tag>
+      ),
+    },
+    {
       title: '超时',
       dataIndex: 'timeout_secs',
       key: 'timeout_secs',
@@ -123,7 +155,7 @@ const Skills: React.FC = () => {
         <Button
           type="link"
           icon={<InfoCircleOutlined />}
-          onClick={() => setSelectedSkillName(record.name)}
+          onClick={() => setSelectedSkill(record)}
         >
           详情
         </Button>
@@ -175,7 +207,7 @@ const Skills: React.FC = () => {
         }
       >
         <Table
-          rowKey="name"
+          rowKey={(record) => `${record.name}:${record.source_layer}:${record.source_scope ?? 'global'}`}
           columns={columns}
           dataSource={skills}
           loading={isLoading}
@@ -186,8 +218,8 @@ const Skills: React.FC = () => {
       <Drawer
         title={skillDetail ? `Skill 详情：${skillDetail.name}` : 'Skill 详情'}
         width={760}
-        open={selectedSkillName !== null}
-        onClose={() => setSelectedSkillName(null)}
+        open={selectedSkill !== null}
+        onClose={() => setSelectedSkill(null)}
       >
         {detailError && (
           <Alert
@@ -210,6 +242,11 @@ const Skills: React.FC = () => {
               <Descriptions.Item label="作者">{skillDetail.author || '-'}</Descriptions.Item>
               <Descriptions.Item label="状态">
                 {skillDetail.enabled ? <Tag color="green">已启用</Tag> : <Tag>已禁用</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="来源">
+                <Tag color={sourceLayerColorMap[skillDetail.source_layer] ?? 'default'}>
+                  {formatSkillSource(skillDetail.source_layer, skillDetail.source_scope)}
+                </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="执行方式">
                 <Tag color={skillDetail.execution_mode === 'process' ? 'blue' : 'default'}>

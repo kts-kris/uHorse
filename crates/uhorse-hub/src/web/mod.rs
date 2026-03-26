@@ -21,8 +21,8 @@ use tokio::sync::RwLock;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
 use uhorse_agent::{
-    Agent, AgentManager, AgentScope, AgentScopeConfig, LayeredMemoryStore, LayeredSkillRegistry,
-    MemoryStore, SessionKey, SessionNamespace, SessionState, SkillRegistry,
+    Agent, AgentManager, AgentScope, AgentScopeConfig, LayeredMemoryStore, LayeredSkillEntry,
+    LayeredSkillRegistry, MemoryStore, SessionKey, SessionNamespace, SessionState, SkillRegistry,
 };
 use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
@@ -484,6 +484,8 @@ struct SkillRuntimeSummary {
     args: Vec<String>,
     permissions: Vec<String>,
     execution_mode: String,
+    source_layer: String,
+    source_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -500,6 +502,14 @@ struct SkillRuntimeDetail {
     env: HashMap<String, String>,
     permissions: Vec<String>,
     execution_mode: String,
+    source_layer: String,
+    source_scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillRuntimeQuery {
+    source_layer: Option<String>,
+    source_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1251,7 +1261,8 @@ async fn persist_task_result_memory(
     }
 }
 
-fn skill_to_summary(skill: &uhorse_agent::Skill) -> SkillRuntimeSummary {
+fn skill_to_summary(entry: LayeredSkillEntry) -> SkillRuntimeSummary {
+    let skill = entry.skill;
     SkillRuntimeSummary {
         name: skill.manifest.name.clone(),
         description: skill.manifest.description.clone(),
@@ -1267,10 +1278,13 @@ fn skill_to_summary(skill: &uhorse_agent::Skill) -> SkillRuntimeSummary {
         } else {
             "dummy".to_string()
         },
+        source_layer: entry.source_layer.to_string(),
+        source_scope: entry.source_scope,
     }
 }
 
-fn skill_to_detail(skill: &uhorse_agent::Skill) -> SkillRuntimeDetail {
+fn skill_to_detail(entry: LayeredSkillEntry) -> SkillRuntimeDetail {
+    let skill = entry.skill;
     SkillRuntimeDetail {
         name: skill.manifest.name.clone(),
         description: skill.manifest.description.clone(),
@@ -1288,6 +1302,8 @@ fn skill_to_detail(skill: &uhorse_agent::Skill) -> SkillRuntimeDetail {
         } else {
             "dummy".to_string()
         },
+        source_layer: entry.source_layer.to_string(),
+        source_scope: entry.source_scope,
     }
 }
 
@@ -2480,23 +2496,42 @@ async fn list_runtime_skills(
     let mut skills: Vec<_> = state
         .agent_runtime
         .skills
-        .list_all_names()
+        .list_all_entries()
         .into_iter()
-        .filter_map(|name| state.agent_runtime.skills.get_any(&name))
-        .map(|skill| skill_to_summary(&skill))
+        .map(skill_to_summary)
         .collect();
-    skills.sort_by(|left, right| left.name.cmp(&right.name));
+    skills.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.source_layer.cmp(&right.source_layer))
+            .then_with(|| {
+                left.source_scope
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(right.source_scope.as_deref().unwrap_or(""))
+            })
+    });
     Json(ApiResponse::success(skills))
 }
 
 async fn get_runtime_skill(
     State(state): State<Arc<WebState>>,
     Path(skill_name): Path<String>,
+    Query(query): Query<SkillRuntimeQuery>,
 ) -> (StatusCode, Json<ApiResponse<SkillRuntimeDetail>>) {
-    match state.agent_runtime.skills.get_any(&skill_name) {
-        Some(skill) => (
+    let entry = match query.source_layer.as_deref() {
+        Some(source_layer) => state.agent_runtime.skills.get_entry_by_source(
+            &skill_name,
+            source_layer,
+            query.source_scope.as_deref(),
+        ),
+        None => state.agent_runtime.skills.get_any_entry(&skill_name),
+    };
+
+    match entry {
+        Some(entry) => (
             StatusCode::OK,
-            Json(ApiResponse::success(skill_to_detail(&skill))),
+            Json(ApiResponse::success(skill_to_detail(entry))),
         ),
         None => (
             StatusCode::NOT_FOUND,
@@ -4465,6 +4500,201 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "echo");
         assert_eq!(skills[0].execution_mode, "process");
+        assert_eq!(skills[0].source_layer, "global");
+        assert!(skills[0].source_scope.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_runtime_skills_expands_same_name_across_sources() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let tenant_scope = "tenant:dingtalk:corp-shared";
+        let user_scope = "user:dingtalk:user-shared";
+
+        async fn write_skill(root: &std::path::Path, name: &str, script: &str) {
+            let skill_dir = root.join("skills").join(name);
+            tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+            tokio::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!(
+                    "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
+                    name, name
+                ),
+            )
+            .await
+            .unwrap();
+            tokio::fs::write(
+                skill_dir.join("skill.toml"),
+                format!(
+                    "enabled = true\ntimeout = 5\nexecutable = \"python3\"\nargs = [\"-c\", \"{}\"]\n",
+                    script
+                ),
+            )
+            .await
+            .unwrap();
+        }
+
+        write_skill(&runtime_root, "echo", "print('global')").await;
+        write_skill(
+            &runtime_root.join("tenants").join(tenant_scope),
+            "echo",
+            "print('tenant')",
+        )
+        .await;
+        write_skill(
+            &runtime_root.join("users").join(user_scope),
+            "echo",
+            "print('user')",
+        )
+        .await;
+
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime,
+        ));
+
+        let Json(response) = list_runtime_skills(State(state)).await;
+        let skills = response.data.unwrap();
+        let echo_entries: Vec<_> = skills
+            .into_iter()
+            .filter(|skill| skill.name == "echo")
+            .collect();
+        assert_eq!(echo_entries.len(), 3);
+        assert_eq!(echo_entries[0].source_layer, "global");
+        assert!(echo_entries[0].source_scope.is_none());
+        assert_eq!(echo_entries[1].source_layer, "tenant");
+        assert_eq!(
+            echo_entries[1].source_scope.as_deref(),
+            Some("tenant:dingtalk:corp-shared")
+        );
+        assert_eq!(echo_entries[2].source_layer, "user");
+        assert_eq!(
+            echo_entries[2].source_scope.as_deref(),
+            Some("user:dingtalk:user-shared")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_runtime_skill_returns_requested_source_entry() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let tenant_scope = "tenant:dingtalk:corp-shared";
+        let user_scope = "user:dingtalk:user-shared";
+
+        async fn write_skill(root: &std::path::Path, name: &str, script: &str) {
+            let skill_dir = root.join("skills").join(name);
+            tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+            tokio::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!(
+                    "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
+                    name, name
+                ),
+            )
+            .await
+            .unwrap();
+            tokio::fs::write(
+                skill_dir.join("skill.toml"),
+                format!(
+                    "enabled = true\ntimeout = 5\nexecutable = \"python3\"\nargs = [\"-c\", \"{}\"]\n",
+                    script
+                ),
+            )
+            .await
+            .unwrap();
+        }
+
+        write_skill(&runtime_root, "echo", "print('global')").await;
+        write_skill(
+            &runtime_root.join("tenants").join(tenant_scope),
+            "echo",
+            "print('tenant')",
+        )
+        .await;
+        write_skill(
+            &runtime_root.join("users").join(user_scope),
+            "echo",
+            "print('user')",
+        )
+        .await;
+
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime,
+        ));
+
+        let (status, body) = get_json(
+            app,
+            "/api/v1/skills/echo?source_layer=tenant&source_scope=tenant%3Adingtalk%3Acorp-shared",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"]["name"], json!("echo"));
+        assert_eq!(body["data"]["source_layer"], json!("tenant"));
+        assert_eq!(
+            body["data"]["source_scope"],
+            json!("tenant:dingtalk:corp-shared")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_runtime_skill_returns_not_found_for_missing_source_entry() {
+        let (_runtime, state) = create_test_runtime_with_skill(
+            "echo",
+            r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
+"#,
+            r#"{"type":"direct_reply","text":"unused"}"#,
+        )
+        .await;
+        let app = create_router((*state).clone());
+
+        let (status, body) = get_json(
+            app,
+            "/api/v1/skills/echo?source_layer=user&source_scope=user%3Adingtalk%3Amissing",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["success"], json!(false));
+        assert_eq!(body["error"], json!("Skill not found"));
+    }
+
+    #[tokio::test]
+    async fn test_get_runtime_skill_returns_not_found_for_global_source_with_scope() {
+        let (_runtime, state) = create_test_runtime_with_skill(
+            "echo",
+            r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
+"#,
+            r#"{"type":"direct_reply","text":"unused"}"#,
+        )
+        .await;
+        let app = create_router((*state).clone());
+
+        let (status, body) = get_json(
+            app,
+            "/api/v1/skills/echo?source_layer=global&source_scope=tenant%3Adingtalk%3Acorp-shared",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["success"], json!(false));
+        assert_eq!(body["error"], json!("Skill not found"));
     }
 
     #[tokio::test]

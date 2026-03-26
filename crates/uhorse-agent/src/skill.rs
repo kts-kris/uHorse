@@ -290,6 +290,17 @@ pub struct LayeredSkillRegistry {
     user: HashMap<String, SkillRegistry>,
 }
 
+/// 分层技能条目。
+#[derive(Clone)]
+pub struct LayeredSkillEntry {
+    /// 技能定义。
+    pub skill: Skill,
+    /// 来源层级：`global`、`tenant`、`user`。
+    pub source_layer: &'static str,
+    /// 来源作用域。
+    pub source_scope: Option<String>,
+}
+
 impl LayeredSkillRegistry {
     /// 创建新的分层注册表。
     pub fn new(global: SkillRegistry) -> Self {
@@ -312,22 +323,81 @@ impl LayeredSkillRegistry {
 
     /// 按 `user > tenant > global` 解析技能。
     pub fn get_for_scopes(&self, scopes: &[String], name: &str) -> Option<Skill> {
+        self.get_for_scopes_entry(scopes, name)
+            .map(|entry| entry.skill)
+    }
+
+    /// 按 `user > tenant > global` 解析技能来源条目。
+    pub fn get_for_scopes_entry(&self, scopes: &[String], name: &str) -> Option<LayeredSkillEntry> {
         for scope in scopes {
+            if let Some(skill) = self.user.get(scope).and_then(|registry| registry.get(name)) {
+                return Some(LayeredSkillEntry {
+                    skill,
+                    source_layer: "user",
+                    source_scope: Some(scope.clone()),
+                });
+            }
             if let Some(skill) = self
-                .user
+                .tenant
                 .get(scope)
                 .and_then(|registry| registry.get(name))
-                .or_else(|| {
-                    self.tenant
-                        .get(scope)
-                        .and_then(|registry| registry.get(name))
-                })
             {
-                return Some(skill);
+                return Some(LayeredSkillEntry {
+                    skill,
+                    source_layer: "tenant",
+                    source_scope: Some(scope.clone()),
+                });
             }
         }
 
-        self.global.get(name)
+        self.global.get(name).map(|skill| LayeredSkillEntry {
+            skill,
+            source_layer: "global",
+            source_scope: None,
+        })
+    }
+
+    /// 按来源精确获取技能条目。
+    pub fn get_entry_by_source(
+        &self,
+        name: &str,
+        source_layer: &str,
+        source_scope: Option<&str>,
+    ) -> Option<LayeredSkillEntry> {
+        match source_layer {
+            "user" => source_scope.and_then(|scope| {
+                self.user
+                    .get(scope)
+                    .and_then(|registry| registry.get(name))
+                    .map(|skill| LayeredSkillEntry {
+                        skill,
+                        source_layer: "user",
+                        source_scope: Some(scope.to_string()),
+                    })
+            }),
+            "tenant" => source_scope.and_then(|scope| {
+                self.tenant
+                    .get(scope)
+                    .and_then(|registry| registry.get(name))
+                    .map(|skill| LayeredSkillEntry {
+                        skill,
+                        source_layer: "tenant",
+                        source_scope: Some(scope.to_string()),
+                    })
+            }),
+            "global" => {
+                if source_scope.is_some() {
+                    None
+                } else {
+                    self.global.get(name).map(|skill| LayeredSkillEntry {
+                        skill,
+                        source_layer: "global",
+                        source_scope: None,
+                    })
+                }
+            }
+            _ => None,
+        }
     }
 
     /// 按 `user > tenant > global` 列出可见技能。
@@ -348,25 +418,8 @@ impl LayeredSkillRegistry {
 
     /// 返回技能来源层级。
     pub fn source_for_scopes(&self, scopes: &[String], name: &str) -> Option<&'static str> {
-        for scope in scopes {
-            if self
-                .user
-                .get(scope)
-                .and_then(|registry| registry.get(name))
-                .is_some()
-            {
-                return Some("user");
-            }
-            if self
-                .tenant
-                .get(scope)
-                .and_then(|registry| registry.get(name))
-                .is_some()
-            {
-                return Some("tenant");
-            }
-        }
-        self.global.get(name).map(|_| "global")
+        self.get_for_scopes_entry(scopes, name)
+            .map(|entry| entry.source_layer)
     }
 
     /// 列出所有层级中的技能名称。
@@ -383,20 +436,100 @@ impl LayeredSkillRegistry {
         names
     }
 
+    /// 列出所有来源条目。
+    pub fn list_all_entries(&self) -> Vec<LayeredSkillEntry> {
+        let mut entries = Vec::new();
+
+        for skill in self.global.skills.values() {
+            entries.push(LayeredSkillEntry {
+                skill: skill.clone(),
+                source_layer: "global",
+                source_scope: None,
+            });
+        }
+        for scope in sorted_skill_scopes(&self.tenant) {
+            if let Some(registry) = self.tenant.get(&scope) {
+                for skill in registry.skills.values() {
+                    entries.push(LayeredSkillEntry {
+                        skill: skill.clone(),
+                        source_layer: "tenant",
+                        source_scope: Some(scope.clone()),
+                    });
+                }
+            }
+        }
+        for scope in sorted_skill_scopes(&self.user) {
+            if let Some(registry) = self.user.get(&scope) {
+                for skill in registry.skills.values() {
+                    entries.push(LayeredSkillEntry {
+                        skill: skill.clone(),
+                        source_layer: "user",
+                        source_scope: Some(scope.clone()),
+                    });
+                }
+            }
+        }
+
+        entries.sort_by(|left, right| {
+            left.skill
+                .name()
+                .cmp(right.skill.name())
+                .then_with(|| left.source_layer.cmp(right.source_layer))
+                .then_with(|| {
+                    left.source_scope
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(right.source_scope.as_deref().unwrap_or(""))
+                })
+        });
+        entries
+    }
+
     /// 返回任意层级中的技能定义，优先 user / tenant / global。
     pub fn get_any(&self, name: &str) -> Option<Skill> {
-        for registry in self.user.values() {
-            if let Some(skill) = registry.get(name) {
-                return Some(skill);
-            }
-        }
-        for registry in self.tenant.values() {
-            if let Some(skill) = registry.get(name) {
-                return Some(skill);
-            }
-        }
-        self.global.get(name)
+        self.get_any_entry(name).map(|entry| entry.skill)
     }
+
+    /// 返回任意层级中的技能来源条目，优先 user / tenant / global。
+    pub fn get_any_entry(&self, name: &str) -> Option<LayeredSkillEntry> {
+        for scope in sorted_skill_scopes(&self.user) {
+            if let Some(skill) = self
+                .user
+                .get(&scope)
+                .and_then(|registry| registry.get(name))
+            {
+                return Some(LayeredSkillEntry {
+                    skill,
+                    source_layer: "user",
+                    source_scope: Some(scope),
+                });
+            }
+        }
+        for scope in sorted_skill_scopes(&self.tenant) {
+            if let Some(skill) = self
+                .tenant
+                .get(&scope)
+                .and_then(|registry| registry.get(name))
+            {
+                return Some(LayeredSkillEntry {
+                    skill,
+                    source_layer: "tenant",
+                    source_scope: Some(scope),
+                });
+            }
+        }
+        self.global.get(name).map(|skill| LayeredSkillEntry {
+            skill,
+            source_layer: "global",
+            source_scope: None,
+        })
+    }
+}
+
+fn sorted_skill_scopes<T>(catalog: &HashMap<String, T>) -> Vec<String> {
+    let mut scopes = catalog.keys().cloned().collect::<Vec<_>>();
+    scopes.sort();
+    scopes
 }
 
 /// 哑技能执行器（用于测试）

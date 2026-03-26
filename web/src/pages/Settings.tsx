@@ -23,6 +23,12 @@ import {
 import { skillService } from '../services/agents';
 import { systemService } from '../services/system';
 
+const sourceLayerColorMap: Record<string, string> = {
+  global: 'default',
+  tenant: 'purple',
+  user: 'cyan',
+};
+
 const Settings: React.FC = () => {
   const {
     data: stats,
@@ -141,7 +147,9 @@ const Settings: React.FC = () => {
               dataSource={skills}
               locale={{ emptyText: '暂无 Skill' }}
               renderItem={(skill) => (
-                <List.Item key={skill.name}>
+                <List.Item
+                  key={`${skill.name}:${skill.source_layer}:${skill.source_scope ?? 'global'}`}
+                >
                   <Descriptions size="small" column={1} style={{ width: '100%' }}>
                     <Descriptions.Item label="Skill">
                       <Space>
@@ -152,6 +160,13 @@ const Settings: React.FC = () => {
                       </Space>
                     </Descriptions.Item>
                     <Descriptions.Item label="执行方式">{skill.execution_mode}</Descriptions.Item>
+                    <Descriptions.Item label="来源">
+                      <Tag color={sourceLayerColorMap[skill.source_layer] ?? 'default'}>
+                        {skill.source_scope
+                          ? `${skill.source_layer} · ${skill.source_scope}`
+                          : skill.source_layer}
+                      </Tag>
+                    </Descriptions.Item>
                     <Descriptions.Item label="超时">{skill.timeout_secs}s</Descriptions.Item>
                     <Descriptions.Item label="命令来源">
                       {skill.executable || '内置 / dummy'}

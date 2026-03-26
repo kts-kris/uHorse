@@ -51,7 +51,9 @@ pub use gateway::{Gateway, GatewayConfig, GatewayEvent};
 pub use memory::{FileMemory, LayeredMemoryStore, MemoryStore};
 pub use router::{Route, RouteTarget, Router};
 pub use session_key::{ChannelType, SessionKey, SessionNamespace};
-pub use skill::{LayeredSkillRegistry, Skill, SkillExecutor, SkillManifest, SkillRegistry};
+pub use skill::{
+    LayeredSkillEntry, LayeredSkillRegistry, Skill, SkillExecutor, SkillManifest, SkillRegistry,
+};
 
 // MCP 相关
 pub use mcp::{
