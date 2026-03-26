@@ -131,6 +131,16 @@ const Sessions: React.FC = () => {
       render: (value: string | null) => (value ? <Tag color="blue">{value}</Tag> : <Tag>未绑定</Tag>),
     },
     {
+      title: 'Namespace',
+      key: 'namespace',
+      width: 220,
+      render: (_, record) => (
+        <Tag color={record.namespace?.tenant ? 'purple' : 'cyan'}>
+          {formatNamespaceSummary(record)}
+        </Tag>
+      ),
+    },
+    {
       title: 'Conversation',
       dataIndex: 'conversation_id',
       key: 'conversation_id',
@@ -274,6 +284,11 @@ const Sessions: React.FC = () => {
               <Descriptions.Item label="Agent">
                 {sessionDetail.agent_id ? <Tag color="blue">{sessionDetail.agent_id}</Tag> : '-'}
               </Descriptions.Item>
+              <Descriptions.Item label="Namespace">
+                <Tag color={sessionDetail.namespace?.tenant ? 'purple' : 'cyan'}>
+                  {formatNamespaceSummary(sessionDetail)}
+                </Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="Conversation ID">
                 {sessionDetail.conversation_id || '-'}
               </Descriptions.Item>
@@ -296,6 +311,39 @@ const Sessions: React.FC = () => {
                 {formatDateTime(sessionDetail.last_active)}
               </Descriptions.Item>
             </Descriptions>
+
+            <Card size="small" title="Namespace 明细" loading={isDetailLoading}>
+              <Descriptions bordered column={1} size="small">
+                <Descriptions.Item label="global">
+                  <Typography.Text code copyable>
+                    {sessionDetail.namespace?.global || '-'}
+                  </Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="tenant">
+                  <Typography.Text code copyable>
+                    {sessionDetail.namespace?.tenant || '-'}
+                  </Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="user">
+                  <Typography.Text code copyable>
+                    {sessionDetail.namespace?.user || '-'}
+                  </Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="session">
+                  <Typography.Text code copyable>
+                    {sessionDetail.namespace?.session || '-'}
+                  </Typography.Text>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Card size="small" title="可见性链路" loading={isDetailLoading}>
+              {renderScopeChain(sessionDetail.visibility_chain, '可见 Agent / Skill')}
+            </Card>
+
+            <Card size="small" title="Memory 上下文链路" loading={isDetailLoading}>
+              {renderScopeChain(sessionDetail.memory_context_chain, '读取 Memory 上下文')}
+            </Card>
 
             <Card size="small" title="Session Metadata" loading={isDetailLoading}>
               {Object.keys(sessionDetail.metadata).length > 0 ? (
@@ -354,6 +402,41 @@ const messageBlockStyle: React.CSSProperties = {
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
 };
+
+function formatNamespaceSummary(session: SessionRuntimeSummary): string {
+  const namespace = session.namespace;
+  if (!namespace) {
+    return '-';
+  }
+
+  return namespace.tenant ? `${namespace.user} · ${namespace.tenant}` : namespace.user;
+}
+
+function renderScopeChain(scopes: string[], emptyDescription: string): React.ReactNode {
+  if (scopes.length === 0) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyDescription} />;
+  }
+
+  return (
+    <Space size={[8, 8]} wrap>
+      {scopes.map((scope) => {
+        const color = scope.startsWith('session:')
+          ? 'geekblue'
+          : scope.startsWith('user:')
+            ? 'cyan'
+            : scope.startsWith('tenant:')
+              ? 'purple'
+              : 'default';
+
+        return (
+          <Tag key={scope} color={color}>
+            {scope}
+          </Tag>
+        );
+      })}
+    </Space>
+  );
+}
 
 function formatDateTime(value: string): string {
   const timestamp = Date.parse(value);

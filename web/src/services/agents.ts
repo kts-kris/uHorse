@@ -18,9 +18,18 @@ export const agentService = {
     throw new Error(getApiErrorMessage(data.error, '获取 Agent 运行时列表失败'));
   },
 
-  async get(agentId: string): Promise<AgentRuntimeDetail> {
+  async get(
+    agentId: string,
+    options?: { source_layer?: string; source_scope?: string | null }
+  ): Promise<AgentRuntimeDetail> {
     const { data } = await client.get<ApiResponse<AgentRuntimeDetail>>(
-      `/api/v1/agents/${encodeURIComponent(agentId)}`
+      `/api/v1/agents/${encodeURIComponent(agentId)}`,
+      {
+        params: {
+          source_layer: options?.source_layer,
+          source_scope: options?.source_scope ?? undefined,
+        },
+      }
     );
     if (data.success && data.data !== null) return data.data;
     throw new Error(getApiErrorMessage(data.error, '获取 Agent 详情失败'));

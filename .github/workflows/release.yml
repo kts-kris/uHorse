@@ -124,6 +124,9 @@ jobs:
       - name: Build Node
         run: cargo build --release --target ${{ matrix.target }} -p uhorse-node
 
+      - name: Build Node Desktop package assets
+        run: npm --prefix apps/node-desktop-web install && npm --prefix apps/node-desktop-web run build
+
       - name: Build Node Desktop
         run: cargo build --release --target ${{ matrix.target }} -p uhorse-node-desktop
 
@@ -170,8 +173,9 @@ jobs:
           VERSION="${{ needs.resolve-version.outputs.version }}"
           ARCHIVE_NAME="uhorse-node-desktop-${VERSION}-${{ matrix.target }}"
 
-          rm -rf package && mkdir -p package
-          cp target/${{ matrix.target }}/release/uhorse-node-desktop package/
+          rm -rf package && mkdir -p package/bin package/web
+          cp target/${{ matrix.target }}/release/uhorse-node-desktop package/bin/
+          cp -R apps/node-desktop-web/dist/. package/web/
           cp README.md package/ 2>/dev/null || true
           cp CHANGELOG.md package/ 2>/dev/null || true
           cp LICENSE* package/ 2>/dev/null || true
@@ -218,8 +222,10 @@ jobs:
           $ARCHIVE_NAME = "uhorse-node-desktop-${VERSION}-${{ matrix.target }}"
 
           Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path package -Force
-          Copy-Item target/${{ matrix.target }}/release/uhorse-node-desktop.exe package/
+          New-Item -ItemType Directory -Path package/bin -Force
+          New-Item -ItemType Directory -Path package/web -Force
+          Copy-Item target/${{ matrix.target }}/release/uhorse-node-desktop.exe package/bin/
+          Copy-Item apps/node-desktop-web/dist/* package/web/ -Recurse
           Copy-Item README.md package/ -ErrorAction SilentlyContinue
           Copy-Item CHANGELOG.md package/ -ErrorAction SilentlyContinue
           Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue

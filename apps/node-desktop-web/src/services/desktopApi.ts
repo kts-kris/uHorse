@@ -16,7 +16,15 @@ import type {
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8757';
 
 function getBaseUrl(): string {
-  return import.meta.env.VITE_DESKTOP_API_URL || DEFAULT_BASE_URL;
+  if (import.meta.env.VITE_DESKTOP_API_URL) {
+    return import.meta.env.VITE_DESKTOP_API_URL;
+  }
+
+  if (!import.meta.env.DEV && typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)) {
+    return window.location.origin;
+  }
+
+  return DEFAULT_BASE_URL;
 }
 
 export function getApiErrorMessage(error: ApiError | undefined, fallback: string): string {

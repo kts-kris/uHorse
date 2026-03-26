@@ -6,6 +6,8 @@ export interface AgentRuntimeSummary {
   is_default: boolean;
   skill_names: string[];
   active_session_count: number;
+  source_layer: string;
+  source_scope: string | null;
 }
 
 export interface AgentRuntimeDetail extends AgentRuntimeSummary {
@@ -30,6 +32,13 @@ export interface SkillRuntimeDetail extends SkillRuntimeSummary {
   env: Record<string, string>;
 }
 
+export interface SessionNamespace {
+  global: string;
+  tenant: string | null;
+  user: string;
+  session: string;
+}
+
 export interface SessionRuntimeSummary {
   session_id: string;
   agent_id: string | null;
@@ -40,9 +49,12 @@ export interface SessionRuntimeSummary {
   message_count: number;
   created_at: string;
   last_active: string;
+  namespace: SessionNamespace | null;
 }
 
 export interface SessionRuntimeDetail extends SessionRuntimeSummary {
+  memory_context_chain: string[];
+  visibility_chain: string[];
   metadata: Record<string, string>;
 }
 

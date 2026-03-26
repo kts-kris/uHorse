@@ -15,6 +15,7 @@
 
 - [系统要求](#系统要求)
 - [从源码安装](#从源码安装)
+- [可选：打包 Node Desktop](#可选打包-node-desktop)
 - [可选：编译 legacy 单体二进制](#可选编译-legacy-单体二进制)
 - [安装验证](#安装验证)
 - [脚本说明](#脚本说明)
@@ -96,6 +97,28 @@ cargo build --release -p uhorse-hub -p uhorse-node
 
 ```bash
 ./target/release/uhorse-node --config node.toml --log-level info
+```
+
+---
+
+## 可选：打包 Node Desktop
+
+如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本：
+
+```bash
+./scripts/package-node-desktop.sh
+```
+
+默认产物：
+
+- `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/bin/uhorse-node-desktop`
+- `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/web/`
+- 对应 `.tar.gz` 或 `.zip` 压缩包
+
+若要验证打包后的宿主 API 与静态资源联通，可继续执行：
+
+```bash
+./scripts/desktop-smoke.sh
 ```
 
 ---

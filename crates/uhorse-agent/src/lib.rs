@@ -48,10 +48,10 @@ pub use agent_scope::{AgentManager, AgentScope, AgentScopeConfig, SessionState};
 pub use bindings::{Binding, BindingBuilder, BindingsConfig, BindingsRouter};
 pub use error::{AgentError, AgentResult};
 pub use gateway::{Gateway, GatewayConfig, GatewayEvent};
-pub use memory::{FileMemory, MemoryStore};
+pub use memory::{FileMemory, LayeredMemoryStore, MemoryStore};
 pub use router::{Route, RouteTarget, Router};
-pub use session_key::{ChannelType, SessionKey};
-pub use skill::{Skill, SkillExecutor, SkillManifest, SkillRegistry};
+pub use session_key::{ChannelType, SessionKey, SessionNamespace};
+pub use skill::{LayeredSkillRegistry, Skill, SkillExecutor, SkillManifest, SkillRegistry};
 
 // MCP 相关
 pub use mcp::{

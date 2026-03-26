@@ -5,7 +5,7 @@
 pub mod ws;
 
 use axum::{
-    extract::{MatchedPath, Path, Request, State},
+    extract::{MatchedPath, Path, Query, Request, State},
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Json, Response},
@@ -14,15 +14,15 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
 use uhorse_agent::{
-    Agent, AgentManager, AgentScope, AgentScopeConfig, FileMemory, MemoryStore, SessionKey,
-    SessionState, SkillRegistry,
+    Agent, AgentManager, AgentScope, AgentScopeConfig, LayeredMemoryStore, LayeredSkillRegistry,
+    MemoryStore, SessionKey, SessionNamespace, SessionState, SkillRegistry,
 };
 use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
@@ -83,6 +83,8 @@ struct AgentRuntimeSummary {
     is_default: bool,
     skill_names: Vec<String>,
     active_session_count: usize,
+    source_layer: String,
+    source_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +97,379 @@ struct AgentRuntimeDetail {
     is_default: bool,
     skill_names: Vec<String>,
     active_session_count: usize,
+    source_layer: String,
+    source_scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AgentRuntimeQuery {
+    source_layer: Option<String>,
+    source_scope: Option<String>,
+}
+
+#[derive(Clone)]
+struct CatalogAgentEntry {
+    agent: Agent,
+    source_layer: &'static str,
+    source_scope: Option<String>,
+}
+
+/// 分层 Agent catalog。
+#[derive(Clone, Default)]
+pub struct LayeredAgentCatalog {
+    global: HashMap<String, Agent>,
+    tenant: HashMap<String, HashMap<String, Agent>>,
+    user: HashMap<String, HashMap<String, Agent>>,
+}
+
+impl LayeredAgentCatalog {
+    fn new(global: HashMap<String, Agent>) -> Self {
+        Self {
+            global,
+            tenant: HashMap::new(),
+            user: HashMap::new(),
+        }
+    }
+
+    fn register_tenant_catalog(
+        &mut self,
+        scope: impl Into<String>,
+        agents: HashMap<String, Agent>,
+    ) {
+        if !agents.is_empty() {
+            self.tenant.insert(scope.into(), agents);
+        }
+    }
+
+    fn register_user_catalog(&mut self, scope: impl Into<String>, agents: HashMap<String, Agent>) {
+        if !agents.is_empty() {
+            self.user.insert(scope.into(), agents);
+        }
+    }
+
+    fn contains_any(&self, agent_id: &str) -> bool {
+        self.get_any(agent_id).is_some()
+    }
+
+    fn get(&self, agent_id: &str) -> Option<Agent> {
+        self.get_any(agent_id)
+    }
+
+    fn get_for_scopes(&self, scopes: &[String], agent_id: &str) -> Option<Agent> {
+        self.get_for_scopes_entry(scopes, agent_id)
+            .map(|entry| entry.agent)
+    }
+
+    fn get_entry_by_source(
+        &self,
+        agent_id: &str,
+        source_layer: &str,
+        source_scope: Option<&str>,
+    ) -> Option<CatalogAgentEntry> {
+        match source_layer {
+            "user" => source_scope.and_then(|scope| {
+                self.user
+                    .get(scope)
+                    .and_then(|catalog| catalog.get(agent_id))
+                    .cloned()
+                    .map(|agent| CatalogAgentEntry {
+                        agent,
+                        source_layer: "user",
+                        source_scope: Some(scope.to_string()),
+                    })
+            }),
+            "tenant" => source_scope.and_then(|scope| {
+                self.tenant
+                    .get(scope)
+                    .and_then(|catalog| catalog.get(agent_id))
+                    .cloned()
+                    .map(|agent| CatalogAgentEntry {
+                        agent,
+                        source_layer: "tenant",
+                        source_scope: Some(scope.to_string()),
+                    })
+            }),
+            "global" => self
+                .global
+                .get(agent_id)
+                .cloned()
+                .map(|agent| CatalogAgentEntry {
+                    agent,
+                    source_layer: "global",
+                    source_scope: None,
+                }),
+            _ => None,
+        }
+    }
+
+    fn get_for_scopes_entry(&self, scopes: &[String], agent_id: &str) -> Option<CatalogAgentEntry> {
+        for scope in scopes {
+            if let Some(agent) = self
+                .user
+                .get(scope)
+                .and_then(|catalog| catalog.get(agent_id))
+                .cloned()
+            {
+                return Some(CatalogAgentEntry {
+                    agent,
+                    source_layer: "user",
+                    source_scope: Some(scope.clone()),
+                });
+            }
+            if let Some(agent) = self
+                .tenant
+                .get(scope)
+                .and_then(|catalog| catalog.get(agent_id))
+                .cloned()
+            {
+                return Some(CatalogAgentEntry {
+                    agent,
+                    source_layer: "tenant",
+                    source_scope: Some(scope.clone()),
+                });
+            }
+        }
+
+        self.global
+            .get(agent_id)
+            .cloned()
+            .map(|agent| CatalogAgentEntry {
+                agent,
+                source_layer: "global",
+                source_scope: None,
+            })
+    }
+
+    fn list_names_for_scopes(&self, scopes: &[String]) -> Vec<String> {
+        let mut names = self.global.keys().cloned().collect::<Vec<_>>();
+        for scope in scopes.iter().rev() {
+            if let Some(catalog) = self.tenant.get(scope) {
+                names.extend(catalog.keys().cloned());
+            }
+            if let Some(catalog) = self.user.get(scope) {
+                names.extend(catalog.keys().cloned());
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn list_all_ids(&self) -> Vec<String> {
+        let mut names = self.global.keys().cloned().collect::<Vec<_>>();
+        for catalog in self.tenant.values() {
+            names.extend(catalog.keys().cloned());
+        }
+        for catalog in self.user.values() {
+            names.extend(catalog.keys().cloned());
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn list_all_entries(&self) -> Vec<CatalogAgentEntry> {
+        let mut entries = Vec::new();
+
+        for (agent_id, agent) in &self.global {
+            let _ = agent_id;
+            entries.push(CatalogAgentEntry {
+                agent: agent.clone(),
+                source_layer: "global",
+                source_scope: None,
+            });
+        }
+
+        for scope in sorted_catalog_scopes(&self.tenant) {
+            if let Some(catalog) = self.tenant.get(&scope) {
+                for agent in catalog.values() {
+                    entries.push(CatalogAgentEntry {
+                        agent: agent.clone(),
+                        source_layer: "tenant",
+                        source_scope: Some(scope.clone()),
+                    });
+                }
+            }
+        }
+
+        for scope in sorted_catalog_scopes(&self.user) {
+            if let Some(catalog) = self.user.get(&scope) {
+                for agent in catalog.values() {
+                    entries.push(CatalogAgentEntry {
+                        agent: agent.clone(),
+                        source_layer: "user",
+                        source_scope: Some(scope.clone()),
+                    });
+                }
+            }
+        }
+
+        entries.sort_by(|left, right| {
+            left.agent
+                .agent_id()
+                .cmp(right.agent.agent_id())
+                .then_with(|| left.source_layer.cmp(right.source_layer))
+                .then_with(|| {
+                    left.source_scope
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(right.source_scope.as_deref().unwrap_or(""))
+                })
+        });
+        entries
+    }
+
+    fn get_any(&self, agent_id: &str) -> Option<Agent> {
+        self.get_any_entry(agent_id).map(|entry| entry.agent)
+    }
+
+    fn get_any_entry(&self, agent_id: &str) -> Option<CatalogAgentEntry> {
+        for scope in sorted_catalog_scopes(&self.user) {
+            if let Some(agent) = self
+                .user
+                .get(&scope)
+                .and_then(|catalog| catalog.get(agent_id))
+            {
+                return Some(CatalogAgentEntry {
+                    agent: agent.clone(),
+                    source_layer: "user",
+                    source_scope: Some(scope),
+                });
+            }
+        }
+        for scope in sorted_catalog_scopes(&self.tenant) {
+            if let Some(agent) = self
+                .tenant
+                .get(&scope)
+                .and_then(|catalog| catalog.get(agent_id))
+            {
+                return Some(CatalogAgentEntry {
+                    agent: agent.clone(),
+                    source_layer: "tenant",
+                    source_scope: Some(scope),
+                });
+            }
+        }
+        self.global
+            .get(agent_id)
+            .cloned()
+            .map(|agent| CatalogAgentEntry {
+                agent,
+                source_layer: "global",
+                source_scope: None,
+            })
+    }
+}
+
+fn sorted_catalog_scopes<T>(catalog: &HashMap<String, T>) -> Vec<String> {
+    let mut scopes = catalog.keys().cloned().collect::<Vec<_>>();
+    scopes.sort();
+    scopes
+}
+
+fn agent_display_name(agent_id: &str) -> String {
+    if agent_id == "main" {
+        return "Main Agent".to_string();
+    }
+
+    let segments = agent_id
+        .split(['-', '_'])
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if segments.is_empty() {
+        agent_id.to_string()
+    } else {
+        segments.join(" ")
+    }
+}
+
+async fn build_catalog_agent(
+    agent_id: &str,
+    workspace_dir: PathBuf,
+    is_default: bool,
+    description: impl Into<String>,
+    system_prompt: impl Into<String>,
+) -> Result<Agent, Box<dyn std::error::Error + Send + Sync>> {
+    let display_name = agent_display_name(agent_id);
+    let scope = AgentScope::new(AgentScopeConfig {
+        agent_id: agent_id.to_string(),
+        workspace_dir: workspace_dir.clone(),
+        display_name: Some(display_name.clone()),
+        is_default,
+    })?;
+    scope.init_workspace().await?;
+
+    Ok(Agent::builder()
+        .agent_id(agent_id)
+        .name(display_name)
+        .description(description)
+        .workspace_dir(workspace_dir)
+        .system_prompt(system_prompt)
+        .set_default(is_default)
+        .build()?
+        .with_scope(scope))
+}
+
+async fn load_agent_catalog_from_root(
+    root: &FsPath,
+    include_main: bool,
+) -> Result<HashMap<String, Agent>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut agents = HashMap::new();
+    if !root.exists() {
+        return Ok(agents);
+    }
+
+    let mut candidates = Vec::new();
+    if include_main {
+        let main_workspace = root.join("workspace");
+        if main_workspace.is_dir() {
+            candidates.push(("main".to_string(), main_workspace));
+        }
+    }
+
+    let mut entries = tokio::fs::read_dir(root).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some(agent_id) = name.strip_prefix("workspace-") else {
+            continue;
+        };
+        if agent_id.is_empty() {
+            continue;
+        }
+        candidates.push((agent_id.to_string(), path));
+    }
+
+    candidates.sort_by(|left, right| left.0.cmp(&right.0));
+    for (agent_id, workspace_dir) in candidates {
+        let is_default = false;
+        let description = format!("{} agent", agent_display_name(&agent_id));
+        let system_prompt = format!("You are the {} for uHorse.", agent_display_name(&agent_id));
+        let agent = build_catalog_agent(
+            &agent_id,
+            workspace_dir,
+            is_default,
+            description,
+            system_prompt,
+        )
+        .await?;
+        agents.insert(agent_id, agent);
+    }
+
+    Ok(agents)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,6 +513,7 @@ struct SessionRuntimeSummary {
     message_count: usize,
     created_at: String,
     last_active: String,
+    namespace: Option<SessionNamespace>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -151,6 +527,9 @@ struct SessionRuntimeDetail {
     message_count: usize,
     created_at: String,
     last_active: String,
+    namespace: Option<SessionNamespace>,
+    memory_context_chain: Vec<String>,
+    visibility_chain: Vec<String>,
     metadata: HashMap<String, String>,
 }
 
@@ -166,12 +545,12 @@ struct SessionMessageRecord {
 pub struct WebAgentRuntime {
     /// Agent 管理器
     pub agent_manager: Arc<AgentManager>,
-    /// 已注册 Agent 集合
-    pub agents: Arc<HashMap<String, Agent>>,
+    /// 分层 Agent catalog
+    pub agents: Arc<LayeredAgentCatalog>,
     /// Memory 存储
     pub memory_store: Arc<dyn MemoryStore>,
-    /// Skill 注册表
-    pub skills: Arc<SkillRegistry>,
+    /// 分层 Skill 注册表
+    pub skills: Arc<LayeredSkillRegistry>,
 }
 
 /// Web 服务器状态
@@ -258,15 +637,15 @@ fn default_agent_runtime() -> WebAgentRuntime {
         AgentManager::new(std::env::temp_dir().join("uhorse-agent-runtime"))
             .expect("fallback agent manager")
     });
-    let memory_store: Arc<dyn MemoryStore> = Arc::new(FileMemory::new(
+    let memory_store: Arc<dyn MemoryStore> = Arc::new(LayeredMemoryStore::new(
         std::env::temp_dir().join("uhorse-web-memory"),
     ));
 
     WebAgentRuntime {
         agent_manager: Arc::new(agent_manager),
-        agents: Arc::new(HashMap::new()),
+        agents: Arc::new(LayeredAgentCatalog::default()),
         memory_store,
-        skills: Arc::new(SkillRegistry::new()),
+        skills: Arc::new(LayeredSkillRegistry::new(SkillRegistry::new())),
     }
 }
 
@@ -275,53 +654,97 @@ pub async fn init_default_agent_runtime(
     base_dir: PathBuf,
 ) -> Result<WebAgentRuntime, Box<dyn std::error::Error + Send + Sync>> {
     let mut agent_manager = AgentManager::new(base_dir.clone())?;
-    let workspace_dir = base_dir.join("workspace");
-    let scope = AgentScope::new(AgentScopeConfig {
-        agent_id: "main".to_string(),
-        workspace_dir: workspace_dir.clone(),
-        display_name: Some("Main Agent".to_string()),
-        is_default: true,
-    })?;
-    scope.init_workspace().await?;
-    agent_manager.register_scope(Arc::new(scope.clone()))?;
 
-    let mut skills = SkillRegistry::new();
-    let skills_dir = base_dir.join("skills");
-    if skills_dir.exists() {
-        let _ = skills.load_from_dir(skills_dir).await;
+    let main_agent = build_catalog_agent(
+        "main",
+        base_dir.join("workspace"),
+        true,
+        "Hub default agent",
+        "You are the default uHorse Hub agent.",
+    )
+    .await?;
+    if let Some(scope) = main_agent.scope().cloned() {
+        agent_manager.register_scope(Arc::new(scope))?;
     }
 
-    let main_agent = Agent::builder()
-        .agent_id("main")
-        .name("Main Agent")
-        .description("Hub default agent")
-        .workspace_dir(workspace_dir)
-        .system_prompt("You are the default uHorse Hub agent.")
-        .set_default(true)
-        .build()?
-        .with_scope(scope);
+    let mut global_agents = HashMap::from([("main".to_string(), main_agent)]);
+    let additional_global_agents = load_agent_catalog_from_root(&base_dir, false).await?;
+    for agent in additional_global_agents.values() {
+        if let Some(scope) = agent.scope().cloned() {
+            agent_manager.register_scope(Arc::new(scope))?;
+        }
+    }
+    global_agents.extend(additional_global_agents);
+    let mut layered_agents = LayeredAgentCatalog::new(global_agents);
 
-    let memory = FileMemory::new(base_dir.join("workspace"));
+    let global_skills = SkillRegistry::from_dir(base_dir.join("skills")).await?;
+    let mut layered_skills = LayeredSkillRegistry::new(global_skills);
+
+    let tenants_dir = base_dir.join("tenants");
+    if tenants_dir.exists() {
+        let mut tenant_entries = tokio::fs::read_dir(&tenants_dir).await?;
+        while let Some(entry) = tenant_entries.next_entry().await? {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(scope) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let registry = SkillRegistry::from_dir(path.join("skills")).await?;
+            if !registry.is_empty() {
+                layered_skills.register_tenant_registry(scope.to_string(), registry);
+            }
+            let catalog = load_agent_catalog_from_root(&path, true).await?;
+            if !catalog.is_empty() {
+                layered_agents.register_tenant_catalog(scope.to_string(), catalog);
+            }
+        }
+    }
+
+    let users_dir = base_dir.join("users");
+    if users_dir.exists() {
+        let mut user_entries = tokio::fs::read_dir(&users_dir).await?;
+        while let Some(entry) = user_entries.next_entry().await? {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(scope) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let registry = SkillRegistry::from_dir(path.join("skills")).await?;
+            if !registry.is_empty() {
+                layered_skills.register_user_registry(scope.to_string(), registry);
+            }
+            let catalog = load_agent_catalog_from_root(&path, true).await?;
+            if !catalog.is_empty() {
+                layered_agents.register_user_catalog(scope.to_string(), catalog);
+            }
+        }
+    }
+
+    let memory = LayeredMemoryStore::new(base_dir.join("workspace"));
     memory.init_workspace().await?;
 
     Ok(WebAgentRuntime {
         agent_manager: Arc::new(agent_manager),
-        agents: Arc::new(HashMap::from([("main".to_string(), main_agent)])),
+        agents: Arc::new(layered_agents),
         memory_store: Arc::new(memory),
-        skills: Arc::new(skills),
+        skills: Arc::new(layered_skills),
     })
 }
 
 fn default_agent_id(state: &WebState) -> String {
-    if state.agent_runtime.agents.contains_key("main") {
+    if state.agent_runtime.agents.contains_any("main") {
         "main".to_string()
     } else {
         state
             .agent_runtime
             .agents
-            .keys()
+            .list_all_ids()
+            .into_iter()
             .next()
-            .cloned()
             .unwrap_or_else(|| "main".to_string())
     }
 }
@@ -329,9 +752,9 @@ fn default_agent_id(state: &WebState) -> String {
 fn agent_scope_for(state: &WebState, agent_id: &str) -> Option<Arc<AgentScope>> {
     state
         .agent_runtime
-        .agent_manager
-        .get_scope(agent_id)
-        .cloned()
+        .agents
+        .get(agent_id)
+        .and_then(|agent| agent.scope().cloned().map(Arc::new))
         .or_else(|| {
             state
                 .agent_runtime
@@ -339,6 +762,195 @@ fn agent_scope_for(state: &WebState, agent_id: &str) -> Option<Arc<AgentScope>> 
                 .get_default_scope()
                 .cloned()
         })
+}
+
+fn agent_scope_for_session(
+    state: &WebState,
+    session_key: &SessionKey,
+    agent_id: &str,
+) -> Option<Arc<AgentScope>> {
+    let visibility_chain = session_key.namespace().visibility_chain();
+    state
+        .agent_runtime
+        .agents
+        .get_for_scopes(&visibility_chain, agent_id)
+        .and_then(|agent| agent.scope().cloned().map(Arc::new))
+        .or_else(|| agent_scope_for(state, agent_id))
+}
+
+fn agent_scope_from_entry(entry: &CatalogAgentEntry) -> Option<Arc<AgentScope>> {
+    entry.agent.scope().cloned().map(Arc::new)
+}
+
+fn agent_entry_from_source_metadata(
+    state: &WebState,
+    agent_id: &str,
+    source_layer: Option<&str>,
+    source_scope: Option<&str>,
+) -> Option<CatalogAgentEntry> {
+    source_layer.and_then(|layer| {
+        state
+            .agent_runtime
+            .agents
+            .get_entry_by_source(agent_id, layer, source_scope)
+    })
+}
+
+fn session_state_agent_entry(
+    state: &WebState,
+    session_state: &SessionState,
+) -> Option<CatalogAgentEntry> {
+    let agent_id = session_state.metadata.get("current_agent")?;
+    agent_entry_from_source_metadata(
+        state,
+        agent_id,
+        session_state
+            .metadata
+            .get("agent_source_layer")
+            .map(String::as_str),
+        session_state
+            .metadata
+            .get("agent_source_scope")
+            .map(String::as_str),
+    )
+}
+
+fn task_context_agent_entry(
+    state: &WebState,
+    session_key: Option<&SessionKey>,
+    context: &TaskContext,
+) -> Option<CatalogAgentEntry> {
+    let agent_id = context.env.get("agent_id").map(String::as_str)?;
+
+    if let Some(entry) = agent_entry_from_source_metadata(
+        state,
+        agent_id,
+        context.env.get("agent_source_layer").map(String::as_str),
+        context.env.get("agent_source_scope").map(String::as_str),
+    ) {
+        return Some(entry);
+    }
+
+    if let Some(session_key) = session_key {
+        let visibility_chain = session_key.namespace().visibility_chain();
+        if let Some(entry) = state
+            .agent_runtime
+            .agents
+            .get_for_scopes_entry(&visibility_chain, agent_id)
+        {
+            return Some(entry);
+        }
+    }
+
+    state.agent_runtime.agents.get_any_entry(agent_id)
+}
+
+async fn resolve_agent_entry_for_session(
+    state: &Arc<WebState>,
+    session_key: &SessionKey,
+    requested_agent_id: Option<&str>,
+) -> Option<CatalogAgentEntry> {
+    if let Some(session_state) = load_session_state_for_session(state, session_key).await {
+        if let Some(entry) =
+            session_state_agent_entry(state.as_ref(), &session_state).filter(|entry| {
+                requested_agent_id
+                    .map(|agent_id| entry.agent.agent_id() == agent_id)
+                    .unwrap_or(true)
+            })
+        {
+            return Some(entry);
+        }
+
+        if let Some(agent_id) = session_state
+            .metadata
+            .get("current_agent")
+            .map(String::as_str)
+            .filter(|agent_id| {
+                requested_agent_id
+                    .map(|requested| requested == *agent_id)
+                    .unwrap_or(true)
+            })
+        {
+            let visibility_chain = session_key.namespace().visibility_chain();
+            if let Some(entry) = state
+                .agent_runtime
+                .agents
+                .get_for_scopes_entry(&visibility_chain, agent_id)
+                .or_else(|| state.agent_runtime.agents.get_any_entry(agent_id))
+            {
+                return Some(entry);
+            }
+        }
+    }
+
+    let visibility_chain = session_key.namespace().visibility_chain();
+    if let Some(agent_id) = requested_agent_id {
+        return state
+            .agent_runtime
+            .agents
+            .get_for_scopes_entry(&visibility_chain, agent_id)
+            .or_else(|| state.agent_runtime.agents.get_any_entry(agent_id));
+    }
+
+    let fallback = default_agent_id(state.as_ref());
+    state
+        .agent_runtime
+        .agents
+        .get_for_scopes_entry(&visibility_chain, &fallback)
+        .or_else(|| state.agent_runtime.agents.get_any_entry(&fallback))
+}
+
+async fn resolve_agent_scope_for_session(
+    state: &Arc<WebState>,
+    session_key: &SessionKey,
+    requested_agent_id: Option<&str>,
+) -> Option<Arc<AgentScope>> {
+    resolve_agent_entry_for_session(state, session_key, requested_agent_id)
+        .await
+        .and_then(|entry| agent_scope_from_entry(&entry))
+}
+
+async fn load_session_state_for_session(
+    state: &Arc<WebState>,
+    session_key: &SessionKey,
+) -> Option<SessionState> {
+    let visibility_chain = session_key.namespace().visibility_chain();
+    let mut latest = None;
+
+    for agent_id in state
+        .agent_runtime
+        .agents
+        .list_names_for_scopes(&visibility_chain)
+    {
+        let Some(scope) = agent_scope_for_session(state.as_ref(), session_key, &agent_id) else {
+            continue;
+        };
+        let Ok(Some(session_state)) = scope.load_session_state(&session_key.as_str()).await else {
+            continue;
+        };
+        let should_replace = latest
+            .as_ref()
+            .map(|existing: &SessionState| session_state.last_active > existing.last_active)
+            .unwrap_or(true);
+        if should_replace {
+            latest = Some(session_state);
+        }
+    }
+
+    if let Some(session_state) = latest {
+        return Some(session_state);
+    }
+
+    let scope = state
+        .agent_runtime
+        .agent_manager
+        .get_default_scope()
+        .cloned()?;
+    scope
+        .load_session_state(&session_key.as_str())
+        .await
+        .ok()
+        .flatten()
 }
 
 fn build_dingtalk_session_key(
@@ -360,20 +972,10 @@ fn build_dingtalk_session_key(
 }
 
 async fn resolve_agent_id_for_session(state: &Arc<WebState>, session_key: &SessionKey) -> String {
-    let fallback = default_agent_id(state.as_ref());
-    let Some(scope) = agent_scope_for(state.as_ref(), &fallback) else {
-        return fallback;
-    };
-
-    match scope.load_session_state(&session_key.as_str()).await {
-        Ok(Some(session_state)) => session_state
-            .metadata
-            .get("current_agent")
-            .filter(|agent_id| state.agent_runtime.agents.contains_key(agent_id.as_str()))
-            .cloned()
-            .unwrap_or(fallback),
-        _ => fallback,
-    }
+    resolve_agent_entry_for_session(state, session_key, None)
+        .await
+        .map(|entry| entry.agent.agent_id().to_string())
+        .unwrap_or_else(|| default_agent_id(state.as_ref()))
 }
 
 async fn collect_agent_planning_context(
@@ -383,22 +985,32 @@ async fn collect_agent_planning_context(
 ) -> String {
     let core_session_id = CoreSessionId::from_string(session_key.as_str());
     let mut sections = Vec::new();
+    let namespace = session_key.namespace();
+    let tenant = namespace.tenant.as_deref().unwrap_or("-");
+    sections.push(format!(
+        "--- Session Namespace ---\n- global: {}\n- tenant: {}\n- user: {}\n- session: {}\n- memory_context_chain: {}\n- visibility_chain: {}",
+        namespace.global,
+        tenant,
+        namespace.user,
+        namespace.session,
+        namespace.memory_context_chain().join(" -> "),
+        namespace.visibility_chain().join(" -> "),
+    ));
 
-    if state.agent_runtime.agents.contains_key(agent_id) {
-        if let Some(agent) = state.agent_runtime.agents.get(agent_id) {
-            if let Some(scope) = agent.scope() {
-                let injected_files = scope
-                    .get_injected_files(&core_session_id, None)
-                    .await
-                    .unwrap_or_default();
-                if !injected_files.is_empty() {
-                    let mut block = String::from("--- Agent Workspace Context ---\n");
-                    for (name, content) in injected_files {
-                        block.push_str(&format!("\n## {}\n{}\n", name, content));
-                    }
-                    sections.push(block);
-                }
+    if let Some(scope) = resolve_agent_entry_for_session(state, session_key, Some(agent_id))
+        .await
+        .and_then(|entry| agent_scope_from_entry(&entry))
+    {
+        let injected_files = scope
+            .get_injected_files(&core_session_id, None)
+            .await
+            .unwrap_or_default();
+        if !injected_files.is_empty() {
+            let mut block = String::from("--- Agent Workspace Context ---\n");
+            for (name, content) in injected_files {
+                block.push_str(&format!("\n## {}\n{}\n", name, content));
             }
+            sections.push(block);
         }
     }
 
@@ -427,7 +1039,12 @@ async fn persist_session_state(
     sender_staff_id: Option<&str>,
     task_id: Option<&TaskId>,
 ) {
-    let Some(scope) = agent_scope_for(state.as_ref(), agent_id) else {
+    let resolved_entry = resolve_agent_entry_for_session(state, session_key, Some(agent_id)).await;
+    let Some(scope) = resolved_entry
+        .as_ref()
+        .and_then(agent_scope_from_entry)
+        .or_else(|| agent_scope_for(state.as_ref(), agent_id))
+    else {
         return;
     };
 
@@ -440,6 +1057,19 @@ async fn persist_session_state(
     session_state
         .metadata
         .insert("current_agent".to_string(), agent_id.to_string());
+    if let Some(entry) = resolved_entry {
+        session_state.metadata.insert(
+            "agent_source_layer".to_string(),
+            entry.source_layer.to_string(),
+        );
+        if let Some(scope) = entry.source_scope {
+            session_state
+                .metadata
+                .insert("agent_source_scope".to_string(), scope);
+        } else {
+            session_state.metadata.remove("agent_source_scope");
+        }
+    }
     session_state
         .metadata
         .insert("conversation_id".to_string(), conversation_id.to_string());
@@ -458,6 +1088,22 @@ async fn persist_session_state(
             .metadata
             .insert("last_task_id".to_string(), task_id.to_string());
     }
+
+    let namespace = session_key.namespace();
+    session_state
+        .metadata
+        .insert("namespace_global".to_string(), namespace.global.clone());
+    if let Some(tenant) = &namespace.tenant {
+        session_state
+            .metadata
+            .insert("namespace_tenant".to_string(), tenant.clone());
+    }
+    session_state
+        .metadata
+        .insert("namespace_user".to_string(), namespace.user.clone());
+    session_state
+        .metadata
+        .insert("namespace_session".to_string(), namespace.session.clone());
 
     if let Err(error) = scope
         .save_session_state(&session_key.as_str(), &session_state)
@@ -502,7 +1148,8 @@ async fn persist_direct_reply_memory(
         );
     }
 
-    let Some(scope) = agent_scope_for(state.as_ref(), agent_id) else {
+    let Some(scope) = resolve_agent_scope_for_session(state, session_key, Some(agent_id)).await
+    else {
         return;
     };
     let entry = format!(
@@ -556,13 +1203,20 @@ async fn persist_task_result_memory(
         );
     }
 
-    let agent_id = completed_task
-        .context
-        .env
-        .get("agent_id")
-        .cloned()
-        .unwrap_or_else(|| default_agent_id(state.as_ref()));
-    let Some(scope) = agent_scope_for(state.as_ref(), &agent_id) else {
+    let session_key = SessionKey::parse(completed_task.context.session_id.as_str()).ok();
+    let Some(scope) = task_context_agent_entry(
+        state.as_ref(),
+        session_key.as_ref(),
+        &completed_task.context,
+    )
+    .and_then(|entry| agent_scope_from_entry(&entry))
+    .or_else(|| {
+        completed_task
+            .context
+            .env
+            .get("agent_id")
+            .and_then(|agent_id| agent_scope_for(state.as_ref(), agent_id))
+    }) else {
         return;
     };
 
@@ -637,7 +1291,23 @@ fn skill_to_detail(skill: &uhorse_agent::Skill) -> SkillRuntimeDetail {
     }
 }
 
+fn session_namespace_from_session_id(session_id: &str) -> Option<SessionNamespace> {
+    SessionKey::parse(session_id)
+        .ok()
+        .map(|key| key.namespace())
+}
+
 fn session_state_to_detail(session_state: &SessionState) -> SessionRuntimeDetail {
+    let namespace = session_namespace_from_session_id(&session_state.session_id);
+    let memory_context_chain = namespace
+        .as_ref()
+        .map(SessionNamespace::memory_context_chain)
+        .unwrap_or_default();
+    let visibility_chain = namespace
+        .as_ref()
+        .map(SessionNamespace::visibility_chain)
+        .unwrap_or_default();
+
     SessionRuntimeDetail {
         session_id: session_state.session_id.clone(),
         agent_id: session_state.metadata.get("current_agent").cloned(),
@@ -648,19 +1318,24 @@ fn session_state_to_detail(session_state: &SessionState) -> SessionRuntimeDetail
         message_count: session_state.message_count,
         created_at: session_state.created_at.to_rfc3339(),
         last_active: session_state.last_active.to_rfc3339(),
+        namespace,
+        memory_context_chain,
+        visibility_chain,
         metadata: session_state.metadata.clone(),
     }
 }
 
 async fn execute_local_skill(
     state: &Arc<WebState>,
+    session_key: &SessionKey,
     skill_name: &str,
     input: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let visibility_chain = session_key.namespace().visibility_chain();
     let skill = state
         .agent_runtime
         .skills
-        .get(skill_name)
+        .get_for_scopes(&visibility_chain, skill_name)
         .ok_or_else(|| format!("Skill not found: {}", skill_name))?;
     let output = skill.execute(input).await?;
     if output.trim().is_empty() {
@@ -670,10 +1345,68 @@ async fn execute_local_skill(
     }
 }
 
+fn agent_session_count_key(
+    agent_id: &str,
+    source_layer: &str,
+    source_scope: Option<&str>,
+) -> (String, String, Option<String>) {
+    (
+        agent_id.to_string(),
+        source_layer.to_string(),
+        source_scope.map(str::to_string),
+    )
+}
+
+fn resolve_session_agent_count_key(
+    state: &WebState,
+    session: &SessionRuntimeDetail,
+) -> Option<(String, String, Option<String>)> {
+    let agent_id = session.agent_id.as_deref()?;
+    let entry = session
+        .metadata
+        .get("agent_source_layer")
+        .and_then(|source_layer| {
+            state.agent_runtime.agents.get_entry_by_source(
+                agent_id,
+                source_layer,
+                session
+                    .metadata
+                    .get("agent_source_scope")
+                    .map(String::as_str),
+            )
+        })
+        .or_else(|| {
+            if session.visibility_chain.is_empty() {
+                state.agent_runtime.agents.get_any_entry(agent_id)
+            } else {
+                state
+                    .agent_runtime
+                    .agents
+                    .get_for_scopes_entry(&session.visibility_chain, agent_id)
+                    .or_else(|| state.agent_runtime.agents.get_any_entry(agent_id))
+            }
+        })?;
+
+    Some(agent_session_count_key(
+        agent_id,
+        entry.source_layer,
+        entry.source_scope.as_deref(),
+    ))
+}
+
 async fn collect_runtime_sessions(state: &Arc<WebState>) -> Vec<SessionRuntimeDetail> {
     let mut sessions = HashMap::new();
+    let mut scanned_scope_dirs = HashSet::new();
 
-    for scope in state.agent_runtime.agent_manager.list_agents() {
+    for entry in state.agent_runtime.agents.list_all_entries() {
+        let Some(scope) = entry.agent.scope().cloned() else {
+            continue;
+        };
+        let scope_dir = scope.agents_dir().to_string_lossy().to_string();
+        if !scanned_scope_dirs.insert(scope_dir) {
+            continue;
+        }
+
         let sessions_dir = scope.agents_dir().join("sessions");
         if !sessions_dir.exists() {
             continue;
@@ -716,25 +1449,30 @@ async fn collect_runtime_sessions(state: &Arc<WebState>) -> Vec<SessionRuntimeDe
 async fn read_session_messages(
     state: &Arc<WebState>,
     session_id: &str,
-    agent_id: Option<&str>,
 ) -> Result<Vec<SessionMessageRecord>, Box<dyn std::error::Error + Send + Sync>> {
-    let resolved_agent_id = agent_id
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| default_agent_id(state.as_ref()));
-    let scope = agent_scope_for(state.as_ref(), &resolved_agent_id)
-        .ok_or_else(|| format!("Agent scope not found: {}", resolved_agent_id))?;
-    let history_path = scope
-        .workspace_dir()
-        .join("sessions")
-        .join(session_id)
-        .join("history.md");
+    let context = state
+        .agent_runtime
+        .memory_store
+        .get_context(&CoreSessionId::from_string(session_id.to_string()))
+        .await?;
+    let history = extract_session_history(&context);
+    Ok(parse_session_messages(&history))
+}
 
-    if !history_path.exists() {
-        return Ok(vec![]);
+fn extract_session_history(content: &str) -> String {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return String::new();
     }
 
-    let content = tokio::fs::read_to_string(history_path).await?;
-    Ok(parse_session_messages(&content))
+    let marker = "=== Session History ===\n";
+    let Some(start) = trimmed.find(marker) else {
+        return String::new();
+    };
+
+    let rest = &trimmed[start + marker.len()..];
+    let end = rest.find("\n\n===").unwrap_or(rest.len());
+    rest[..end].trim().to_string()
 }
 
 fn parse_session_messages(content: &str) -> Vec<SessionMessageRecord> {
@@ -1034,7 +1772,7 @@ pub async fn submit_dingtalk_task(
             Ok(())
         }
         AgentDecision::ExecuteSkill { skill_name, input } => {
-            let reply_text = execute_local_skill(state, &skill_name, &input).await?;
+            let reply_text = execute_local_skill(state, &session_key, &skill_name, &input).await?;
             persist_direct_reply_memory(state, &session_key, &agent_id, text, &reply_text).await;
             persist_session_state(
                 state,
@@ -1065,7 +1803,7 @@ pub async fn submit_dingtalk_task(
             let workspace_hint = node.workspace.path.clone();
             validate_planned_command(&command, &workspace_hint)?;
 
-            let task_context = TaskContext::new(
+            let mut task_context = TaskContext::new(
                 UserId::from_string(
                     inbound
                         .sender_user_id
@@ -1079,6 +1817,16 @@ pub async fn submit_dingtalk_task(
             .with_intent(text.to_string())
             .with_env("agent_id", agent_id.clone())
             .with_env("conversation_id", inbound.conversation_id.clone());
+
+            if let Some(entry) =
+                resolve_agent_entry_for_session(state, &session_key, Some(&agent_id)).await
+            {
+                task_context =
+                    task_context.with_env("agent_source_layer", entry.source_layer.to_string());
+                if let Some(source_scope) = entry.source_scope {
+                    task_context = task_context.with_env("agent_source_scope", source_scope);
+                }
+            }
 
             let task_id = state
                 .hub
@@ -1127,10 +1875,12 @@ async fn decide_dingtalk_action(
     let Some(llm_client) = state.llm_client.as_ref() else {
         return Err("LLM client is not configured".into());
     };
+    let visibility_chain = session_key.namespace().visibility_chain();
     let agent = state
         .agent_runtime
         .agents
-        .get(agent_id)
+        .get_for_scopes(&visibility_chain, agent_id)
+        .or_else(|| state.agent_runtime.agents.get(agent_id))
         .ok_or_else(|| format!("Agent not found: {}", agent_id))?;
     let context = collect_agent_planning_context(state, agent_id, session_key).await;
     let response = llm_client
@@ -1140,7 +1890,10 @@ async fn decide_dingtalk_action(
             agent_id,
             session_key,
             &context,
-            &state.agent_runtime.skills.list_names(),
+            &state
+                .agent_runtime
+                .skills
+                .list_names_for_scopes(&session_key.namespace().visibility_chain()),
         ))
         .await?;
 
@@ -1615,10 +2368,10 @@ async fn list_runtime_agents(
     State(state): State<Arc<WebState>>,
 ) -> Json<ApiResponse<Vec<AgentRuntimeSummary>>> {
     let sessions = collect_runtime_sessions(&state).await;
-    let session_counts: HashMap<String, usize> =
+    let session_counts: HashMap<(String, String, Option<String>), usize> =
         sessions.into_iter().fold(HashMap::new(), |mut acc, item| {
-            if let Some(agent_id) = item.agent_id {
-                *acc.entry(agent_id).or_insert(0) += 1;
+            if let Some(key) = resolve_session_agent_count_key(state.as_ref(), &item) {
+                *acc.entry(key).or_insert(0) += 1;
             }
             acc
         });
@@ -1626,23 +2379,42 @@ async fn list_runtime_agents(
     let mut agents: Vec<_> = state
         .agent_runtime
         .agents
-        .values()
-        .map(|agent| AgentRuntimeSummary {
-            agent_id: agent.agent_id().to_string(),
-            name: agent.name().to_string(),
-            description: agent.description().to_string(),
-            workspace_dir: agent.workspace_dir().display().to_string(),
-            is_default: state
-                .agent_runtime
-                .agent_manager
-                .get_default_scope()
-                .map(|scope| scope.config().agent_id == agent.agent_id())
-                .unwrap_or(false),
-            skill_names: state.agent_runtime.skills.list_names(),
-            active_session_count: session_counts.get(agent.agent_id()).copied().unwrap_or(0),
+        .list_all_entries()
+        .into_iter()
+        .map(|entry| {
+            let agent = entry.agent;
+            let key = agent_session_count_key(
+                agent.agent_id(),
+                entry.source_layer,
+                entry.source_scope.as_deref(),
+            );
+            AgentRuntimeSummary {
+                agent_id: agent.agent_id().to_string(),
+                name: agent.name().to_string(),
+                description: agent.description().to_string(),
+                workspace_dir: agent.workspace_dir().display().to_string(),
+                is_default: agent
+                    .scope()
+                    .map(|scope| scope.config().is_default)
+                    .unwrap_or(false),
+                skill_names: state.agent_runtime.skills.list_all_names(),
+                active_session_count: session_counts.get(&key).copied().unwrap_or(0),
+                source_layer: entry.source_layer.to_string(),
+                source_scope: entry.source_scope,
+            }
         })
         .collect();
-    agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+    agents.sort_by(|left, right| {
+        left.agent_id
+            .cmp(&right.agent_id)
+            .then_with(|| left.source_layer.cmp(&right.source_layer))
+            .then_with(|| {
+                left.source_scope
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(right.source_scope.as_deref().unwrap_or(""))
+            })
+    });
 
     Json(ApiResponse::success(agents))
 }
@@ -1650,32 +2422,51 @@ async fn list_runtime_agents(
 async fn get_runtime_agent(
     State(state): State<Arc<WebState>>,
     Path(agent_id): Path<String>,
+    Query(query): Query<AgentRuntimeQuery>,
 ) -> (StatusCode, Json<ApiResponse<AgentRuntimeDetail>>) {
     let sessions = collect_runtime_sessions(&state).await;
-    let active_session_count = sessions
-        .into_iter()
-        .filter(|session| session.agent_id.as_deref() == Some(agent_id.as_str()))
-        .count();
-
-    match state.agent_runtime.agents.get(&agent_id) {
-        Some(agent) => (
-            StatusCode::OK,
-            Json(ApiResponse::success(AgentRuntimeDetail {
-                agent_id: agent.agent_id().to_string(),
-                name: agent.name().to_string(),
-                description: agent.description().to_string(),
-                workspace_dir: agent.workspace_dir().display().to_string(),
-                system_prompt: agent.system_prompt().to_string(),
-                is_default: state
-                    .agent_runtime
-                    .agent_manager
-                    .get_default_scope()
-                    .map(|scope| scope.config().agent_id == agent.agent_id())
-                    .unwrap_or(false),
-                skill_names: state.agent_runtime.skills.list_names(),
-                active_session_count,
-            })),
+    let entry = match query.source_layer.as_deref() {
+        Some(source_layer) => state.agent_runtime.agents.get_entry_by_source(
+            &agent_id,
+            source_layer,
+            query.source_scope.as_deref(),
         ),
+        None => state.agent_runtime.agents.get_any_entry(&agent_id),
+    };
+
+    match entry {
+        Some(entry) => {
+            let active_session_count = sessions
+                .iter()
+                .filter_map(|session| resolve_session_agent_count_key(state.as_ref(), session))
+                .filter(|key| {
+                    *key == agent_session_count_key(
+                        &agent_id,
+                        entry.source_layer,
+                        entry.source_scope.as_deref(),
+                    )
+                })
+                .count();
+            let agent = entry.agent;
+            (
+                StatusCode::OK,
+                Json(ApiResponse::success(AgentRuntimeDetail {
+                    agent_id: agent.agent_id().to_string(),
+                    name: agent.name().to_string(),
+                    description: agent.description().to_string(),
+                    workspace_dir: agent.workspace_dir().display().to_string(),
+                    system_prompt: agent.system_prompt().to_string(),
+                    is_default: agent
+                        .scope()
+                        .map(|scope| scope.config().is_default)
+                        .unwrap_or(false),
+                    skill_names: state.agent_runtime.skills.list_all_names(),
+                    active_session_count,
+                    source_layer: entry.source_layer.to_string(),
+                    source_scope: entry.source_scope,
+                })),
+            )
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(ApiResponse::error("Agent not found")),
@@ -1689,9 +2480,9 @@ async fn list_runtime_skills(
     let mut skills: Vec<_> = state
         .agent_runtime
         .skills
-        .list_names()
+        .list_all_names()
         .into_iter()
-        .filter_map(|name| state.agent_runtime.skills.get(&name))
+        .filter_map(|name| state.agent_runtime.skills.get_any(&name))
         .map(|skill| skill_to_summary(&skill))
         .collect();
     skills.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1702,7 +2493,7 @@ async fn get_runtime_skill(
     State(state): State<Arc<WebState>>,
     Path(skill_name): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<SkillRuntimeDetail>>) {
-    match state.agent_runtime.skills.get(&skill_name) {
+    match state.agent_runtime.skills.get_any(&skill_name) {
         Some(skill) => (
             StatusCode::OK,
             Json(ApiResponse::success(skill_to_detail(&skill))),
@@ -1730,6 +2521,7 @@ async fn list_runtime_sessions(
             message_count: session.message_count,
             created_at: session.created_at,
             last_active: session.last_active,
+            namespace: session.namespace,
         })
         .collect();
     Json(ApiResponse::success(sessions))
@@ -1756,8 +2548,8 @@ async fn get_runtime_session_messages(
     State(state): State<Arc<WebState>>,
     Path(session_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<Vec<SessionMessageRecord>>>) {
-    let sessions = collect_runtime_sessions(&state).await;
-    let Some(session) = sessions
+    let Some(_session) = collect_runtime_sessions(&state)
+        .await
         .into_iter()
         .find(|item| item.session_id == session_id)
     else {
@@ -1767,7 +2559,7 @@ async fn get_runtime_session_messages(
         );
     };
 
-    match read_session_messages(&state, &session_id, session.agent_id.as_deref()).await {
+    match read_session_messages(&state, &session_id).await {
         Ok(messages) => (StatusCode::OK, Json(ApiResponse::success(messages))),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2868,6 +3660,13 @@ mod tests {
         assert_eq!(
             session_state
                 .metadata
+                .get("agent_source_layer")
+                .map(String::as_str),
+            Some("global")
+        );
+        assert_eq!(
+            session_state
+                .metadata
                 .get("conversation_id")
                 .map(String::as_str),
             Some("conv-1")
@@ -2931,6 +3730,45 @@ mod tests {
         assert!(context.contains("**Assistant:** world"));
     }
 
+    #[test]
+    fn test_session_state_to_detail_includes_namespace_chains() {
+        let mut session_state = SessionState::new("dingtalk:user-1:corp-1".to_string());
+        session_state
+            .metadata
+            .insert("current_agent".to_string(), "main".to_string());
+
+        let detail = session_state_to_detail(&session_state);
+
+        assert_eq!(
+            detail.namespace.as_ref().map(|ns| ns.global.as_str()),
+            Some("global")
+        );
+        assert_eq!(
+            detail
+                .namespace
+                .as_ref()
+                .and_then(|ns| ns.tenant.as_deref()),
+            Some("tenant:dingtalk:corp-1")
+        );
+        assert_eq!(
+            detail.memory_context_chain,
+            vec![
+                "global".to_string(),
+                "tenant:dingtalk:corp-1".to_string(),
+                "user:dingtalk:user-1".to_string(),
+                "session:dingtalk:user-1:corp-1".to_string()
+            ]
+        );
+        assert_eq!(
+            detail.visibility_chain,
+            vec![
+                "user:dingtalk:user-1".to_string(),
+                "tenant:dingtalk:corp-1".to_string(),
+                "global".to_string()
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn test_init_default_agent_runtime_binds_scope_to_agent() {
         let runtime = create_test_runtime().await;
@@ -2939,6 +3777,125 @@ mod tests {
 
         assert_eq!(scope.config().agent_id, "main");
         assert_eq!(scope.workspace_dir(), agent.workspace_dir());
+    }
+
+    #[tokio::test]
+    async fn test_collect_runtime_sessions_reads_user_catalog_scope() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let user_root = runtime_root.join("users").join("user:dingtalk:user-scope");
+        tokio::fs::create_dir_all(user_root.join("workspace-helper"))
+            .await
+            .unwrap();
+
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime.clone(),
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-scope");
+
+        persist_session_state(
+            &state,
+            &session_key,
+            "helper",
+            "conv-user-scope",
+            Some("user-scope"),
+            None,
+            None,
+        )
+        .await;
+
+        let sessions = collect_runtime_sessions(&state).await;
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, session_key.as_str());
+        assert_eq!(sessions[0].agent_id.as_deref(), Some("helper"));
+    }
+
+    #[tokio::test]
+    async fn test_list_runtime_agents_includes_source_metadata_for_user_catalog() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let user_scope = "user:dingtalk:user-metadata";
+        let user_root = runtime_root.join("users").join(user_scope);
+        tokio::fs::create_dir_all(user_root.join("workspace-helper"))
+            .await
+            .unwrap();
+
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-metadata");
+
+        persist_session_state(
+            &state,
+            &session_key,
+            "helper",
+            "conv-user-metadata",
+            Some("user-metadata"),
+            None,
+            None,
+        )
+        .await;
+
+        let Json(response) = list_runtime_agents(State(state)).await;
+        let agents = response.data.unwrap();
+        let helper = agents
+            .into_iter()
+            .find(|agent| {
+                agent.agent_id == "helper"
+                    && agent.source_layer == "user"
+                    && agent.source_scope.as_deref() == Some(user_scope)
+            })
+            .expect("user helper agent");
+        assert_eq!(helper.active_session_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_runtime_agent_returns_requested_source_entry() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let tenant_scope = "tenant:dingtalk:corp-shared";
+        let tenant_root = runtime_root.join("tenants").join(tenant_scope);
+        let user_root = runtime_root.join("users").join("user:dingtalk:user-shared");
+        tokio::fs::create_dir_all(tenant_root.join("workspace-helper"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(user_root.join("workspace-helper"))
+            .await
+            .unwrap();
+
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime,
+        ));
+
+        let (status, body) = get_json(
+            app,
+            "/api/v1/agents/helper?source_layer=tenant&source_scope=tenant%3Adingtalk%3Acorp-shared",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"]["agent_id"], json!("helper"));
+        assert_eq!(body["data"]["source_layer"], json!("tenant"));
+        assert_eq!(
+            body["data"]["source_scope"],
+            json!("tenant:dingtalk:corp-shared")
+        );
     }
 
     #[tokio::test]
@@ -3041,6 +3998,97 @@ mod tests {
                 .map(String::as_str),
             Some(task_id.as_str())
         );
+    }
+
+    #[test]
+    fn test_task_context_agent_entry_prefers_source_metadata() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let tenant_scope = "tenant:dingtalk:corp-shared";
+        let user_scope = "user:dingtalk:user-shared";
+        std::fs::create_dir_all(
+            runtime_root
+                .join("tenants")
+                .join(tenant_scope)
+                .join("workspace-helper"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            runtime_root
+                .join("users")
+                .join(user_scope)
+                .join("workspace-helper"),
+        )
+        .unwrap();
+
+        let runtime = tokio_test::block_on(init_default_agent_runtime(runtime_root)).unwrap();
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = WebState::new_with_runtime(Arc::new(hub), None, None, Arc::new(runtime));
+        let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
+        let context = TaskContext::new(
+            UserId::from_string("user-shared"),
+            uhorse_protocol::SessionId::from_string(session_key.as_str()),
+            "dingtalk",
+        )
+        .with_env("agent_id", "helper")
+        .with_env("agent_source_layer", "tenant")
+        .with_env("agent_source_scope", tenant_scope);
+
+        let entry = task_context_agent_entry(&state, Some(&session_key), &context).unwrap();
+        assert_eq!(entry.source_layer, "tenant");
+        assert_eq!(entry.source_scope.as_deref(), Some(tenant_scope));
+    }
+
+    #[tokio::test]
+    async fn test_collect_agent_planning_context_uses_session_bound_scope() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let tenant_scope = "tenant:dingtalk:corp-shared";
+        let user_scope = "user:dingtalk:user-shared";
+        let tenant_root = runtime_root
+            .join("tenants")
+            .join(tenant_scope)
+            .join("workspace-helper");
+        let user_root = runtime_root
+            .join("users")
+            .join(user_scope)
+            .join("workspace-helper");
+        tokio::fs::create_dir_all(&tenant_root).await.unwrap();
+        tokio::fs::create_dir_all(&user_root).await.unwrap();
+        tokio::fs::write(tenant_root.join("AGENTS.md"), "tenant instructions")
+            .await
+            .unwrap();
+        tokio::fs::write(user_root.join("AGENTS.md"), "user instructions")
+            .await
+            .unwrap();
+
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: "直接回复用户".to_string(),
+            })),
+            runtime,
+        ));
+        let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
+
+        persist_session_state(
+            &state,
+            &session_key,
+            "helper",
+            "conv-shared",
+            Some("user-shared"),
+            None,
+            None,
+        )
+        .await;
+
+        let context = collect_agent_planning_context(&state, "helper", &session_key).await;
+        assert!(context.contains("AGENTS.md"));
+        assert!(context.contains("user instructions"));
+        assert!(!context.contains("tenant instructions"));
     }
 
     #[tokio::test]
@@ -3331,7 +4379,8 @@ args = ["-c", "print('never')"]
         )
         .await;
 
-        let error = execute_local_skill(&state, "disabled-skill", "input")
+        let session_key = SessionKey::new("dingtalk", "skill-user");
+        let error = execute_local_skill(&state, &session_key, "disabled-skill", "input")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("disabled"));
@@ -3350,7 +4399,8 @@ args = ["-c", "import sys; sys.stderr.write('boom\\n')"]
         )
         .await;
 
-        let error = execute_local_skill(&state, "stderr-skill", "input")
+        let session_key = SessionKey::new("dingtalk", "skill-user");
+        let error = execute_local_skill(&state, &session_key, "stderr-skill", "input")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("boom"));
@@ -3369,7 +4419,8 @@ args = ["-c", "import time; time.sleep(2); print('late')"]
         )
         .await;
 
-        let error = execute_local_skill(&state, "timeout-skill", "input")
+        let session_key = SessionKey::new("dingtalk", "skill-user");
+        let error = execute_local_skill(&state, &session_key, "timeout-skill", "input")
             .await
             .unwrap_err();
         assert!(error.to_string().contains("timed out"));
@@ -3388,7 +4439,8 @@ args = ["-c", "print('{\"ok\":true,\"message\":\"done\"}')"]
         )
         .await;
 
-        let output = execute_local_skill(&state, "json-skill", "input")
+        let session_key = SessionKey::new("dingtalk", "skill-user");
+        let output = execute_local_skill(&state, &session_key, "json-skill", "input")
             .await
             .unwrap();
         assert!(output.contains("\"ok\": true"));
@@ -3452,6 +4504,42 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, session_key.as_str());
         assert_eq!(sessions[0].agent_id.as_deref(), Some("main"));
+        assert_eq!(
+            sessions[0].namespace.as_ref().map(|ns| ns.global.as_str()),
+            Some("global")
+        );
+        assert_eq!(
+            sessions[0].namespace.as_ref().map(|ns| ns.user.as_str()),
+            Some("user:dingtalk:user-api")
+        );
+        assert!(sessions[0]
+            .namespace
+            .as_ref()
+            .and_then(|ns| ns.tenant.as_ref())
+            .is_none());
+
+        let (_, Json(session_detail_response)) =
+            get_runtime_session(State(state.clone()), Path(session_key.as_str().to_string())).await;
+        let session_detail = session_detail_response.data.unwrap();
+        assert_eq!(
+            session_detail.memory_context_chain,
+            vec![
+                "global".to_string(),
+                "user:dingtalk:user-api".to_string(),
+                "session:dingtalk:user-api".to_string()
+            ]
+        );
+        assert_eq!(
+            session_detail.visibility_chain,
+            vec!["user:dingtalk:user-api".to_string(), "global".to_string()]
+        );
+        assert_eq!(
+            session_detail
+                .metadata
+                .get("namespace_session")
+                .map(String::as_str),
+            Some("session:dingtalk:user-api")
+        );
 
         let (_, Json(messages_response)) =
             get_runtime_session_messages(State(state), Path(session_key.as_str().to_string()))
@@ -3460,6 +4548,82 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].user_message, "hello");
         assert_eq!(messages[0].assistant_message, "world");
+    }
+
+    #[tokio::test]
+    async fn test_get_runtime_session_messages_uses_session_history_not_catalog_scope() {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        let tenant_scope = "tenant:dingtalk:corp-shared";
+        let user_scope = "user:dingtalk:user-shared";
+        let tenant_root = runtime_root.join("tenants").join(tenant_scope);
+        let user_root = runtime_root.join("users").join(user_scope);
+        tokio::fs::create_dir_all(tenant_root.join("workspace-helper"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(user_root.join("workspace-helper"))
+            .await
+            .unwrap();
+
+        let runtime = Arc::new(
+            init_default_agent_runtime(runtime_root.clone())
+                .await
+                .unwrap(),
+        );
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            None,
+            runtime.clone(),
+        ));
+        let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
+
+        persist_session_state(
+            &state,
+            &session_key,
+            "helper",
+            "conv-shared",
+            Some("user-shared"),
+            None,
+            None,
+        )
+        .await;
+
+        runtime
+            .memory_store
+            .store_message(
+                &CoreSessionId::from_string(session_key.as_str()),
+                "from layered memory",
+                "session reply",
+            )
+            .await
+            .unwrap();
+
+        let tenant_history_path = runtime_root
+            .join("tenants")
+            .join(tenant_scope)
+            .join("workspace-helper")
+            .join("sessions")
+            .join(session_key.as_str())
+            .join("history.md");
+        tokio::fs::create_dir_all(tenant_history_path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(
+            &tenant_history_path,
+            "## 2026-03-26 00:00:00 UTC\n\n**User:** tenant scope\n\n**Assistant:** tenant reply\n\n",
+        )
+        .await
+        .unwrap();
+
+        let (_, Json(messages_response)) =
+            get_runtime_session_messages(State(state), Path(session_key.as_str().to_string()))
+                .await;
+        let messages = messages_response.data.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].user_message, "from layered memory");
+        assert_eq!(messages[0].assistant_message, "session reply");
     }
 
     #[tokio::test]

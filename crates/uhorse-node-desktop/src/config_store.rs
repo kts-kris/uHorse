@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use uhorse_node_runtime::{NodeConfig, NodeError, NodeId, NodeResult};
 
-const DEFAULT_CONFIG_FILE_NAME: &str = "node-desktop.toml";
 const FALLBACK_NODE_NAME: &str = "uHorse-Node";
 const DEFAULT_NODE_ID_PREFIX: &str = "node-desktop-";
 
@@ -101,10 +100,6 @@ pub struct ConfigStore {
 impl ConfigStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
-    }
-
-    pub fn default() -> Self {
-        Self::new(DEFAULT_CONFIG_FILE_NAME)
     }
 
     pub fn path(&self) -> &Path {

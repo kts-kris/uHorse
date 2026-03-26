@@ -1,6 +1,6 @@
 # uHorse Makefile - Hub / Node 主线快捷命令
 
-.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke node-run node-check deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
+.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
 
 .DEFAULT_GOAL := help
 
@@ -77,6 +77,19 @@ node-run: ## 启动 Node（需要已准备 node.toml）
 
 node-check: ## 检查当前工作区是否可作为 Node workspace
 	@cargo run --release -p uhorse-node -- check --workspace .
+
+desktop-web-build: ## 构建 Node Desktop Web 前端
+	@npm --prefix apps/node-desktop-web install
+	@npm --prefix apps/node-desktop-web run build
+
+desktop-build: ## 编译 Node Desktop 宿主
+	@cargo build --release -p uhorse-node-desktop
+
+desktop-package: ## 打包 Node Desktop 宿主 + Web 静态资源
+	@./scripts/package-node-desktop.sh
+
+desktop-smoke: ## 运行 Node Desktop API + 静态资源 smoke
+	@./scripts/desktop-smoke.sh
 
 deps: ## 启动 PostgreSQL + Redis 依赖
 	@docker compose up -d postgres redis

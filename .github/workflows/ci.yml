@@ -71,10 +71,10 @@ jobs:
         run: cargo test --workspace
 
       - name: Build Node Desktop Web
-        run: |
-          cd apps/node-desktop-web
-          npm install
-          npm run build
+        run: npm --prefix apps/node-desktop-web install && npm --prefix apps/node-desktop-web run build
+
+      - name: Run Node Desktop smoke
+        run: ./scripts/desktop-smoke.sh
 
   # ==================== 代码检查 ====================
   lint:

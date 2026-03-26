@@ -61,6 +61,40 @@
 - Node workspace 检查
 - Hub Docker smoke
 
+### `package-node-desktop.sh`
+
+打包 Node Desktop 宿主与前端静态资源：
+
+```bash
+./scripts/package-node-desktop.sh
+```
+
+默认会：
+
+- 构建 `apps/node-desktop-web`
+- 编译 `uhorse-node-desktop`
+- 生成 `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/`
+- 输出对应压缩包
+
+### `desktop-smoke.sh`
+
+运行 Node Desktop 宿主 API + 静态资源 smoke：
+
+```bash
+./scripts/desktop-smoke.sh
+```
+
+覆盖内容：
+
+- `apps/node-desktop-web` 构建
+- `uhorse-node-desktop` release 编译
+- `GET /api/settings/defaults`
+- `GET /api/settings/capabilities`
+- `GET /api/workspace/status`
+- `GET /api/runtime/status`
+- `GET /api/versioning/summary`
+- `/` 与前端路由回退静态资源可访问
+
 ## 推荐搭配
 
 ```bash
@@ -69,6 +103,8 @@ make start
 make node-run
 make test-quick
 make test-full
+make desktop-package
+make desktop-smoke
 ```
 
 ## 参考文档

@@ -37,6 +37,45 @@ pub struct SessionKey {
     pub team_id: Option<String>,
 }
 
+/// 会话运行时命名空间。
+///
+/// 在不改变 `SessionKey` 字符串格式的前提下，提供统一的
+/// `global / tenant / user / session` 四层作用域键。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionNamespace {
+    /// 全局共享作用域键。
+    pub global: String,
+    /// 租户共享作用域键。
+    pub tenant: Option<String>,
+    /// 用户私有作用域键。
+    pub user: String,
+    /// 会话私有作用域键。
+    pub session: String,
+}
+
+impl SessionNamespace {
+    /// 返回 memory 上下文从共享到私有的读取顺序。
+    pub fn memory_context_chain(&self) -> Vec<String> {
+        let mut scopes = vec![self.global.clone()];
+        if let Some(tenant) = &self.tenant {
+            scopes.push(tenant.clone());
+        }
+        scopes.push(self.user.clone());
+        scopes.push(self.session.clone());
+        scopes
+    }
+
+    /// 返回 agent / skill 从私有到共享的解析顺序。
+    pub fn visibility_chain(&self) -> Vec<String> {
+        let mut scopes = vec![self.user.clone()];
+        if let Some(tenant) = &self.tenant {
+            scopes.push(tenant.clone());
+        }
+        scopes.push(self.global.clone());
+        scopes
+    }
+}
+
 impl SessionKey {
     /// 创建新的 Session Key
     pub fn new(channel_type: impl Into<String>, channel_user_id: impl Into<String>) -> Self {
@@ -108,6 +147,23 @@ impl SessionKey {
     /// 获取用户 ID（不带 team）
     pub fn user_key(&self) -> String {
         format!("{}:{}", self.channel_type, self.channel_user_id)
+    }
+
+    /// 获取租户作用域键。
+    pub fn tenant_key(&self) -> Option<String> {
+        self.team_id
+            .as_ref()
+            .map(|team_id| format!("tenant:{}:{}", self.channel_type, team_id))
+    }
+
+    /// 获取运行时命名空间。
+    pub fn namespace(&self) -> SessionNamespace {
+        SessionNamespace {
+            global: "global".to_string(),
+            tenant: self.tenant_key(),
+            user: format!("user:{}", self.user_key()),
+            session: format!("session:{}", self.as_str()),
+        }
     }
 }
 
@@ -222,5 +278,63 @@ mod tests {
         assert!(key.matches_channel("slack"));
         assert!(key.matches_team("T123"));
         assert!(!key.matches_team("T456"));
+    }
+
+    #[test]
+    fn test_session_namespace_without_team() {
+        let key = SessionKey::new("telegram", "user123");
+        let namespace = key.namespace();
+
+        assert_eq!(namespace.global, "global");
+        assert!(namespace.tenant.is_none());
+        assert_eq!(namespace.user, "user:telegram:user123");
+        assert_eq!(namespace.session, "session:telegram:user123");
+        assert_eq!(
+            namespace.memory_context_chain(),
+            vec![
+                "global".to_string(),
+                "user:telegram:user123".to_string(),
+                "session:telegram:user123".to_string()
+            ]
+        );
+        assert_eq!(
+            namespace.visibility_chain(),
+            vec!["user:telegram:user123".to_string(), "global".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_session_namespace_with_team() {
+        let key = SessionKey::with_team("dingtalk", "user456", "corp789");
+        let namespace = key.namespace();
+
+        assert_eq!(
+            key.tenant_key(),
+            Some("tenant:dingtalk:corp789".to_string())
+        );
+        assert_eq!(namespace.global, "global");
+        assert_eq!(
+            namespace.tenant,
+            Some("tenant:dingtalk:corp789".to_string())
+        );
+        assert_eq!(namespace.user, "user:dingtalk:user456");
+        assert_eq!(namespace.session, "session:dingtalk:user456:corp789");
+        assert_eq!(
+            namespace.memory_context_chain(),
+            vec![
+                "global".to_string(),
+                "tenant:dingtalk:corp789".to_string(),
+                "user:dingtalk:user456".to_string(),
+                "session:dingtalk:user456:corp789".to_string()
+            ]
+        );
+        assert_eq!(
+            namespace.visibility_chain(),
+            vec![
+                "user:dingtalk:user456".to_string(),
+                "tenant:dingtalk:corp789".to_string(),
+                "global".to_string()
+            ]
+        );
     }
 }

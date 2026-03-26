@@ -26,8 +26,21 @@ import type { ColumnsType } from 'antd/es/table';
 import type { AgentRuntimeSummary } from '../types';
 import { agentService } from '../services/agents';
 
+const sourceLayerColorMap: Record<string, string> = {
+  global: 'default',
+  tenant: 'purple',
+  user: 'cyan',
+};
+
+function formatAgentSource(sourceLayer: string, sourceScope: string | null): string {
+  if (!sourceScope) {
+    return sourceLayer;
+  }
+  return `${sourceLayer} · ${sourceScope}`;
+}
+
 const Agents: React.FC = () => {
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentRuntimeSummary | null>(null);
 
   const {
     data: agents = [],
@@ -45,9 +58,18 @@ const Agents: React.FC = () => {
     isLoading: isDetailLoading,
     error: detailError,
   } = useQuery({
-    queryKey: ['agent-runtime', selectedAgentId],
-    queryFn: () => agentService.get(selectedAgentId!),
-    enabled: selectedAgentId !== null,
+    queryKey: [
+      'agent-runtime',
+      selectedAgent?.agent_id,
+      selectedAgent?.source_layer,
+      selectedAgent?.source_scope,
+    ],
+    queryFn: () =>
+      agentService.get(selectedAgent!.agent_id, {
+        source_layer: selectedAgent!.source_layer,
+        source_scope: selectedAgent!.source_scope,
+      }),
+    enabled: selectedAgent !== null,
   });
 
   const stats = useMemo(() => {
@@ -110,6 +132,16 @@ const Agents: React.FC = () => {
       width: 120,
     },
     {
+      title: '来源',
+      key: 'source',
+      width: 220,
+      render: (_, record) => (
+        <Tag color={sourceLayerColorMap[record.source_layer] ?? 'default'}>
+          {formatAgentSource(record.source_layer, record.source_scope)}
+        </Tag>
+      ),
+    },
+    {
       title: 'Workspace',
       dataIndex: 'workspace_dir',
       key: 'workspace_dir',
@@ -128,7 +160,7 @@ const Agents: React.FC = () => {
         <Button
           type="link"
           icon={<EyeOutlined />}
-          onClick={() => setSelectedAgentId(record.agent_id)}
+          onClick={() => setSelectedAgent(record)}
         >
           详情
         </Button>
@@ -196,7 +228,7 @@ const Agents: React.FC = () => {
         }
       >
         <Table
-          rowKey="agent_id"
+          rowKey={(record) => `${record.agent_id}:${record.source_layer}:${record.source_scope ?? 'global'}`}
           columns={columns}
           dataSource={agents}
           loading={isLoading}
@@ -207,8 +239,8 @@ const Agents: React.FC = () => {
       <Drawer
         title={agentDetail ? `Agent 详情：${agentDetail.name}` : 'Agent 详情'}
         width={720}
-        open={selectedAgentId !== null}
-        onClose={() => setSelectedAgentId(null)}
+        open={selectedAgent !== null}
+        onClose={() => setSelectedAgent(null)}
       >
         {detailError && (
           <Alert
@@ -230,6 +262,11 @@ const Agents: React.FC = () => {
               </Descriptions.Item>
               <Descriptions.Item label="默认 Agent">
                 {agentDetail.is_default ? <Tag color="gold">是</Tag> : <Tag>否</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="来源">
+                <Tag color={sourceLayerColorMap[agentDetail.source_layer] ?? 'default'}>
+                  {formatAgentSource(agentDetail.source_layer, agentDetail.source_scope)}
+                </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="活跃 Session 数">
                 {agentDetail.active_session_count}

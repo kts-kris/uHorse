@@ -1,15 +1,34 @@
+import React, { Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, Spin } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import MainLayout from './components/Layout/MainLayout';
-import Dashboard from './pages/Dashboard';
-import Workspaces from './pages/Workspaces';
-import Versioning from './pages/Versioning';
-import Logs from './pages/Logs';
-import Settings from './pages/Settings';
+
+const MainLayout = React.lazy(() => import('./components/Layout/MainLayout'));
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const Workspaces = React.lazy(() => import('./pages/Workspaces'));
+const Versioning = React.lazy(() => import('./pages/Versioning'));
+const Logs = React.lazy(() => import('./pages/Logs'));
+const Settings = React.lazy(() => import('./pages/Settings'));
 
 const queryClient = new QueryClient();
+
+const RouteFallback: React.FC = () => (
+  <div
+    style={{
+      minHeight: 320,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}
+  >
+    <Spin size="large" />
+  </div>
+);
+
+function renderLazy(element: React.ReactNode): React.ReactElement {
+  return <Suspense fallback={<RouteFallback />}>{element}</Suspense>;
+}
 
 function App() {
   return (
@@ -17,13 +36,13 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<MainLayout />}>
+            <Route path="/" element={renderLazy(<MainLayout />)}>
               <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="workspaces" element={<Workspaces />} />
-              <Route path="versioning" element={<Versioning />} />
-              <Route path="logs" element={<Logs />} />
-              <Route path="settings" element={<Settings />} />
+              <Route path="dashboard" element={renderLazy(<Dashboard />)} />
+              <Route path="workspaces" element={renderLazy(<Workspaces />)} />
+              <Route path="versioning" element={renderLazy(<Versioning />)} />
+              <Route path="logs" element={renderLazy(<Logs />)} />
+              <Route path="settings" element={renderLazy(<Settings />)} />
             </Route>
           </Routes>
         </BrowserRouter>

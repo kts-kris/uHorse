@@ -15,6 +15,7 @@ The recommended path is:
 
 - [System Requirements](#system-requirements)
 - [Install from Source](#install-from-source)
+- [Optional: package Node Desktop](#optional-package-node-desktop)
 - [Optional: build the legacy monolithic binary](#optional-build-the-legacy-monolithic-binary)
 - [Installation Verification](#installation-verification)
 - [About the helper scripts](#about-the-helper-scripts)
@@ -96,6 +97,28 @@ Terminal 2:
 
 ```bash
 ./target/release/uhorse-node --config node.toml --log-level info
+```
+
+---
+
+## Optional: package Node Desktop
+
+If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script:
+
+```bash
+./scripts/package-node-desktop.sh
+```
+
+Default outputs:
+
+- `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/bin/uhorse-node-desktop`
+- `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/web/`
+- matching `.tar.gz` or `.zip` archive
+
+To verify the packaged host API and static assets together, run:
+
+```bash
+./scripts/desktop-smoke.sh
 ```
 
 ---

@@ -78,7 +78,7 @@ const Settings: React.FC = () => {
       <Alert
         type="info"
         showIcon
-        message="当前页面展示系统运行时与配置来源，不提供在线写配置。"
+        message="当前页面展示系统运行时与配置摘要，不提供在线写配置。"
         description="如果需要调整 Hub / Agent / Skill 配置，请修改部署配置、skill.toml 或对应运行目录后重启服务。"
       />
 
@@ -136,7 +136,7 @@ const Settings: React.FC = () => {
         </Col>
 
         <Col xs={24} lg={12}>
-          <Card title="Skill 配置来源">
+          <Card title="Skill 运行配置">
             <List
               dataSource={skills}
               locale={{ emptyText: '暂无 Skill' }}

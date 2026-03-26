@@ -169,6 +169,11 @@ impl SkillRegistry {
         Self::default()
     }
 
+    /// 判断是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+
     /// 注册技能
     pub fn register(&mut self, skill: Skill) {
         let name = skill.name().to_string();
@@ -205,6 +210,15 @@ impl SkillRegistry {
         }
 
         Ok(count)
+    }
+
+    /// 从目录创建注册表。
+    pub async fn from_dir(dir: PathBuf) -> AgentResult<Self> {
+        let mut registry = Self::new();
+        if dir.exists() {
+            let _ = registry.load_from_dir(dir).await?;
+        }
+        Ok(registry)
     }
 
     /// 从目录加载单个技能
@@ -265,6 +279,123 @@ impl SkillRegistry {
             .map_err(|e| AgentError::Skill(format!("Failed to parse SKILL.md: {}", e)))?;
 
         Ok(manifest)
+    }
+}
+
+/// 分层技能注册表。
+#[derive(Clone, Default)]
+pub struct LayeredSkillRegistry {
+    global: SkillRegistry,
+    tenant: HashMap<String, SkillRegistry>,
+    user: HashMap<String, SkillRegistry>,
+}
+
+impl LayeredSkillRegistry {
+    /// 创建新的分层注册表。
+    pub fn new(global: SkillRegistry) -> Self {
+        Self {
+            global,
+            tenant: HashMap::new(),
+            user: HashMap::new(),
+        }
+    }
+
+    /// 注册 tenant 级技能表。
+    pub fn register_tenant_registry(&mut self, scope: impl Into<String>, registry: SkillRegistry) {
+        self.tenant.insert(scope.into(), registry);
+    }
+
+    /// 注册 user 级技能表。
+    pub fn register_user_registry(&mut self, scope: impl Into<String>, registry: SkillRegistry) {
+        self.user.insert(scope.into(), registry);
+    }
+
+    /// 按 `user > tenant > global` 解析技能。
+    pub fn get_for_scopes(&self, scopes: &[String], name: &str) -> Option<Skill> {
+        for scope in scopes {
+            if let Some(skill) = self
+                .user
+                .get(scope)
+                .and_then(|registry| registry.get(name))
+                .or_else(|| {
+                    self.tenant
+                        .get(scope)
+                        .and_then(|registry| registry.get(name))
+                })
+            {
+                return Some(skill);
+            }
+        }
+
+        self.global.get(name)
+    }
+
+    /// 按 `user > tenant > global` 列出可见技能。
+    pub fn list_names_for_scopes(&self, scopes: &[String]) -> Vec<String> {
+        let mut names = self.global.list_names();
+        for scope in scopes.iter().rev() {
+            if let Some(registry) = self.tenant.get(scope) {
+                names.extend(registry.list_names());
+            }
+            if let Some(registry) = self.user.get(scope) {
+                names.extend(registry.list_names());
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// 返回技能来源层级。
+    pub fn source_for_scopes(&self, scopes: &[String], name: &str) -> Option<&'static str> {
+        for scope in scopes {
+            if self
+                .user
+                .get(scope)
+                .and_then(|registry| registry.get(name))
+                .is_some()
+            {
+                return Some("user");
+            }
+            if self
+                .tenant
+                .get(scope)
+                .and_then(|registry| registry.get(name))
+                .is_some()
+            {
+                return Some("tenant");
+            }
+        }
+        self.global.get(name).map(|_| "global")
+    }
+
+    /// 列出所有层级中的技能名称。
+    pub fn list_all_names(&self) -> Vec<String> {
+        let mut names = self.global.list_names();
+        for registry in self.tenant.values() {
+            names.extend(registry.list_names());
+        }
+        for registry in self.user.values() {
+            names.extend(registry.list_names());
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// 返回任意层级中的技能定义，优先 user / tenant / global。
+    pub fn get_any(&self, name: &str) -> Option<Skill> {
+        for registry in self.user.values() {
+            if let Some(skill) = registry.get(name) {
+                return Some(skill);
+            }
+        }
+        for registry in self.tenant.values() {
+            if let Some(skill) = registry.get(name) {
+                return Some(skill);
+            }
+        }
+        self.global.get(name)
     }
 }
 
@@ -417,5 +548,71 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         let skill = registry.get("echo").unwrap();
         let output = skill.execute("hello").await.unwrap();
         assert_eq!(output, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_layered_skill_registry_resolves_user_before_tenant_before_global() {
+        let tempdir = tempdir().unwrap();
+
+        async fn write_skill(root: &std::path::Path, name: &str, command: &str) {
+            let skill_dir = root.join(name);
+            tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+            tokio::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!(
+                    "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
+                    name, name
+                ),
+            )
+            .await
+            .unwrap();
+            tokio::fs::write(
+                skill_dir.join("skill.toml"),
+                format!(
+                    "enabled = true\ntimeout = 5\nexecutable = \"python3\"\nargs = [\"-c\", \"{}\"]\n",
+                    command
+                ),
+            )
+            .await
+            .unwrap();
+        }
+
+        let global_dir = tempdir.path().join("global");
+        let tenant_dir = tempdir.path().join("tenant");
+        let user_dir = tempdir.path().join("user");
+        tokio::fs::create_dir_all(&global_dir).await.unwrap();
+        tokio::fs::create_dir_all(&tenant_dir).await.unwrap();
+        tokio::fs::create_dir_all(&user_dir).await.unwrap();
+
+        write_skill(&global_dir, "echo", "print('global')").await;
+        write_skill(&tenant_dir, "echo", "print('tenant')").await;
+        write_skill(&user_dir, "echo", "print('user')").await;
+
+        let global = SkillRegistry::from_dir(global_dir).await.unwrap();
+        let tenant = SkillRegistry::from_dir(tenant_dir).await.unwrap();
+        let user = SkillRegistry::from_dir(user_dir).await.unwrap();
+
+        let mut layered = LayeredSkillRegistry::new(global);
+        layered.register_tenant_registry("tenant:dingtalk:corp-1", tenant);
+        layered.register_user_registry("user:dingtalk:user-1", user);
+
+        let scopes = vec![
+            "user:dingtalk:user-1".to_string(),
+            "tenant:dingtalk:corp-1".to_string(),
+            "global".to_string(),
+        ];
+
+        let output = layered
+            .get_for_scopes(&scopes, "echo")
+            .unwrap()
+            .execute("ignored")
+            .await
+            .unwrap();
+        assert_eq!(output, "user");
+        assert_eq!(layered.source_for_scopes(&scopes, "echo"), Some("user"));
+        assert_eq!(
+            layered.list_names_for_scopes(&scopes),
+            vec!["echo".to_string()]
+        );
     }
 }
