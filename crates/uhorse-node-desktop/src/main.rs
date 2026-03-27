@@ -25,7 +25,7 @@ use tower_http::{
     services::{ServeDir, ServeFile},
 };
 use tracing::info;
-use uhorse_node_runtime::{NodeConfig, NodeError, NodeResult, Workspace};
+use uhorse_node_runtime::{NodeError, NodeResult, Workspace};
 
 use app_state::DesktopAppState;
 use config_store::ConfigStore;
@@ -106,12 +106,10 @@ fn doctor(workspace_path: &str) -> anyhow::Result<()> {
 }
 
 fn print_config(workspace_path: &str) -> anyhow::Result<()> {
-    let config = NodeConfig {
-        workspace_path: workspace_path.to_string(),
-        require_git_repo: false,
-        ..Default::default()
-    };
-    println!("{}", serde_json::to_string_pretty(&config)?);
+    let mut config = ConfigStore::new("node-desktop.toml").load()?;
+    config.node.workspace_path = workspace_path.to_string();
+    config.node.require_git_repo = false;
+    println!("{}", serde_json::to_string_pretty(&config.node)?);
     Ok(())
 }
 

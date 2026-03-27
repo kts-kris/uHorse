@@ -1,11 +1,11 @@
 # uHorse 安装指南
 
-本文档只描述 **当前仓库主线 v4.0 Hub-Node 架构** 的真实安装路径。
+本文档只描述 **当前仓库主线 `v4.1.1` Hub-Node 架构** 的真实安装路径。
 
 当前最推荐、也最贴近已验证代码路径的安装方式是：
 
-- 编译 `uhorse-hub`
-- 编译 `uhorse-node`
+- 编译 `uhorse-hub` 与 `uhorse-node`
+- 按需编译或下载 `uhorse-node-desktop`
 - 生成 `hub.toml` 和 `node.toml`
 - 按本地或部署场景分别启动 Hub 与 Node
 
@@ -58,16 +58,19 @@ git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
 ```
 
-### 2. 编译 Hub 和 Node
+### 2. 编译主线二进制
 
 ```bash
-cargo build --release -p uhorse-hub -p uhorse-node
+cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 ```
 
-编译完成后，主要产物是：
+编译完成后，主线产物是：
 
 - `target/release/uhorse-hub`
 - `target/release/uhorse-node`
+- `target/release/uhorse-node-desktop`
+
+如果你不想本地编译，也可以直接从 GitHub Release / nightly 获取主流平台的 `uhorse-hub` 与 `uhorse-node-desktop` archive。
 
 ### 3. 生成默认配置
 
@@ -105,7 +108,7 @@ cargo build --release -p uhorse-hub -p uhorse-node
 
 如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本。
 
-4.1 当前已经固定的交付边界是：**`bin + web` archive、`desktop-smoke.sh`、CI / release artifact**。这表示当前仓库主线已经覆盖可分发 archive 与 smoke 验证，但**不包含**原生 `.app/.dmg`、签名、公证、安装器。
+`v4.1.1` 当前已经固定的交付边界是：**`bin + web` archive、`desktop-smoke.sh`、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive 与 smoke 验证，但**不包含**原生 `.app/.dmg`、签名、公证、安装器。
 
 可以直接使用仓库内置脚本：
 
@@ -187,9 +190,9 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 - Node
 - 一个文件存在性命令 roundtrip
 
-### 5. 验证 Node Desktop 4.1 archive 边界
+### 5. 验证 Node Desktop `v4.1.1` archive 边界
 
-如果你正在验收 4.1 的 Node Desktop 交付件，请额外执行：
+如果你正在验收 `v4.1.1` 的 Node Desktop 交付件，请额外执行：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -281,4 +284,4 @@ hub_url = "ws://127.0.0.1:8765/ws"
 - [CONFIG.md](CONFIG.md)：配置结构与示例
 - [LOCAL_SETUP.md](LOCAL_SETUP.md)：本地 Hub-Node 启动指南
 - [TESTING.md](TESTING.md)：编译、测试与闭环验证
-- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4.0 Hub-Node 部署说明
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4 Hub-Node 部署说明

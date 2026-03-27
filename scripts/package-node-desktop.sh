@@ -25,7 +25,7 @@ ARCHIVE_PATH="$PACKAGE_ROOT/uhorse-node-desktop-$VERSION-$TARGET.$ARCHIVE_EXT"
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$WEB_DIR" "$BIN_DIR"
 
-npm --prefix apps/node-desktop-web install
+npm --prefix apps/node-desktop-web ci
 npm --prefix apps/node-desktop-web run build
 cargo build --release --target "$TARGET" -p uhorse-node-desktop
 
@@ -37,10 +37,16 @@ cp LICENSE* "$PACKAGE_DIR/" 2>/dev/null || true
 
 rm -f "$ARCHIVE_PATH"
 if [ "$ARCHIVE_EXT" = "zip" ]; then
-  (
-    cd "$PACKAGE_ROOT"
-    zip -qr "$ARCHIVE_PATH" "$(basename "$PACKAGE_DIR")"
-  )
+  if command -v zip >/dev/null 2>&1; then
+    (
+      cd "$PACKAGE_ROOT"
+      zip -qr "$ARCHIVE_PATH" "$(basename "$PACKAGE_DIR")"
+    )
+  else
+    PACKAGE_DIR_WIN="$(cygpath -w "$PACKAGE_DIR" 2>/dev/null || printf '%s' "$PACKAGE_DIR")"
+    ARCHIVE_PATH_WIN="$(cygpath -w "$ARCHIVE_PATH" 2>/dev/null || printf '%s' "$ARCHIVE_PATH")"
+    powershell.exe -NoProfile -Command "Compress-Archive -Path '$PACKAGE_DIR_WIN' -DestinationPath '$ARCHIVE_PATH_WIN' -Force"
+  fi
 else
   tar -czf "$ARCHIVE_PATH" -C "$PACKAGE_ROOT" "$(basename "$PACKAGE_DIR")"
 fi

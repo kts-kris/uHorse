@@ -385,6 +385,7 @@ impl Node {
             config.connection.clone(),
             config.name.clone(),
             workspace.root().to_string_lossy().to_string(),
+            config.capabilities.clone(),
             heartbeat_snapshot.clone(),
         );
 

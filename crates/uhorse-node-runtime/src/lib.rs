@@ -5,6 +5,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+mod browser;
 pub mod connection;
 pub mod error;
 pub mod executor;

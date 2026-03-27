@@ -1,6 +1,6 @@
 # uHorse 通道指南
 
-本文档只描述 **当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
+本文档只描述 **`v4.1.1` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
 
 当前最重要、也是主推荐路径的是：
 
@@ -107,9 +107,9 @@ DingTalk inbound message
 
 这意味着 DingTalk 消息不是在通道层本地直接处理，而是会先进入 LLM 规划，再进入 Hub-Node 任务执行链路。
 
-## 4.1 来源感知运行时
+## 来源感知运行时
 
-在当前 4.1 口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
+在当前 `v4.1.1` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
 
 这里的目标不是把 DingTalk 变成 `memory / agent / skill` 管理入口，而是让运行时能够区分资源来自哪里、应该按什么边界共享或隔离。
 
@@ -128,11 +128,12 @@ DingTalk inbound message
 
 1. 读取用户原始自然语言请求
 2. 通过 LLM 规划单个 `Command`
-3. 仅接受 `FileCommand` 或 `ShellCommand`
-4. 对路径做本地校验，禁止绝对路径越界和 `..`
-5. 拒绝危险 git，例如 `git reset --hard`、`git clean -fd`、`git push --force`
+3. 仅接受 `FileCommand`、`ShellCommand` 或受控 `BrowserCommand`
+4. 对文件路径做本地校验，禁止绝对路径越界和 `..`
+5. 对浏览器目标做本地校验，只允许公共 `http/https` URL，拒绝 `file://`、localhost、私网地址和其他越界目标
+6. 拒绝危险 git，例如 `git reset --hard`、`git clean -fd`、`git push --force`
 
-如果 LLM 返回非法 JSON、越界路径或危险命令，Hub 会直接报错，不会下发到 Node。
+如果 LLM 返回非法 JSON、越界路径、非法浏览器目标或危险命令，Hub 会直接报错，不会下发到 Node。
 
 ---
 
@@ -152,7 +153,7 @@ DingTalk inbound message
 - 如果总结失败，则回退到结构化文本结果
 - 任务规划或本地校验阶段失败时，会即时回发错误信息
 
-当前主线已经用真实企业租户验证：不安全请求会即时错误回显，合法请求的执行结果会原路回传到原会话。
+当前主线已经用真实企业租户验证：不安全请求会即时错误回显，合法文件 / shell 请求与受控浏览器请求的执行结果都会原路回传到原会话。
 
 因此 DingTalk 在当前主线中不只是“入站入口”，也是任务结果的回传出口。
 
@@ -240,4 +241,4 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocaptur
 - [CONFIG.md](CONFIG.md)：统一配置与 legacy 配置边界
 - [README.md](README.md)：项目总览
 - [TESTING.md](TESTING.md)：测试与验证
-- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4.0 部署说明
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md)：v4 部署说明

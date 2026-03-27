@@ -1,6 +1,6 @@
 # uHorse Channel Guide
 
-This document only describes the **channel path that is actually wired into the current mainline runtime**.
+This document only describes the **channel path that is actually wired into the current `v4.1.1` mainline runtime**.
 
 The most important and recommended path today is:
 
@@ -107,9 +107,9 @@ DingTalk inbound message
 
 So DingTalk messages do not stop at the channel layer. They first go through LLM planning, then enter the Hub-Node execution pipeline.
 
-## 4.1 Source-aware runtime
+## Source-aware runtime
 
-Under the current 4.1 wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
+Under the current `v4.1.1` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
 
 The goal is not to turn DingTalk into a management surface for `memory / agent / skill`, but to let the runtime distinguish where a resource came from and what sharing or isolation boundary it should follow.
 
@@ -128,11 +128,12 @@ The current `uhorse-hub` runtime no longer limits DingTalk text to a fixed comma
 
 1. reads the user's original natural-language request
 2. asks the LLM to plan a single `Command`
-3. only accepts `FileCommand` or `ShellCommand`
-4. validates paths locally and rejects `..` or out-of-workspace absolute paths
-5. blocks dangerous git commands such as `git reset --hard`, `git clean -fd`, and `git push --force`
+3. only accepts `FileCommand`, `ShellCommand`, or a controlled `BrowserCommand`
+4. validates file paths locally and rejects `..` or out-of-workspace absolute paths
+5. validates browser targets locally and only allows public `http/https` URLs while rejecting `file://`, localhost, private-network, and other out-of-bound targets
+6. blocks dangerous git commands such as `git reset --hard`, `git clean -fd`, and `git push --force`
 
-If the LLM returns invalid JSON, an out-of-workspace path, or a dangerous command, Hub rejects it before anything is dispatched to the Node.
+If the LLM returns invalid JSON, an out-of-workspace path, an invalid browser target, or a dangerous command, Hub rejects it before anything is dispatched to the Node.
 
 ---
 
@@ -152,7 +153,7 @@ The reply-content strategy is:
 - fall back to structured text when summarization fails
 - return immediate error text when planning or local validation fails
 
-The current mainline has already been validated with a real enterprise tenant: unsafe requests return immediate errors, and valid request results are routed back to the original conversation.
+The current mainline has already been validated with a real enterprise tenant: unsafe requests return immediate errors, and valid file / shell requests plus controlled browser requests are routed back to the original conversation.
 
 So DingTalk is both the inbound entrypoint and the result return channel.
 
@@ -240,4 +241,4 @@ This does not require real DingTalk credentials, but it proves that the Hub-Node
 - [CONFIG-en.md](CONFIG-en.md): unified vs legacy config boundary
 - [README-en.md](README-en.md): project overview
 - [TESTING.md](TESTING.md): test and validation commands
-- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md): v4.0 deployment guide
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md): v4 deployment guide

@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>v4.0 Hub-Node mainline with landed 4.1 runtime increments</strong>
+  <strong>v4.1.1 Hub-Node mainline release</strong>
 </p>
 
 <p align="center">
-  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; these docs also cover the landed 4.1 layered runtime and Node Desktop packaging boundary.</em>
+  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the primary deliverables are now `uhorse-hub` and `uhorse-node-desktop`, and these docs cover the DingTalk browser pipeline plus the Node Desktop packaging boundary.</em>
 </p>
 
 <p align="center">
@@ -25,31 +25,36 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0--alpha.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.1.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
-  <img src="https://img.shields.io/badge/status-alpha-yellow" alt="Status">
+  <img src="https://img.shields.io/badge/status-released-green" alt="Status">
 </p>
 
 ---
 
 ## Overview
 
-The current mainline is the **v4.0 Hub-Node architecture**, with several 4.1 increments already landed:
+The current public release line is **v4.1.1 Hub-Node mainline**.
+
+Core components and primary deliverables:
 
 - `uhorse-hub`: cloud-side control plane for Node access, task scheduling, Web API, approval endpoints, and DingTalk Stream intake.
-- `uhorse-node`: local execution node binary.
-- `uhorse-node-runtime`: the real Node runtime implementation, including reconnect, workspace protection, permissions, approval requests, and task execution.
+- `uhorse-node-runtime`: the real Node runtime implementation, including reconnect, workspace protection, permissions, browser execution, approval requests, and task execution.
+- `uhorse-node-desktop`: the recommended local desktop form factor for Node, delivered as a `bin/ + web/` archive.
 - `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
 - `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
-The landed 4.1-facing capabilities that are already visible in the repository are:
+The `v4.1.1` capabilities already visible and validated in the repository include:
 
+- DingTalk natural-language requests can enter the Hub → Node pipeline and, in controlled cases, be planned into a `BrowserCommand`.
+- Hub locally validates browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets.
+- Node Desktop and the runtime support browser-capability routing, so browser tasks are dispatched to nodes that declare `CommandType::Browser`.
 - `memory / agent / skill` support layered sharing and isolation across `global / tenant / user` scopes.
 - the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
-- Node Desktop is currently delivered as a `bin/ + web/` archive validated by `desktop-smoke.sh` and CI / release artifacts, not as native `.app/.dmg`, code signing, notarization, or installers.
+- Node Desktop is delivered as a `bin/ + web/` archive together with `desktop-smoke.sh` and GitHub release / nightly artifacts, not as native `.app/.dmg`, code signing, notarization, or installers.
 
-These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe 4.1 as a return to the old monolithic Agent platform.
+These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.1.1` as a return to the old monolithic Agent platform.
 
 ## Current Status
 
@@ -64,25 +69,29 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Node reconnect after Hub restart | ✅ | Node reconnects and re-registers automatically |
 | Layered `memory / agent / skill` scopes | ✅ | the runtime now organizes sharing and isolation across `global / tenant / user` scopes |
 | Source-aware runtime / UI | ✅ | runtime pages such as Skills and Settings expose `source_layer` and `source_scope` so same-name multi-source resources can be distinguished |
-| Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive with `desktop-smoke.sh`; `.app/.dmg` is not part of the current boundary |
+| Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive, and CI / release / nightly all publish matching artifacts; `.app/.dmg` is outside the current boundary |
 | Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` covers a real Hub + Node + WebSocket roundtrip |
 | Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
 | DingTalk Stream integration | ✅ | Stream mode is the recommended path; mirroring Node Desktop notifications also requires `channels.dingtalk.notification_bindings` |
+| DingTalk browser planning path | ✅ | Hub now allows controlled `BrowserCommand` planning and dispatches browser work to nodes that declare `CommandType::Browser` |
 
 ## Quick Start
 
-### 1. Build the binaries
+### 1. Build the mainline binaries
 
 ```bash
 git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
-cargo build --release -p uhorse-hub -p uhorse-node
+cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 ```
 
-Build outputs:
+Primary outputs:
 
 - `target/release/uhorse-hub`
 - `target/release/uhorse-node`
+- `target/release/uhorse-node-desktop`
+
+If you want prebuilt mainstream-platform packages, use the GitHub Release / nightly archives for `uhorse-hub` and `uhorse-node-desktop`.
 
 ### 2. Generate default configs
 
@@ -237,28 +246,30 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 ### Primary source entrypoints
 
 - Hub startup and unified config loading: `crates/uhorse-hub/src/main.rs`
-- Hub Web API: `crates/uhorse-hub/src/web/mod.rs`
+- Hub Web API plus DingTalk / browser planning validation: `crates/uhorse-hub/src/web/mod.rs`
 - Hub WebSocket auth and registration: `crates/uhorse-hub/src/web/ws.rs`
 - Hub scheduler: `crates/uhorse-hub/src/task_scheduler.rs`
 - Node CLI entrypoint: `crates/uhorse-node/src/main.rs`
 - Node runtime: `crates/uhorse-node-runtime/src/node.rs`
-- Node connection loop: `crates/uhorse-node-runtime/src/connection.rs`
+- Node browser execution and command dispatch: `crates/uhorse-node-runtime/src/executor.rs`
+- Node Desktop desktop host: `crates/uhorse-node-desktop/src/main.rs`
 - Local integration tests: `crates/uhorse-hub/tests/integration_test.rs`
 
 ## Documentation Index
 
 | Document | Description |
 |----------|-------------|
-| [CHANGELOG-en.md](CHANGELOG-en.md) | 4.1-facing change facts, documentation sync notes, and explicit non-goals |
+| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.1.1` release facts, documentation sync notes, and explicit non-goals |
 | [INSTALL-en.md](INSTALL-en.md) | current Hub-Node install path plus the Node Desktop archive / smoke boundary |
 | [API-en.md](API-en.md) | current implemented Hub-Node API surface |
 | [LOCAL_SETUP.md](LOCAL_SETUP.md) | local dual-process setup, JWT bootstrap, approval, and reconnect regression |
 | [CONFIG-en.md](CONFIG-en.md) | unified config, legacy HubConfig, NodeConfig, and permission rules |
-| [CHANNELS-en.md](CHANNELS-en.md) | current channel status, DingTalk Stream, source-aware runtime entry, and notification mirroring |
-| [scripts/README.md](scripts/README.md) | mainline scripts, including Node Desktop package / smoke and CI-aligned usage |
+| [CHANNELS-en.md](CHANNELS-en.md) | current channel status, DingTalk Stream, browser planning path, and notification mirroring |
+| [scripts/README.md](scripts/README.md) | mainline scripts, including Node Desktop package / smoke and CI / release aligned usage |
 | [TESTING.md](TESTING.md) | package tests, workspace tests, and manual regression order |
-| [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4.0 Hub-Node deployment guide |
-| [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4.0 architecture details |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.1.1` release notes |
+| [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4 Hub-Node deployment guide |
+| [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4 architecture details |
 
 ## Workspace Layout
 

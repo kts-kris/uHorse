@@ -1,196 +1,58 @@
-## uHorse 3.0.0 发布
+## uHorse 4.1.1 发布
 
-**发布日期**: 2025-03-13
+**发布日期**：2026-03-27
 
-### 重大更新
+### 本次发布重点
 
-uHorse 3.0.0 是一个里程碑版本，完成了从"企业级多渠道 AI 网关"到"企业级 AI 基础设施平台"的全面升级。
+`v4.1.1` 的目标不是扩展新的产品线，而是把当前已经完成的 Hub-Node 主线、DingTalk 浏览器链路与 Node Desktop 交付边界正式收口为一版可发布的主线版本。
 
-#### 核心指标提升
+### 主要新增
 
-| 维度 | 2.0 基准 | 3.0 达成 | 提升 |
-|------|----------|----------|------|
-| **高可用性** | 40% | 95% | +55% |
-| **可扩展性** | 40% | 95% | +55% |
-| **安全合规** | 50% | 100% | +50% |
-| **数据治理** | 40% | 100% | +60% |
-| **API 标准** | 60% | 100% | +40% |
-| **企业集成** | 30% | 100% | +70% |
+- DingTalk 自然语言请求现在可以在受控场景下规划为 `BrowserCommand`
+- Hub 会对浏览器目标执行本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标
+- `uhorse-node-runtime` 已接入正式浏览器执行路径
+- `uhorse-node-desktop` 默认启用 `browser` feature，并通过 `CommandType::Browser` 参与能力路由
+- GitHub release / nightly workflow 现在为 `uhorse-hub` 与 `uhorse-node-desktop` 生成主流平台 archive 产物
+- `channels.dingtalk.notification_bindings` 已纳入当前主线说明，用于将稳定 `node_id` 绑定到 DingTalk `user_id`
 
----
+### 主要变更
 
-### 新增功能 (6 个 Phase)
+- Node Desktop 当前正式交付边界已固定为 `bin + web` archive
+- README / INSTALL / CHANNELS / scripts / release 文档已统一到 `v4.1.1` 口径
+- 每日构建与正式发布链路已统一使用 `Cargo.toml` 版本与 `CHANGELOG.md` 版本段作为发布事实源
+- `memory / agent / skill` 的 4.1 叙事已明确为 `global / tenant / user` 分层共享与隔离
+- runtime API 与 Web UI 已通过 `source_layer`、`source_scope` 暴露来源感知信息
 
-#### Phase 1: 高可用性基础设施
-- ✅ **服务发现**: etcd + Consul 双后端
-- ✅ **负载均衡**: 4 种策略 (轮询/加权/健康感知/最少连接)
-- ✅ **分布式配置**: 配置中心 + 热加载 + 版本管理
-- ✅ **故障转移**: 自动/手动/优先级策略
+### 主交付物
 
-#### Phase 2: 可扩展性架构
-- ✅ **数据库分片**: 按 tenant_id 分片 + 读写分离
-- ✅ **分布式缓存**: Redis 集成 (会话/令牌黑名单)
-- ✅ **消息队列**: NATS 集成 (任务队列/死信队列)
-- ✅ **缓存策略**: LRU/LFU/TTL
+本次发布的主交付物是：
 
-#### Phase 3: 安全合规体系
-- ✅ **传输加密**: TLS 1.3 + Let's Encrypt 自动证书
-- ✅ **存储加密**: SQLCipher + 字段级加密
-- ✅ **GDPR 合规**: 数据导出/删除/同意管理
-- ✅ **审计增强**: 持久化 + 防篡改签名
+- `uhorse-hub`
+- `uhorse-node-desktop`
 
-#### Phase 4: 数据治理体系
-- ✅ **数据分类**: 4 级敏感度 (Public/Internal/Confidential/Restricted)
-- ✅ **保留策略**: 自动过期删除
-- ✅ **备份恢复**: 增量/完整备份 + AES-256-GCM 加密
-- ✅ **灾难恢复**: PITR + 跨区域复制
+其中 `uhorse-node-desktop` 继续以 `bin + web` archive 形式发布，面向主流平台提供 `.tar.gz` 或 `.zip` 包。
 
-#### Phase 5: API 标准体系
-- ✅ **OpenAPI 3.0**: utoipa 集成 + Swagger UI + ReDoc
-- ✅ **客户端生成**: TypeScript/Go/Python/Rust
-- ✅ **API 版本管理**: URL 版本 + 废弃通知
-- ✅ **Rate Limiting**: 全局/用户/端点/分布式
+### 不包含内容
 
-#### Phase 6: 企业集成体系
-- ✅ **SSO/OAuth2**: 授权服务器 + OIDC + SAML 2.0
-- ✅ **多 IdP 集成**: Okta/Auth0/Azure AD/Google Workspace
-- ✅ **SIEM 集成**: Splunk HEC + Datadog Logs API
-- ✅ **第三方集成**: Jira/GitHub/Slack
+`v4.1.1` 明确 **不包含**：
 
----
+- 原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
+- 旧时代 `agent / skill / memory` 独立平台的全面回归
+- 将 legacy `uhorse` 单体路径恢复为主交付物
 
-### 新增模块 (11 个 crate)
+### 验证基线
 
-| Crate | 功能 |
-|-------|------|
-| `uhorse-discovery` | 服务发现 (etcd/Consul) |
-| `uhorse-cache` | 分布式缓存 (Redis) |
-| `uhorse-queue` | 消息队列 (NATS) |
-| `uhorse-gdpr` | GDPR 合规 |
-| `uhorse-governance` | 数据治理 |
-| `uhorse-backup` | 备份恢复 |
-| `uhorse-sso` | SSO/OAuth2/OIDC/SAML |
-| `uhorse-siem` | SIEM 集成 |
-| `uhorse-webhook` | Webhook 增强 |
-| `uhorse-integration` | 第三方集成 |
-| `uhorse-observability` | 可观测性增强 |
-
----
-
-### 测试覆盖
-
-- **总测试数**: 329+
-- **状态**: ✅ 全部通过
-
----
-
-### 升级指南
+发布前已完成并建议持续复核的验证基线包括：
 
 ```bash
-# 拉取最新代码
-git pull
-git checkout v3.0.0
-
-# 构建项目
-cargo build --release
-
-# 启动完整栈
-docker-compose up -d
-
-# 健康检查
-curl http://localhost:8080/health/live
+cargo test --workspace
+./scripts/package-node-desktop.sh
+./scripts/desktop-smoke.sh
+cargo build --release -p uhorse-hub -p uhorse-node-desktop
 ```
 
----
+### 升级与获取方式
 
-## uHorse 2.0.0 发布
-
-### 重大更新
-
-uHorse 2.0.0 是一个重要里程碑版本，带来了企业级多渠道 AI 网关的完整实现。
-
----
-
-## 新功能
-
-### 实时通信
-- **WebSocket 支持**: 全双工实时通信
-  - 连接管理（心跳、重连、会话绑定）
-  - 房间机制（全局/Agent/Session 分组）
-  - 事件推送（消息、状态变更、任务进度）
-- **SSE 流式响应**: 服务器推送事件
-  - /api/v1/events 事件流端点
-  - /api/v1/chat/stream LLM 流式聊天
-  - Keep-alive 支持
-
-### 前端管理界面
-- **Dashboard**: 系统概览、统计数据
-- **Agents 页面**: Agent 管理CRUD
-- **Skills 页面**: 技能管理
-- **Sessions 页面**: 会话列表、消息历史
-- **Channels 页面**: 通道状态监控
-- **Settings 页面**: 系统配置
-  - 通用设置（服务器、日志）
-  - LLM 设置（模型、API Key、参数）
-  - 安全设置（JWT、限流、CORS）
-
-### 企业级特性
-- **RBAC 权限控制**:
-  - 角色：Admin / Operator / Viewer
-  - 资源：Agent / Skill / Session / Channel / System / Tenant
-  - 操作：Create / Read / Update / Delete / Execute / Manage
-- **审计日志**:
-  - 操作日志记录（用户/IP 追踪）
-  - 查询 API（过滤、分页）
-  - 导出功能（JSON/CSV）
-- **多租户架构**:
-  - 租户隔离（TenantId）
-  - 资源配额（Agent/技能/消息/存储）
-  - 租户计划：Free / Pro / Enterprise
-
-### 多模态支持
-- **STT 语音转文字**: OpenAI Whisper 集成
-- **TTS 文字转语音**: OpenAI TTS 集成（6 种音色）
-- **Vision 图像理解**: GPT-4V / Claude Vision 支持
-- **文档解析**: PDF / DOCX / XLSX / MD / JSON / CSV
-
----
-
-## 技术改进
-
-### 新增依赖
-- async-stream - 流式处理
-- futures - 异步工具
-- base64 - 图像编码
-- utoipa + utoipa-swagger-ui - OpenAPI 文档
-
-### 新增模块
-- crates/uhorse-multimodal/ - 多模态支持 crate
-- crates/uhorse-gateway/src/auth/ - 认证模块（RBAC/审计/多租户）
-- crates/uhorse-gateway/src/websocket.rs - WebSocket 管理
-- web/src/pages/ - 前端管理页面
-
----
-
-## 升级指南
-
-```bash
-# 拉取最新代码
-git pull
-git checkout v2.0.0
-
-# 构建项目
-cargo build --release
-
-# 启动服务
-cargo run --release
-
-# 启动前端
-cd web && npm install && npm run build
-```
-
----
-
-## 致谢
-
-感谢所有贡献者的辛勤工作！
+- 从源码构建：见 `README.md` 与 `INSTALL.md`
+- 获取预编译产物：使用 GitHub Release / nightly 中的 `uhorse-hub` 与 `uhorse-node-desktop` archive
+- 查看完整变更：见 `CHANGELOG.md` 与 `CHANGELOG-en.md`

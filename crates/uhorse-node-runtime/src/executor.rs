@@ -2,6 +2,7 @@
 //!
 //! 负责执行 Hub 下发的各类命令
 
+use crate::browser::{BrowserConfig, BrowserExecutor};
 use crate::error::{NodeError, NodeResult};
 use crate::permission::{PermissionManager, PermissionResult};
 use crate::workspace::Workspace;
@@ -42,6 +43,9 @@ pub struct CommandExecutor {
 
     /// 执行统计
     stats: Arc<RwLock<ExecutorStats>>,
+
+    /// 浏览器执行器
+    browser_executor: BrowserExecutor,
 }
 
 /// 执行器统计
@@ -80,6 +84,7 @@ impl CommandExecutor {
             default_timeout: Duration::from_secs(60),
             max_output_size: 10 * 1024 * 1024,
             stats: Arc::new(RwLock::new(ExecutorStats::default())),
+            browser_executor: BrowserExecutor::new(BrowserConfig::default()),
         }
     }
 
@@ -779,10 +784,8 @@ impl CommandExecutor {
     }
 
     /// 执行浏览器操作
-    async fn execute_browser(&self, _cmd: &BrowserCommand) -> NodeResult<CommandOutput> {
-        Err(NodeError::Execution(
-            "Browser execution not yet implemented".to_string(),
-        ))
+    async fn execute_browser(&self, cmd: &BrowserCommand) -> NodeResult<CommandOutput> {
+        self.browser_executor.execute(cmd).await
     }
 
     /// 执行技能
@@ -995,6 +998,9 @@ mod tests {
     use tempfile::TempDir;
     use uhorse_protocol::{CodeLanguage, SessionId, UserId};
 
+    #[cfg(feature = "browser")]
+    use uhorse_protocol::BrowserResult;
+
     fn create_context() -> TaskContext {
         TaskContext::new(
             UserId::from_string("test-user"),
@@ -1106,5 +1112,43 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_execute_browser_returns_feature_disabled_error_without_browser_feature() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let result = executor
+            .execute_unchecked(&Command::Browser(BrowserCommand::Navigate {
+                url: "https://example.com".to_string(),
+            }))
+            .await;
+
+        #[cfg(not(feature = "browser"))]
+        {
+            let error = result.unwrap_err();
+            assert!(matches!(error, NodeError::Execution(_)));
+            assert!(error
+                .to_string()
+                .contains("Browser support not enabled. Compile with 'browser' feature"));
+        }
+
+        #[cfg(feature = "browser")]
+        {
+            match result {
+                Ok(result) => match result.output {
+                    CommandOutput::Browser {
+                        result: BrowserResult::Navigate { .. },
+                    }
+                    | CommandOutput::Browser {
+                        result: BrowserResult::Error { .. },
+                    } => {}
+                    other => panic!("unexpected output: {:?}", other),
+                },
+                Err(error) => assert!(matches!(error, NodeError::Execution(_))),
+            }
+        }
     }
 }

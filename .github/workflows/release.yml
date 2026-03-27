@@ -103,6 +103,7 @@ jobs:
 
       - name: Install protobuf compiler (Windows)
         if: runner.os == 'Windows'
+        shell: powershell
         run: choco install protoc --yes
 
       - name: Cache cargo registry
@@ -118,24 +119,29 @@ jobs:
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/node-desktop-web/package-lock.json
+
       - name: Build Hub
         run: cargo build --release --target ${{ matrix.target }} -p uhorse-hub
 
-      - name: Build Node
-        run: cargo build --release --target ${{ matrix.target }} -p uhorse-node
+      - name: Package Node Desktop
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          UHORSE_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/package-node-desktop.sh
 
-      - name: Build Node Desktop package assets
-        run: npm --prefix apps/node-desktop-web install && npm --prefix apps/node-desktop-web run build
-
-      - name: Build Node Desktop
-        run: cargo build --release --target ${{ matrix.target }} -p uhorse-node-desktop
-
-      - name: Prepare binaries (Unix)
+      - name: Prepare Hub binary (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          strip uhorse-hub uhorse-node uhorse-node-desktop 2>/dev/null || true
-          chmod +x uhorse-hub uhorse-node uhorse-node-desktop
+          strip uhorse-hub 2>/dev/null || true
+          chmod +x uhorse-hub
 
       - name: Create Hub archive (Unix)
         if: runner.os != 'Windows'
@@ -150,38 +156,6 @@ jobs:
           cp LICENSE* package/ 2>/dev/null || true
 
           tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
-          echo "hub_archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
-
-      - name: Create Node archive (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          VERSION="${{ needs.resolve-version.outputs.version }}"
-          ARCHIVE_NAME="uhorse-node-${VERSION}-${{ matrix.target }}"
-
-          rm -rf package && mkdir -p package
-          cp target/${{ matrix.target }}/release/uhorse-node package/
-          cp README.md package/ 2>/dev/null || true
-          cp CHANGELOG.md package/ 2>/dev/null || true
-          cp LICENSE* package/ 2>/dev/null || true
-
-          tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
-          echo "node_archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
-
-      - name: Create Node Desktop archive (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          VERSION="${{ needs.resolve-version.outputs.version }}"
-          ARCHIVE_NAME="uhorse-node-desktop-${VERSION}-${{ matrix.target }}"
-
-          rm -rf package && mkdir -p package/bin package/web
-          cp target/${{ matrix.target }}/release/uhorse-node-desktop package/bin/
-          cp -R apps/node-desktop-web/dist/. package/web/
-          cp README.md package/ 2>/dev/null || true
-          cp CHANGELOG.md package/ 2>/dev/null || true
-          cp LICENSE* package/ 2>/dev/null || true
-
-          tar -czvf ${ARCHIVE_NAME}.tar.gz -C package .
-          echo "node_desktop_archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
 
       - name: Create Hub archive (Windows)
         if: runner.os == 'Windows'
@@ -197,41 +171,6 @@ jobs:
           Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
 
           Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
-          echo "hub_archive=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
-
-      - name: Create Node archive (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          $VERSION = "${{ needs.resolve-version.outputs.version }}"
-          $ARCHIVE_NAME = "uhorse-node-${VERSION}-${{ matrix.target }}"
-
-          Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path package -Force
-          Copy-Item target/${{ matrix.target }}/release/uhorse-node.exe package/
-          Copy-Item README.md package/ -ErrorAction SilentlyContinue
-          Copy-Item CHANGELOG.md package/ -ErrorAction SilentlyContinue
-          Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
-
-          Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
-          echo "node_archive=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
-
-      - name: Create Node Desktop archive (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          $VERSION = "${{ needs.resolve-version.outputs.version }}"
-          $ARCHIVE_NAME = "uhorse-node-desktop-${VERSION}-${{ matrix.target }}"
-
-          Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path package/bin -Force
-          New-Item -ItemType Directory -Path package/web -Force
-          Copy-Item target/${{ matrix.target }}/release/uhorse-node-desktop.exe package/bin/
-          Copy-Item apps/node-desktop-web/dist/* package/web/ -Recurse
-          Copy-Item README.md package/ -ErrorAction SilentlyContinue
-          Copy-Item CHANGELOG.md package/ -ErrorAction SilentlyContinue
-          Copy-Item LICENSE* package/ -ErrorAction SilentlyContinue
-
-          Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
-          echo "node_desktop_archive=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
 
       - name: Upload Hub artifact
         uses: actions/upload-artifact@v4
@@ -240,19 +179,12 @@ jobs:
           path: |
             ${{ github.workspace }}/uhorse-hub-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
 
-      - name: Upload Node artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: uhorse-node-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
-          path: |
-            ${{ github.workspace }}/uhorse-node-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
-
       - name: Upload Node Desktop artifact
         uses: actions/upload-artifact@v4
         with:
           name: uhorse-node-desktop-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
           path: |
-            ${{ github.workspace }}/uhorse-node-desktop-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
+            ${{ github.workspace }}/target/node-desktop-package/uhorse-node-desktop-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
 
   # ==================== 发布到 GitHub Releases ====================
   release:

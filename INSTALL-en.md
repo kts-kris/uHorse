@@ -1,11 +1,11 @@
 # uHorse Installation Guide
 
-This document only describes the **current v4.0 Hub-Node mainline** installation path that matches the repository as it exists today.
+This document only describes the **current `v4.1.1` Hub-Node mainline** installation path that matches the repository as it exists today.
 
 The recommended path is:
 
-- build `uhorse-hub`
-- build `uhorse-node`
+- build `uhorse-hub` and `uhorse-node`
+- optionally build or download `uhorse-node-desktop`
 - generate `hub.toml` and `node.toml`
 - start Hub and Node separately
 
@@ -58,16 +58,19 @@ git clone https://github.com/uhorse/uhorse-rs
 cd uhorse-rs
 ```
 
-### 2. Build Hub and Node
+### 2. Build the mainline binaries
 
 ```bash
-cargo build --release -p uhorse-hub -p uhorse-node
+cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 ```
 
-Main build outputs:
+Primary outputs:
 
 - `target/release/uhorse-hub`
 - `target/release/uhorse-node`
+- `target/release/uhorse-node-desktop`
+
+If you do not want to build locally, you can also use the mainstream-platform `uhorse-hub` and `uhorse-node-desktop` archives from GitHub Release / nightly.
 
 ### 3. Generate default configs
 
@@ -105,7 +108,7 @@ Terminal 2:
 
 If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script.
 
-The fixed 4.1 delivery boundary is: **`bin + web` archive delivery, `desktop-smoke.sh`, and CI / release artifacts**. This means the current mainline already covers archive packaging and smoke validation, but it does **not** include native `.app/.dmg`, code signing, notarization, or installers.
+The fixed `v4.1.1` delivery boundary is: **`bin + web` archive delivery, `desktop-smoke.sh`, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging and smoke validation, but it does **not** include native `.app/.dmg`, code signing, notarization, or installers.
 
 Use the built-in packaging script:
 
@@ -187,9 +190,9 @@ This test starts a real:
 - Node
 - file existence roundtrip task
 
-### 5. Verify the Node Desktop 4.1 archive boundary
+### 5. Verify the Node Desktop `v4.1.1` archive boundary
 
-If you are validating the 4.1 Node Desktop deliverable, also run:
+If you are validating the `v4.1.1` Node Desktop deliverable, also run:
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -281,4 +284,4 @@ hub_url = "ws://127.0.0.1:8765/ws"
 - [CONFIG-en.md](CONFIG-en.md): actual config structure and examples
 - [LOCAL_SETUP.md](LOCAL_SETUP.md): local Hub-Node startup guide
 - [TESTING.md](TESTING.md): build, test, and roundtrip verification
-- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md): v4.0 Hub-Node deployment guide
+- [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md): v4 Hub-Node deployment guide

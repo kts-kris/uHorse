@@ -4,9 +4,22 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use uhorse_node_runtime::{NodeConfig, NodeError, NodeId, NodeResult};
+use uhorse_protocol::{CommandType, NodeCapabilities};
 
 const FALLBACK_NODE_NAME: &str = "uHorse-Node";
 const DEFAULT_NODE_ID_PREFIX: &str = "node-desktop-";
+
+fn desktop_node_capabilities() -> NodeCapabilities {
+    NodeCapabilities {
+        supported_commands: vec![
+            CommandType::File,
+            CommandType::Shell,
+            CommandType::Code,
+            CommandType::Browser,
+        ],
+        ..NodeCapabilities::default()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DesktopConfig {
@@ -21,6 +34,7 @@ impl Default for DesktopConfig {
         let mut node = NodeConfig::default();
         node.name = current_computer_name();
         node.node_id = Some(default_node_id(&node.name));
+        node.capabilities = desktop_node_capabilities();
         Self {
             node,
             desktop: DesktopPreferencesConfig::default(),
@@ -118,6 +132,18 @@ impl ConfigStore {
         if config.node.node_id.is_none() {
             config.node.node_id = Some(default_node_id(&config.node.name));
         }
+        if !config
+            .node
+            .capabilities
+            .supported_commands
+            .contains(&CommandType::Browser)
+        {
+            config
+                .node
+                .capabilities
+                .supported_commands
+                .push(CommandType::Browser);
+        }
 
         Ok(config)
     }
@@ -133,6 +159,7 @@ impl ConfigStore {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use uhorse_protocol::CommandType;
 
     #[test]
     fn test_load_returns_default_when_missing() {
@@ -200,5 +227,48 @@ launch_at_login = false
             loaded.node.node_id.as_ref().map(NodeId::as_str),
             Some("node-desktop-my-desktop")
         );
+    }
+
+    #[test]
+    fn test_default_config_enables_browser_capability() {
+        let config = DesktopConfig::default();
+        assert!(config
+            .node
+            .capabilities
+            .supported_commands
+            .contains(&CommandType::Browser));
+    }
+
+    #[test]
+    fn test_load_backfills_browser_capability_for_legacy_config() {
+        let temp = TempDir::new().unwrap();
+        let config_path = temp.path().join("node-desktop.toml");
+        fs::write(
+            &config_path,
+            r#"name = "Legacy Desktop"
+workspace_path = "/tmp/workspace"
+require_git_repo = false
+
+[capabilities]
+supported_commands = ["file", "shell", "code"]
+tags = ["default"]
+max_concurrent_tasks = 5
+available_tools = []
+
+[desktop]
+notifications_enabled = true
+show_notification_details = true
+mirror_notifications_to_dingtalk = false
+launch_at_login = false
+"#,
+        )
+        .unwrap();
+
+        let loaded = ConfigStore::new(config_path).load().unwrap();
+        assert!(loaded
+            .node
+            .capabilities
+            .supported_commands
+            .contains(&CommandType::Browser));
     }
 }

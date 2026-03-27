@@ -7,24 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-03-27
+
 ### Added
 
-- Daily build workflow with smart change detection
-- Nightly release channel for development builds
-- 4.1 文档入口已补齐：README / INSTALL / CHANNELS / scripts/README / CHANGELOG 统一对齐当前主线事实
-- `memory / agent / skill` 的 4.1 叙事已明确为 `global / tenant / user` 分层共享与隔离，而不是旧单体 Agent 平台回归
-- runtime API 与 Web UI 已以 `source_layer`、`source_scope` 暴露来源感知信息，便于区分同名多来源资源
-- Node Desktop 4.1 交付边界已固定为 `bin + web` archive、`desktop-smoke.sh` 与 CI / release artifact
+- DingTalk 自然语言请求现在可以规划为受控 `BrowserCommand`，支持打开公共 `http/https` 页面并通过 Hub → Node → Hub 链路回传页面文本结果
+- Hub 已为浏览器目标增加本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标
+- `uhorse-node-runtime` 已接入正式浏览器执行路径，`uhorse-node-desktop` 默认启用 `browser` feature，并可通过 `CommandType::Browser` 参与能力路由
+- GitHub release / nightly workflow 现在会为 `uhorse-hub` 与 `uhorse-node-desktop` 生成主流平台 archive 产物
+- `channels.dingtalk.notification_bindings` 已纳入当前主线说明，用于将稳定 `node_id` 绑定到 DingTalk `user_id`，补齐 Node Desktop 本地通知镜像回传路径
 
 ### Changed
 
-- GitHub 首页与安装文档已同步到当前已落地的 4.1 增量能力，并补充对应导流
-- 通道文档已补充来源感知 runtime 的文档落点，以及 Node Desktop 通知镜像到 DingTalk 的 4.1 口径
+- Node Desktop 当前正式交付边界已收口为 `bin + web` archive，配套 `package-node-desktop.sh`、`desktop-smoke.sh` 与 release artifacts
+- README / INSTALL / CHANNELS / scripts / release 说明已统一到 `v4.1.1` 口径，并与当前 Hub-Node、DingTalk、Node Desktop 实现保持一致
+- 每日构建与正式发布链路已统一使用 `Cargo.toml` 版本与 `CHANGELOG.md` 版本段作为发布事实源
+- `memory / agent / skill` 的 4.1 叙事已明确为 `global / tenant / user` 分层共享与隔离，而不是旧单体 Agent 平台回归
+- runtime API 与 Web UI 已以 `source_layer`、`source_scope` 暴露来源感知信息，便于区分同名多来源资源
 
 ### Not Included
 
-- 4.1 不包含原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
-- 4.1 不表示旧时代 `agent / skill / memory` 独立平台全面回归；当前文档只描述现有 Hub-Node 主线里的分层 runtime 能力
+- `v4.1.1` 不包含原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
+- `v4.1.1` 不表示旧时代 `agent / skill / memory` 独立平台全面回归；当前文档只描述现有 Hub-Node 主线里的分层 runtime 能力
+- `v4.1.1` 不把 legacy `uhorse` 单体路径恢复为主交付物；当前主交付物仍是 `uhorse-hub` 与 `uhorse-node-desktop`
 
 ## [4.0.0] - 2026-03-18
 
@@ -241,7 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.1...HEAD
+[4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1
 [4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/kts-kris/uHorse/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/kts-kris/uHorse/compare/v0.1.0...v2.0.0

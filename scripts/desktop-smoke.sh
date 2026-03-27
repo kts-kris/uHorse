@@ -29,7 +29,7 @@ command -v curl >/dev/null 2>&1 || fail "curl 未安装"
 command -v python3 >/dev/null 2>&1 || fail "python3 未安装"
 
 info "构建 Node Desktop Web 与宿主..."
-npm --prefix apps/node-desktop-web install >/dev/null
+npm --prefix apps/node-desktop-web ci >/dev/null
 npm --prefix apps/node-desktop-web run build >/dev/null
 cargo build --release -p uhorse-node-desktop >/dev/null
 pass "构建完成"

@@ -7,24 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-03-27
+
 ### Added
 
-- Daily build workflow with smart change detection
-- Nightly release channel for development builds
-- 4.1-facing documentation entrypoints are now aligned across README / INSTALL / CHANNELS / scripts/README / CHANGELOG
-- the 4.1 `memory / agent / skill` narrative is now explicitly documented as layered sharing and isolation across `global / tenant / user` scopes, not as a return to the old monolithic Agent platform
-- the runtime API and Web UI now expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished
-- the Node Desktop 4.1 delivery boundary is now explicitly documented as `bin + web` archive delivery with `desktop-smoke.sh` and CI / release artifacts
+- DingTalk natural-language requests can now be planned into a controlled `BrowserCommand`, opening public `http/https` pages and returning extracted page text through the Hub → Node → Hub pipeline
+- Hub now applies local safety validation to browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets
+- `uhorse-node-runtime` now uses the formal browser execution path, `uhorse-node-desktop` enables the `browser` feature by default, and browser-capable nodes participate in capability-based routing via `CommandType::Browser`
+- GitHub release / nightly workflows now produce mainstream-platform archive artifacts for `uhorse-hub` and `uhorse-node-desktop`
+- `channels.dingtalk.notification_bindings` is now part of the documented mainline path for mapping stable `node_id` values to DingTalk `user_id` values so Node Desktop notification mirroring can return to the correct user
 
 ### Changed
 
-- the GitHub-facing README and install docs now point to the landed 4.1 increments and their supporting documents
-- the channel docs now define where source-aware runtime semantics live and how Node Desktop notification mirroring to DingTalk fits into the 4.1 flow
+- The formal Node Desktop delivery boundary is now fixed as a `bin + web` archive together with `package-node-desktop.sh`, `desktop-smoke.sh`, and release artifacts
+- README / INSTALL / CHANNELS / scripts / release docs are now aligned to `v4.1.1` and match the current Hub-Node, DingTalk, and Node Desktop implementation
+- Daily build and formal release flows now use the `Cargo.toml` version and the `CHANGELOG.md` version section as the release source of truth
+- the 4.1 `memory / agent / skill` narrative is explicitly documented as layered sharing and isolation across `global / tenant / user` scopes, not as a return to the old monolithic Agent platform
+- the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished
 
 ### Not Included
 
-- 4.1 does not include native `.app/.dmg` packaging, code signing, notarization, installers, or drag-and-drop desktop distribution
-- 4.1 does not mean a full return of the old standalone `agent / skill / memory` platform; the docs only describe the layered runtime capabilities that exist in the current Hub-Node mainline
+- `v4.1.1` does not include native `.app/.dmg`, code signing, notarization, installers, or drag-and-drop desktop distribution
+- `v4.1.1` does not mean a full return of the old standalone `agent / skill / memory` platform; the docs only describe the layered runtime capabilities that exist in the current Hub-Node mainline
+- `v4.1.1` does not restore the legacy monolithic `uhorse` path as a primary deliverable; the primary deliverables remain `uhorse-hub` and `uhorse-node-desktop`
 
 ## [4.0.0] - 2026-03-18
 
@@ -241,7 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.1...HEAD
+[4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1
 [4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/kts-kris/uHorse/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/kts-kris/uHorse/compare/v0.1.0...v2.0.0

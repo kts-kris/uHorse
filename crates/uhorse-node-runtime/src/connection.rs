@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tracing::{debug, error, info, warn};
-use uhorse_protocol::{HubToNode, MessageCodec, NodeId, NodeToHub};
+use uhorse_protocol::{HubToNode, MessageCodec, NodeCapabilities, NodeId, NodeToHub};
 
 /// 连接配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +137,9 @@ pub struct HubConnection {
     /// 工作空间路径
     workspace_path: String,
 
+    /// 节点能力
+    capabilities: NodeCapabilities,
+
     /// 连接状态
     state: Arc<RwLock<ConnectionState>>,
 
@@ -157,6 +160,7 @@ impl HubConnection {
         config: ConnectionConfig,
         node_name: String,
         workspace_path: String,
+        capabilities: NodeCapabilities,
         heartbeat_snapshot: Arc<RwLock<Option<HeartbeatSnapshot>>>,
     ) -> Self {
         Self {
@@ -164,6 +168,7 @@ impl HubConnection {
             node_id,
             node_name,
             workspace_path,
+            capabilities,
             state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
             running: Arc::new(AtomicBool::new(false)),
             heartbeat_snapshot,
@@ -195,6 +200,7 @@ impl HubConnection {
         let node_id = self.node_id.clone();
         let node_name = self.node_name.clone();
         let workspace_path = self.workspace_path.clone();
+        let capabilities = self.capabilities.clone();
         let heartbeat_snapshot = self.heartbeat_snapshot.clone();
 
         tokio::spawn(async move {
@@ -205,6 +211,7 @@ impl HubConnection {
                 node_id,
                 node_name,
                 workspace_path,
+                capabilities,
                 heartbeat_snapshot,
                 inbound_tx,
                 outbound_rx,
@@ -224,6 +231,7 @@ impl HubConnection {
         node_id: NodeId,
         node_name: String,
         workspace_path: String,
+        capabilities: NodeCapabilities,
         heartbeat_snapshot: Arc<RwLock<Option<HeartbeatSnapshot>>>,
         inbound_tx: mpsc::Sender<HubToNode>,
         outbound_rx: mpsc::Receiver<NodeToHub>,
@@ -240,6 +248,7 @@ impl HubConnection {
                 &node_id,
                 &node_name,
                 &workspace_path,
+                &capabilities,
                 &heartbeat_snapshot,
                 &inbound_tx,
                 &outbound_rx,
@@ -285,6 +294,7 @@ impl HubConnection {
         node_id: &NodeId,
         node_name: &str,
         workspace_path: &str,
+        capabilities: &NodeCapabilities,
         heartbeat_snapshot: &Arc<RwLock<Option<HeartbeatSnapshot>>>,
         inbound_tx: &mpsc::Sender<HubToNode>,
         outbound_rx: &Arc<tokio::sync::Mutex<mpsc::Receiver<NodeToHub>>>,
@@ -321,7 +331,7 @@ impl HubConnection {
             message_id: uhorse_protocol::MessageId::new(),
             node_id: node_id.clone(),
             name: node_name.to_string(),
-            capabilities: uhorse_protocol::NodeCapabilities::default(),
+            capabilities: capabilities.clone(),
             workspace: uhorse_protocol::WorkspaceInfo {
                 name: workspace_name,
                 path: workspace_path.to_string(),

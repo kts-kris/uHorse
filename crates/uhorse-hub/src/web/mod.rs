@@ -15,6 +15,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -29,8 +30,9 @@ use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
 use uhorse_llm::{ChatMessage, LLMClient};
 use uhorse_observability::{HealthService, HealthStatus, MetricsCollector, MetricsExporter};
 use uhorse_protocol::{
-    Command, CommandOutput, FileCommand, HubToNode, MessageId,
-    PermissionRule as ProtocolPermissionRule, Priority, SessionId, TaskContext, TaskId, UserId,
+    BrowserResult, Command, CommandOutput, CommandType, FileCommand, HubToNode, MessageId,
+    NodeCapabilities, PermissionRule as ProtocolPermissionRule, Priority, SessionId, TaskContext,
+    TaskId, UserId,
 };
 use uhorse_security::ApprovalRequest;
 
@@ -1844,13 +1846,21 @@ pub async fn submit_dingtalk_task(
                 }
             }
 
+            let required_capabilities = match &command {
+                Command::Browser(_) => Some(NodeCapabilities {
+                    supported_commands: vec![CommandType::Browser],
+                    ..NodeCapabilities::default()
+                }),
+                _ => None,
+            };
+
             let task_id = state
                 .hub
                 .submit_task(
                     command,
                     task_context,
                     uhorse_protocol::Priority::Normal,
-                    None,
+                    required_capabilities,
                     vec![],
                     Some(workspace_hint),
                 )
@@ -1986,7 +1996,7 @@ fn build_agent_decision_messages(
         ChatMessage::system(agent_system_prompt.to_string()),
         ChatMessage::system(
             format!(
-                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件或 shell 操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api/browser 命令。若返回 execute_command，路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
+                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。若返回 execute_command，路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
                 if skill_names.is_empty() {
                     "（无）".to_string()
                 } else {
@@ -2022,7 +2032,7 @@ fn build_dingtalk_plan_messages(
     injected_context: &str,
 ) -> Vec<ChatMessage> {
     let mut messages = vec![ChatMessage::system(
-        "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON> }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 命令。禁止生成 code/database/api/browser/skill 命令。路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。如果无法安全规划，返回一个会在本地校验失败的命令并附带原因到路径字段之外是不允许的，因此应返回最接近且可解析的安全命令。shell 命令只允许只读、安全的本地仓库检查或目录查看。".to_string(),
+        "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON> }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 或 browser 命令。禁止生成 code/database/api/skill 命令。路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标；首选先 navigate，再按需要 wait_for / get_text / close。如果无法安全规划，返回一个会在本地校验失败的命令并附带原因到路径字段之外是不允许的，因此应返回最接近且可解析的安全命令。shell 命令只允许只读、安全的本地仓库检查或目录查看。".to_string(),
     )];
 
     if !injected_context.trim().is_empty() {
@@ -2062,7 +2072,8 @@ fn validate_planned_command(
     match command {
         Command::File(file_command) => validate_file_command(file_command, workspace_root),
         Command::Shell(shell_command) => validate_shell_command(shell_command, workspace_root),
-        _ => Err("仅允许规划 FileCommand 或 ShellCommand。".into()),
+        Command::Browser(browser_command) => validate_browser_command(browser_command),
+        _ => Err("仅允许规划 FileCommand、ShellCommand 或 BrowserCommand。".into()),
     }
 }
 
@@ -2116,6 +2127,66 @@ fn validate_shell_command(
     ] {
         if command_text.contains(pattern) {
             return Err(format!("禁止危险 git 命令：{}", pattern).into());
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_browser_command(
+    command: &uhorse_protocol::BrowserCommand,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match command {
+        uhorse_protocol::BrowserCommand::Navigate { url } => validate_browser_target_url(url),
+        uhorse_protocol::BrowserCommand::Screenshot { .. }
+        | uhorse_protocol::BrowserCommand::Click { .. }
+        | uhorse_protocol::BrowserCommand::Type { .. }
+        | uhorse_protocol::BrowserCommand::WaitFor { .. }
+        | uhorse_protocol::BrowserCommand::GetText { .. }
+        | uhorse_protocol::BrowserCommand::Evaluate { .. }
+        | uhorse_protocol::BrowserCommand::Close => Ok(()),
+    }
+}
+
+fn validate_browser_target_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "浏览器 URL 非法。")?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("浏览器命令只允许 http/https URL。".into()),
+    }
+
+    let Some(host) = parsed.host_str() else {
+        return Err("浏览器 URL 缺少主机名。".into());
+    };
+
+    let host = host.trim().to_ascii_lowercase();
+    if matches!(host.as_str(), "localhost" | "localhost.localdomain") {
+        return Err("禁止访问 localhost 目标。".into());
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        match ip {
+            IpAddr::V4(ipv4) => {
+                if ipv4.is_loopback()
+                    || ipv4.is_private()
+                    || ipv4.is_link_local()
+                    || ipv4.is_unspecified()
+                    || ipv4.is_broadcast()
+                    || ipv4.is_documentation()
+                {
+                    return Err("禁止访问本机或私网 IPv4 目标。".into());
+                }
+            }
+            IpAddr::V6(ipv6) => {
+                if ipv6.is_loopback()
+                    || ipv6.is_unique_local()
+                    || ipv6.is_unicast_link_local()
+                    || ipv6.is_unspecified()
+                {
+                    return Err("禁止访问本机或私网 IPv6 目标。".into());
+                }
+            }
         }
     }
 
@@ -2369,6 +2440,29 @@ fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String
         CommandOutput::Json { content } => {
             serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string())
         }
+        CommandOutput::Browser { result } => match result {
+            BrowserResult::Navigate { final_url, title } => match title {
+                Some(title) if !title.trim().is_empty() => {
+                    format!("已打开页面：{}\n标题：{}", final_url, title)
+                }
+                _ => format!("已打开页面：{}", final_url),
+            },
+            BrowserResult::GetText { text } => {
+                if text.trim().is_empty() {
+                    "页面已读取，但未提取到文本。".to_string()
+                } else {
+                    text.clone()
+                }
+            }
+            BrowserResult::Evaluate { value } => {
+                serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+            }
+            BrowserResult::Ok => "执行成功。".to_string(),
+            BrowserResult::Error { message } => format!("执行失败：{}", message),
+            BrowserResult::Screenshot { format, .. } => {
+                format!("截图成功，格式：{}。", format)
+            }
+        },
         CommandOutput::None => "执行成功，无输出。".to_string(),
         other => format!("执行成功，输出类型：{:?}", other),
     }
@@ -3193,9 +3287,10 @@ mod tests {
     use tempfile::{tempdir, TempDir};
     use tower::util::ServiceExt;
     use uhorse_protocol::{
-        Action, Command, CommandOutput, CommandResult, ExecutionError, FileCommand,
-        NodeCapabilities, Priority, ResourcePattern as ProtocolResourcePattern, ShellCommand,
-        TaskStatus, WorkspaceInfo,
+        Action, BrowserResult, BrowserCommand, Command, CommandOutput, CommandResult,
+        CommandType, ExecutionError, FileCommand, HubToNode, NodeCapabilities, NodeToHub,
+        Priority, ResourcePattern as ProtocolResourcePattern, ShellCommand, TaskStatus,
+        WorkspaceInfo,
     };
 
     use crate::HubConfig;
@@ -3636,6 +3731,40 @@ mod tests {
                 command: Command::File(FileCommand::Exists { path }),
             } => {
                 assert_eq!(path, format!("{}/Cargo.toml", workspace_root));
+            }
+            other => panic!("unexpected decision: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_plan_dingtalk_command_allows_browser_output() {
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"command":{"type":"browser","action":"navigate","url":"https://example.com/article"}}"#.to_string(),
+            })),
+        ));
+
+        let session_key = SessionKey::new("dingtalk", "user-1");
+        let decision = plan_dingtalk_command(
+            &state,
+            "打开文章页面",
+            &workspace_root,
+            "main",
+            &session_key,
+        )
+        .await
+        .unwrap();
+
+        match decision {
+            AgentDecision::ExecuteCommand {
+                command: Command::Browser(uhorse_protocol::BrowserCommand::Navigate { url }),
+            } => {
+                assert_eq!(url, "https://example.com/article");
             }
             other => panic!("unexpected decision: {:?}", other),
         }
@@ -4278,6 +4407,166 @@ mod tests {
                 .map(String::as_str),
             Some(task_id.as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn test_submit_dingtalk_task_dispatches_browser_assignment_only_to_browser_capable_node() {
+        let runtime = create_test_runtime().await;
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, mut task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"execute_command","command":{"type":"browser","action":"navigate","url":"https://example.com/article"}}"#.to_string(),
+            })),
+            runtime,
+        ));
+
+        let file_only_node_id = uhorse_protocol::NodeId::from_string("node-file-only");
+        let (file_only_tx, mut file_only_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(file_only_node_id.clone(), file_only_tx)
+            .await;
+        hub.handle_node_connection(
+            file_only_node_id.clone(),
+            "file-only-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let browser_node_id = uhorse_protocol::NodeId::from_string("node-browser-capable");
+        let (browser_tx, mut browser_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(browser_node_id.clone(), browser_tx)
+            .await;
+        hub.handle_node_connection(
+            browser_node_id.clone(),
+            "browser-node".to_string(),
+            NodeCapabilities {
+                supported_commands: vec![
+                    CommandType::File,
+                    CommandType::Shell,
+                    CommandType::Code,
+                    CommandType::Browser,
+                ],
+                ..NodeCapabilities::default()
+            },
+            WorkspaceInfo {
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("打开文章页面".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-browser".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let assignment = tokio::time::timeout(std::time::Duration::from_secs(1), browser_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let task_id = match assignment {
+            HubToNode::TaskAssignment {
+                task_id,
+                command,
+                context,
+                ..
+            } => {
+                match command {
+                    Command::Browser(BrowserCommand::Navigate { url }) => {
+                        assert_eq!(url, "https://example.com/article");
+                    }
+                    other => panic!("unexpected command: {:?}", other),
+                }
+                assert_eq!(context.session_id.as_str(), "dingtalk:actual-user:corp-1");
+                task_id
+            }
+            other => panic!("unexpected message: {:?}", other),
+        };
+
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(200), file_only_rx.recv())
+            .await
+            .is_err());
+
+        let status = hub.get_task_status(&task_id).await.unwrap();
+        assert_eq!(status.status, TaskStatus::Running);
+        assert_eq!(status.node_id.as_ref(), Some(&browser_node_id));
+
+        hub.handle_node_message(
+            &browser_node_id,
+            NodeToHub::TaskResult {
+                message_id: uhorse_protocol::MessageId::new(),
+                task_id: task_id.clone(),
+                result: CommandResult::success(CommandOutput::Browser {
+                    result: BrowserResult::GetText {
+                        text: "页面正文".to_string(),
+                    },
+                }),
+                metrics: uhorse_protocol::ExecutionMetrics {
+                    duration_ms: 1,
+                    cpu_time_ms: 0,
+                    peak_memory_mb: 0,
+                    bytes_read: 0,
+                    bytes_written: 0,
+                    network_requests: 1,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+        let task_result = tokio::time::timeout(std::time::Duration::from_secs(1), task_result_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task_result.task_id, task_id);
+        assert!(task_result.result.success);
+        assert_eq!(format_task_result_message(&task_result.result), "页面正文");
+        assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
+
+        let completed_task = hub.get_completed_task(&task_id).await.unwrap();
+        assert_eq!(format_task_result_message(&completed_task.result), "页面正文");
+
+        reply_task_result(state.clone(), task_result).await.unwrap();
+        assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
     }
 
     #[tokio::test]
@@ -5116,6 +5405,48 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     fn test_validate_shell_command_allows_workspace_cwd_none() {
         let command = ShellCommand::new("pwd");
         assert!(validate_shell_command(&command, "/tmp/workspace").is_ok());
+    }
+
+    #[test]
+    fn test_validate_browser_command_allows_public_https_url() {
+        let command = uhorse_protocol::BrowserCommand::Navigate {
+            url: "https://example.com/article".to_string(),
+        };
+        assert!(validate_browser_command(&command).is_ok());
+    }
+
+    #[test]
+    fn test_validate_browser_command_rejects_localhost() {
+        let command = uhorse_protocol::BrowserCommand::Navigate {
+            url: "http://localhost:3000".to_string(),
+        };
+        assert!(validate_browser_command(&command).is_err());
+    }
+
+    #[test]
+    fn test_validate_browser_command_rejects_private_ip() {
+        let command = uhorse_protocol::BrowserCommand::Navigate {
+            url: "http://192.168.1.10/internal".to_string(),
+        };
+        assert!(validate_browser_command(&command).is_err());
+    }
+
+    #[test]
+    fn test_validate_browser_command_rejects_file_scheme() {
+        let command = uhorse_protocol::BrowserCommand::Navigate {
+            url: "file:///tmp/demo.html".to_string(),
+        };
+        assert!(validate_browser_command(&command).is_err());
+    }
+
+    #[test]
+    fn test_format_task_result_message_browser_text() {
+        let result = CommandResult::success(CommandOutput::Browser {
+            result: BrowserResult::GetText {
+                text: "页面正文".to_string(),
+            },
+        });
+        assert_eq!(format_task_result_message(&result), "页面正文");
     }
 
     #[test]

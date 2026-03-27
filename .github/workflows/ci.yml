@@ -70,8 +70,18 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/node-desktop-web/package-lock.json
+
       - name: Build Node Desktop Web
-        run: npm --prefix apps/node-desktop-web install && npm --prefix apps/node-desktop-web run build
+        run: npm --prefix apps/node-desktop-web ci && npm --prefix apps/node-desktop-web run build
+
+      - name: Build release binaries
+        run: cargo build --release -p uhorse-hub -p uhorse-node-desktop
 
       - name: Run Node Desktop smoke
         run: ./scripts/desktop-smoke.sh
