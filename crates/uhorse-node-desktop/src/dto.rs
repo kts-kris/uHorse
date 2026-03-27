@@ -135,6 +135,10 @@ pub struct DesktopNodeStatusDto {
     pub connection_state: String,
     pub hub_url: String,
     pub workspace_path: String,
+    pub saved_workspace_path: String,
+    pub runtime_workspace_path: Option<String>,
+    pub restart_required: bool,
+    pub restart_notice: Option<String>,
     pub running_tasks: usize,
     pub max_concurrent_tasks: usize,
     pub pending_approvals: usize,
@@ -159,6 +163,9 @@ pub struct DesktopWorkspaceStatusDto {
     pub internal_work_dir: String,
     pub allowed_patterns: Vec<String>,
     pub denied_patterns: Vec<String>,
+    pub running_workspace_path: Option<String>,
+    pub restart_required: bool,
+    pub restart_notice: Option<String>,
     pub error: Option<String>,
 }
 

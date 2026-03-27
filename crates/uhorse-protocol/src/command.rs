@@ -604,7 +604,13 @@ impl ApiCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum BrowserCommand {
-    /// 打开页面
+    /// 在系统默认浏览器中打开页面
+    OpenSystem {
+        /// URL
+        url: String,
+    },
+
+    /// 在自动化浏览器会话中打开页面
     Navigate {
         /// URL
         url: String,
@@ -660,6 +666,7 @@ impl BrowserCommand {
     /// 超时时间
     pub fn timeout(&self) -> Duration {
         match self {
+            Self::OpenSystem { .. } => Duration::from_secs(10),
             Self::Navigate { .. } => Duration::from_secs(30),
             Self::Screenshot { .. } => Duration::from_secs(10),
             Self::Click { .. } => Duration::from_secs(5),

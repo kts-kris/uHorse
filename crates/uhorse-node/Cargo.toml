@@ -50,6 +50,7 @@ notify = "6.1"
 
 # HTTP client
 reqwest = { workspace = true }
+open = { workspace = true }
 
 # Database drivers (optional features) - use workspace sqlx version
 sqlx = { workspace = true, optional = true }

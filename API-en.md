@@ -221,7 +221,7 @@ Request fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `command` | object | protocol command, currently including `file`, `shell`, etc. |
+| `command` | object | protocol command, currently including `file`, `shell`, and controlled `browser` commands |
 | `user_id` | string | user identifier |
 | `session_id` | string | session identifier |
 | `channel` | string | source channel such as `api` or `dingtalk` |
@@ -261,6 +261,12 @@ Successful response:
   "error": null
 }
 ```
+
+Browser task notes:
+
+- the current mainline plans DingTalk “open a webpage” requests as `BrowserCommand::OpenSystem`
+- Hub validates target URLs first and rejects `file://`, localhost, and private-network addresses
+- when a file write succeeds, Node returns structured `file_operation` JSON and the Hub summary text prefers `Saved successfully: <path>` style output
 
 ### 2. Get task status: `GET /api/tasks/:task_id`
 

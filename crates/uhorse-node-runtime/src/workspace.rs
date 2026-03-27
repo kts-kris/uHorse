@@ -516,4 +516,15 @@ mod tests {
 
         assert_eq!(resolved, workspace.root().join("nested/file.txt"));
     }
+
+    #[test]
+    fn test_workspace_resolve_path_normalizes_parent_escape_outside_root() {
+        let temp = TempDir::new().unwrap();
+        let workspace = Workspace::new(temp.path()).unwrap();
+        let resolved = workspace.resolve_path("../outside.txt").unwrap();
+
+        assert_eq!(resolved, workspace.root().parent().unwrap().join("outside.txt"));
+        assert!(!workspace.contains("../outside.txt"));
+        assert!(!workspace.can_access("../outside.txt", true).unwrap());
+    }
 }

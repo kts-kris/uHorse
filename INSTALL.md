@@ -181,14 +181,16 @@ curl http://127.0.0.1:8765/api/nodes
 
 ```bash
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
 ```
 
-这条测试会真实启动：
+这两条测试会真实启动：
 
 - Hub
 - WebSocket 服务
 - Node
 - 一个文件存在性命令 roundtrip
+- 一个真实写文件 roundtrip（包含落盘与 structured file_operation 返回）
 
 ### 5. 验证 Node Desktop `v4.1.1` archive 边界
 

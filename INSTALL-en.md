@@ -181,14 +181,16 @@ curl http://127.0.0.1:8765/api/nodes
 
 ```bash
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
+cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
 ```
 
-This test starts a real:
+These tests start real:
 
 - Hub
 - WebSocket server
 - Node
-- file existence roundtrip task
+- a file existence roundtrip task
+- a real file write roundtrip, including on-disk persistence and structured `file_operation` output
 
 ### 5. Verify the Node Desktop `v4.1.1` archive boundary
 

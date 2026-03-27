@@ -37,6 +37,7 @@ use uhorse_protocol::{
 use uhorse_security::ApprovalRequest;
 
 use crate::{
+    node_manager::workspace_matches_hint,
     task_scheduler::{CompletedTask, TaskResult},
     Hub, HubStats,
 };
@@ -61,6 +62,22 @@ pub struct DingTalkReplyRoute {
     pub robot_code: Option<String>,
 }
 
+const DINGTALK_PROCESSING_ACK_TEXT: &str = "收到啦，正在处理，请稍等～";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DingTalkReplyTarget {
+    SessionWebhook {
+        webhook: String,
+        at_user_ids: Vec<String>,
+    },
+    GroupConversation {
+        conversation_id: String,
+    },
+    DirectUser {
+        user_id: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlannedDingTalkCommand {
     command: Command,
@@ -71,9 +88,17 @@ struct PlannedDingTalkCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AgentDecision {
-    DirectReply { text: String },
-    ExecuteCommand { command: Command },
-    ExecuteSkill { skill_name: String, input: String },
+    DirectReply {
+        text: String,
+    },
+    ExecuteCommand {
+        command: Command,
+        workspace_path: Option<String>,
+    },
+    ExecuteSkill {
+        skill_name: String,
+        input: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1042,6 +1067,53 @@ async fn collect_agent_planning_context(
     sections.join("\n\n")
 }
 
+fn collect_online_workspace_roots(nodes: &[crate::node_manager::NodeInfo]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut roots = Vec::new();
+
+    for node in nodes {
+        let normalized = PathBuf::from(&node.workspace.path);
+        if seen.insert(normalized.clone()) {
+            roots.push(normalized.to_string_lossy().to_string());
+        }
+    }
+
+    roots.sort();
+    roots
+}
+
+fn resolve_default_workspace_root(online_workspace_roots: &[String]) -> Option<String> {
+    if online_workspace_roots.len() == 1 {
+        online_workspace_roots.first().cloned()
+    } else {
+        None
+    }
+}
+
+fn build_workspace_roots_context(
+    online_workspace_roots: &[String],
+    default_workspace_root: Option<&str>,
+) -> String {
+    if online_workspace_roots.is_empty() {
+        return "当前没有在线 Node workspace。".to_string();
+    }
+
+    let mut lines = vec!["当前在线 Node workspace 列表：".to_string()];
+    lines.extend(
+        online_workspace_roots
+            .iter()
+            .map(|root| format!("- {}", root)),
+    );
+
+    if let Some(default_workspace_root) = default_workspace_root {
+        lines.push(format!("默认 workspace_path：{}", default_workspace_root));
+    } else {
+        lines.push("存在多个在线 workspace，execute_command 必须显式填写 workspace_path，且必须精确等于其中一个根路径。".to_string());
+    }
+
+    lines.join("\n")
+}
+
 async fn persist_session_state(
     state: &Arc<WebState>,
     session_key: &SessionKey,
@@ -1629,13 +1701,23 @@ pub fn create_router(state: WebState) -> Router {
 }
 
 /// 首页
-async fn index_page() -> Html<&'static str> {
-    Html(include_str!("templates/index.html"))
+fn render_versioned_template(template: &'static str, version: &str) -> Html<String> {
+    Html(template.replace("{{APP_VERSION}}", version))
+}
+
+async fn index_page(State(state): State<Arc<WebState>>) -> Html<String> {
+    render_versioned_template(
+        include_str!("templates/index.html"),
+        state.health_service.version(),
+    )
 }
 
 /// Dashboard 页面
-async fn dashboard_page() -> Html<&'static str> {
-    Html(include_str!("templates/dashboard.html"))
+async fn dashboard_page(State(state): State<Arc<WebState>>) -> Html<String> {
+    render_versioned_template(
+        include_str!("templates/dashboard.html"),
+        state.health_service.version(),
+    )
 }
 
 /// DingTalk webhook 端点
@@ -1813,12 +1895,32 @@ pub async fn submit_dingtalk_task(
             );
             Ok(())
         }
-        AgentDecision::ExecuteCommand { command } => {
-            let Some(node) = state.hub.get_online_nodes().await.into_iter().next() else {
-                return Err("No online node available".into());
-            };
+        AgentDecision::ExecuteCommand {
+            command,
+            workspace_path,
+        } => {
+            let online_nodes = state.hub.get_online_nodes().await;
+            let online_workspace_roots = collect_online_workspace_roots(&online_nodes);
+            let workspace_hint = workspace_path
+                .or_else(|| resolve_default_workspace_root(&online_workspace_roots))
+                .ok_or_else(|| {
+                    if online_workspace_roots.is_empty() {
+                        "No online node available".to_string()
+                    } else {
+                        format!(
+                            "Multiple online workspaces available, workspace_path is required: {}",
+                            online_workspace_roots.join(", ")
+                        )
+                    }
+                })?;
 
-            let workspace_hint = node.workspace.path.clone();
+            if !online_workspace_roots
+                .iter()
+                .any(|root| root == &workspace_hint)
+            {
+                return Err(format!("No online node matches workspace: {}", workspace_hint).into());
+            }
+
             validate_planned_command(&command, &workspace_hint)?;
 
             let mut task_context = TaskContext::new(
@@ -1879,7 +1981,13 @@ pub async fn submit_dingtalk_task(
 
             {
                 let mut routes = state.dingtalk_routes.write().await;
-                routes.insert(task_id.clone(), route);
+                routes.insert(task_id.clone(), route.clone());
+            }
+
+            if let Some(channel) = state.dingtalk_channel.as_ref() {
+                send_dingtalk_reply(channel, &route, DINGTALK_PROCESSING_ACK_TEXT).await?;
+            } else {
+                warn!("Skip DingTalk processing ack because channel is unavailable");
             }
 
             info!(
@@ -1909,6 +2017,9 @@ async fn decide_dingtalk_action(
         .or_else(|| state.agent_runtime.agents.get(agent_id))
         .ok_or_else(|| format!("Agent not found: {}", agent_id))?;
     let context = collect_agent_planning_context(state, agent_id, session_key).await;
+    let online_nodes = state.hub.get_online_nodes().await;
+    let online_workspace_roots = collect_online_workspace_roots(&online_nodes);
+    let default_workspace_root = resolve_default_workspace_root(&online_workspace_roots);
     let response = llm_client
         .chat_completion(build_agent_decision_messages(
             agent.system_prompt(),
@@ -1916,6 +2027,8 @@ async fn decide_dingtalk_action(
             agent_id,
             session_key,
             &context,
+            &online_workspace_roots,
+            default_workspace_root.as_deref(),
             &state
                 .agent_runtime
                 .skills
@@ -1923,29 +2036,55 @@ async fn decide_dingtalk_action(
         ))
         .await?;
 
-    parse_agent_decision(state, &response, text, agent_id, session_key).await
+    parse_agent_decision(
+        state,
+        &response,
+        text,
+        &online_workspace_roots,
+        default_workspace_root.as_deref(),
+        agent_id,
+        session_key,
+    )
+    .await
 }
 
 async fn parse_agent_decision(
     state: &Arc<WebState>,
     response: &str,
     text: &str,
+    online_workspace_roots: &[String],
+    default_workspace_root: Option<&str>,
     agent_id: &str,
     session_key: &SessionKey,
 ) -> Result<AgentDecision, Box<dyn std::error::Error + Send + Sync>> {
+    let default_workspace_root = default_workspace_root.map(ToString::to_string);
+
     if let Ok(decision) = serde_json::from_str::<AgentDecision>(response) {
-        return Ok(decision);
+        return match decision {
+            AgentDecision::ExecuteCommand {
+                command,
+                workspace_path,
+            } => {
+                let workspace_path = workspace_path.or_else(|| default_workspace_root.clone());
+                if let Some(workspace_path) = workspace_path.as_deref() {
+                    validate_planned_command(&command, workspace_path)?;
+                }
+                Ok(AgentDecision::ExecuteCommand {
+                    command,
+                    workspace_path,
+                })
+            }
+            other => Ok(other),
+        };
     }
 
-    let Some(node) = state.hub.get_online_nodes().await.into_iter().next() else {
-        return Ok(AgentDecision::DirectReply {
-            text: response.trim().to_string(),
-        });
-    };
-    let workspace_root = node.workspace.path.clone();
-
-    if let Ok(command) = parse_planned_command(response, &workspace_root) {
-        return Ok(AgentDecision::ExecuteCommand { command });
+    if let Some(default_workspace_root) = default_workspace_root.as_deref() {
+        if let Ok(planned) = parse_planned_command(response, default_workspace_root) {
+            return Ok(AgentDecision::ExecuteCommand {
+                command: planned.command,
+                workspace_path: planned.workspace_path,
+            });
+        }
     }
 
     let trimmed = response.trim();
@@ -1955,13 +2094,28 @@ async fn parse_agent_decision(
         });
     }
 
-    plan_dingtalk_command(state, text, &workspace_root, agent_id, session_key).await
+    let Some(default_workspace_root) = default_workspace_root else {
+        return Ok(AgentDecision::DirectReply {
+            text: response.trim().to_string(),
+        });
+    };
+
+    plan_dingtalk_command(
+        state,
+        text,
+        &default_workspace_root,
+        &online_workspace_roots,
+        agent_id,
+        session_key,
+    )
+    .await
 }
 
 async fn plan_dingtalk_command(
     state: &Arc<WebState>,
     text: &str,
     workspace_root: &str,
+    online_workspace_roots: &[String],
     agent_id: &str,
     session_key: &SessionKey,
 ) -> Result<AgentDecision, Box<dyn std::error::Error + Send + Sync>> {
@@ -1974,14 +2128,18 @@ async fn plan_dingtalk_command(
         .chat_completion(build_dingtalk_plan_messages(
             text,
             workspace_root,
+            online_workspace_roots,
             agent_id,
             session_key,
             &injected_context,
         ))
         .await?;
 
-    let command = parse_planned_command(&response, workspace_root)?;
-    Ok(AgentDecision::ExecuteCommand { command })
+    let planned = parse_planned_command(&response, workspace_root)?;
+    Ok(AgentDecision::ExecuteCommand {
+        command: planned.command,
+        workspace_path: planned.workspace_path,
+    })
 }
 
 fn build_agent_decision_messages(
@@ -1990,13 +2148,17 @@ fn build_agent_decision_messages(
     agent_id: &str,
     session_key: &SessionKey,
     injected_context: &str,
+    online_workspace_roots: &[String],
+    default_workspace_root: Option<&str>,
     skill_names: &[String],
 ) -> Vec<ChatMessage> {
+    let workspace_context =
+        build_workspace_roots_context(online_workspace_roots, default_workspace_root);
     let mut messages = vec![
         ChatMessage::system(agent_system_prompt.to_string()),
         ChatMessage::system(
             format!(
-                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。若返回 execute_command，路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
+                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\"}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。用户只是要在宿主机打开网页时使用 open_system；只有需要继续读取网页内容、点击或抓取文本时才使用 navigate / wait_for / get_text / close。若返回 execute_command，workspace_path 必须填写目标 Node workspace 根路径；路径必须限制在该 workspace 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供决策参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
                 if skill_names.is_empty() {
                     "（无）".to_string()
                 } else {
@@ -2004,6 +2166,7 @@ fn build_agent_decision_messages(
                 }
             )
         ),
+        ChatMessage::system(workspace_context),
     ];
 
     if !injected_context.trim().is_empty() {
@@ -2027,22 +2190,31 @@ fn build_agent_decision_messages(
 fn build_dingtalk_plan_messages(
     text: &str,
     workspace_root: &str,
+    online_workspace_roots: &[String],
     agent_id: &str,
     session_key: &SessionKey,
     injected_context: &str,
 ) -> Vec<ChatMessage> {
+    let workspace_context =
+        build_workspace_roots_context(online_workspace_roots, Some(workspace_root));
     let mut messages = vec![ChatMessage::system(
-        "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON> }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 或 browser 命令。禁止生成 code/database/api/skill 命令。路径必须限制在 workspace 内，不允许绝对路径越界，不允许使用 ..。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标；首选先 navigate，再按需要 wait_for / get_text / close。如果无法安全规划，返回一个会在本地校验失败的命令并附带原因到路径字段之外是不允许的，因此应返回最接近且可解析的安全命令。shell 命令只允许只读、安全的本地仓库检查或目录查看。".to_string(),
+        "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\" }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 或 browser 命令。禁止生成 code/database/api/skill 命令。workspace_path 必须填写目标 Node workspace 根路径。路径必须限制在 workspace_path 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标；仅当用户要在宿主机打开网页时使用 open_system；读取网页内容或继续交互时使用 navigate / wait_for / get_text / close。shell 命令只允许只读、安全的本地仓库检查或目录查看。".to_string(),
     )];
 
-    if !injected_context.trim().is_empty() {
-        messages.push(ChatMessage::system(format!(
-            "当前 Agent：{}\n当前 SessionKey：{}\n{}",
-            agent_id,
-            session_key.as_str(),
-            injected_context
-        )));
-    }
+    messages.push(ChatMessage::system(format!(
+        "{}\n{}",
+        workspace_context,
+        if injected_context.trim().is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n当前 Agent：{}\n当前 SessionKey：{}\n{}",
+                agent_id,
+                session_key.as_str(),
+                injected_context
+            )
+        }
+    )));
 
     messages.push(ChatMessage::user(format!(
         "workspace_root: {}\nagent_id: {}\nsession_key: {}\nuser_request: {}\n请输出单个 JSON 对象。",
@@ -2057,12 +2229,17 @@ fn build_dingtalk_plan_messages(
 fn parse_planned_command(
     response: &str,
     workspace_root: &str,
-) -> Result<Command, Box<dyn std::error::Error + Send + Sync>> {
-    let planned: PlannedDingTalkCommand =
+) -> Result<PlannedDingTalkCommand, Box<dyn std::error::Error + Send + Sync>> {
+    let mut planned: PlannedDingTalkCommand =
         serde_json::from_str(response).map_err(|e| format!("LLM 返回了无效 JSON：{}", e))?;
 
-    validate_planned_command(&planned.command, workspace_root)?;
-    Ok(planned.command)
+    if planned.workspace_path.is_none() {
+        planned.workspace_path = Some(workspace_root.to_string());
+    }
+
+    let effective_workspace = planned.workspace_path.as_deref().unwrap_or(workspace_root);
+    validate_planned_command(&planned.command, effective_workspace)?;
+    Ok(planned)
 }
 
 fn validate_planned_command(
@@ -2137,7 +2314,8 @@ fn validate_browser_command(
     command: &uhorse_protocol::BrowserCommand,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match command {
-        uhorse_protocol::BrowserCommand::Navigate { url } => validate_browser_target_url(url),
+        uhorse_protocol::BrowserCommand::OpenSystem { url }
+        | uhorse_protocol::BrowserCommand::Navigate { url } => validate_browser_target_url(url),
         uhorse_protocol::BrowserCommand::Screenshot { .. }
         | uhorse_protocol::BrowserCommand::Click { .. }
         | uhorse_protocol::BrowserCommand::Type { .. }
@@ -2197,11 +2375,10 @@ fn ensure_workspace_path(
     value: &str,
     workspace_root: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let root = PathBuf::from(workspace_root);
     let path = PathBuf::from(value);
 
     if path.is_absolute() {
-        if !path.starts_with(&root) {
+        if !workspace_matches_hint(value, workspace_root) {
             return Err("路径必须位于 workspace 内。".into());
         }
         return Ok(());
@@ -2300,11 +2477,7 @@ pub async fn reply_dingtalk_error(
     Ok(())
 }
 
-async fn send_dingtalk_reply(
-    channel: &DingTalkChannel,
-    route: &DingTalkReplyRoute,
-    reply_text: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn resolve_dingtalk_reply_target(route: &DingTalkReplyRoute) -> Option<DingTalkReplyTarget> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let webhook_available = route
         .session_webhook
@@ -2319,27 +2492,56 @@ async fn send_dingtalk_reply(
             .as_ref()
             .map(|value| vec![value.clone()])
             .unwrap_or_default();
-        channel
-            .reply_via_session_webhook(
-                route.session_webhook.as_deref().unwrap_or_default(),
-                reply_text,
-                &at_user_ids,
-            )
-            .await?;
-    } else {
-        let is_group = matches!(route.conversation_type.as_deref(), Some("2"));
-        if is_group {
+        return route
+            .session_webhook
+            .clone()
+            .map(|webhook| DingTalkReplyTarget::SessionWebhook {
+                webhook,
+                at_user_ids,
+            });
+    }
+
+    let is_group = matches!(route.conversation_type.as_deref(), Some("2"));
+    if is_group {
+        return Some(DingTalkReplyTarget::GroupConversation {
+            conversation_id: route.conversation_id.clone(),
+        });
+    }
+
+    route
+        .sender_user_id
+        .clone()
+        .map(|user_id| DingTalkReplyTarget::DirectUser { user_id })
+}
+
+async fn send_dingtalk_reply(
+    channel: &DingTalkChannel,
+    route: &DingTalkReplyRoute,
+    reply_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match resolve_dingtalk_reply_target(route) {
+        Some(DingTalkReplyTarget::SessionWebhook {
+            webhook,
+            at_user_ids,
+        }) => {
+            channel
+                .reply_via_session_webhook(&webhook, reply_text, &at_user_ids)
+                .await?;
+        }
+        Some(DingTalkReplyTarget::GroupConversation { conversation_id }) => {
             channel
                 .send_group_message(
-                    &route.conversation_id,
+                    &conversation_id,
                     &MessageContent::Text(reply_text.to_string()),
                 )
                 .await?;
-        } else if let Some(user_id) = route.sender_user_id.as_deref() {
+        }
+        Some(DingTalkReplyTarget::DirectUser { user_id }) => {
             channel
-                .send_message(user_id, &MessageContent::Text(reply_text.to_string()))
+                .send_message(&user_id, &MessageContent::Text(reply_text.to_string()))
                 .await?;
-        } else {
+        }
+        None => {
             warn!(
                 "Skip DingTalk personal reply for conversation {} because sender_user_id is missing",
                 route.conversation_id
@@ -2354,6 +2556,10 @@ async fn build_task_result_reply_text(state: &Arc<WebState>, task_result: &TaskR
     let Some(completed_task) = state.hub.get_completed_task(&task_result.task_id).await else {
         return format_task_result_message(&task_result.result);
     };
+
+    if let Some(reply) = result_summary_override(&completed_task.result) {
+        return reply;
+    }
 
     summarize_task_result_or_fallback(state, &completed_task).await
 }
@@ -2371,6 +2577,17 @@ async fn summarize_task_result_or_fallback(
             );
             format_task_result_message(&completed_task.result)
         }
+    }
+}
+
+fn result_summary_override(result: &uhorse_protocol::CommandResult) -> Option<String> {
+    if !result.success {
+        return None;
+    }
+
+    match &result.output {
+        CommandOutput::Json { content } => format_file_operation_result(content),
+        _ => None,
     }
 }
 
@@ -2408,6 +2625,51 @@ fn build_result_summary_messages(completed_task: &CompletedTask) -> Vec<ChatMess
     ]
 }
 
+fn format_file_operation_result(content: &serde_json::Value) -> Option<String> {
+    if content.get("kind")?.as_str()? != "file_operation" {
+        return None;
+    }
+
+    let action = content.get("action")?.as_str()?;
+    let path = content
+        .get("path")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            content
+                .get("destination_path")
+                .and_then(|value| value.as_str())
+        });
+
+    match action {
+        "write" => path.map(|path| format!("已保存成功：{}", path)),
+        "append" => path.map(|path| format!("已追加成功：{}", path)),
+        "copy" => match (
+            content.get("source_path").and_then(|value| value.as_str()),
+            content
+                .get("destination_path")
+                .and_then(|value| value.as_str()),
+        ) {
+            (Some(source), Some(destination)) => {
+                Some(format!("已复制成功：{}\n到：{}", source, destination))
+            }
+            _ => path.map(|path| format!("已复制成功：{}", path)),
+        },
+        "move" => match (
+            content.get("source_path").and_then(|value| value.as_str()),
+            content
+                .get("destination_path")
+                .and_then(|value| value.as_str()),
+        ) {
+            (Some(source), Some(destination)) => {
+                Some(format!("已移动成功：{}\n到：{}", source, destination))
+            }
+            _ => path.map(|path| format!("已移动成功：{}", path)),
+        },
+        "create_dir" => path.map(|path| format!("已创建目录：{}", path)),
+        _ => None,
+    }
+}
+
 fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String {
     if !result.success {
         if let Some(skill_name) = result
@@ -2438,14 +2700,17 @@ fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String
             }
         }
         CommandOutput::Json { content } => {
-            serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string())
+            format_file_operation_result(content).unwrap_or_else(|| {
+                serde_json::to_string_pretty(content).unwrap_or_else(|_| content.to_string())
+            })
         }
         CommandOutput::Browser { result } => match result {
+            BrowserResult::OpenSystem { url } => format!("已在系统浏览器打开：{}", url),
             BrowserResult::Navigate { final_url, title } => match title {
                 Some(title) if !title.trim().is_empty() => {
-                    format!("已打开页面：{}\n标题：{}", final_url, title)
+                    format!("浏览器会话已导航到：{}\n标题：{}", final_url, title)
                 }
-                _ => format!("已打开页面：{}", final_url),
+                _ => format!("浏览器会话已导航到：{}", final_url),
             },
             BrowserResult::GetText { text } => {
                 if text.trim().is_empty() {
@@ -3287,10 +3552,9 @@ mod tests {
     use tempfile::{tempdir, TempDir};
     use tower::util::ServiceExt;
     use uhorse_protocol::{
-        Action, BrowserResult, BrowserCommand, Command, CommandOutput, CommandResult,
-        CommandType, ExecutionError, FileCommand, HubToNode, NodeCapabilities, NodeToHub,
-        Priority, ResourcePattern as ProtocolResourcePattern, ShellCommand, TaskStatus,
-        WorkspaceInfo,
+        Action, BrowserCommand, BrowserResult, Command, CommandOutput, CommandResult, CommandType,
+        ExecutionError, FileCommand, HubToNode, NodeCapabilities, NodeToHub, Priority,
+        ResourcePattern as ProtocolResourcePattern, ShellCommand, TaskStatus, WorkspaceInfo,
     };
 
     use crate::HubConfig;
@@ -3565,6 +3829,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_index_page_renders_runtime_version() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new(Arc::new(hub), None, None));
+        let (status, body, _) = get_text(app, "/").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains(&format!("Version {}", env!("CARGO_PKG_VERSION"))));
+        assert!(!body.contains("Version {{APP_VERSION}}"));
+    }
+
+    #[tokio::test]
+    async fn test_dashboard_page_renders_runtime_version() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new(Arc::new(hub), None, None));
+        let (status, body, _) = get_text(app, "/dashboard").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
+        assert!(!body.contains("v{{APP_VERSION}}"));
+    }
+
+    #[tokio::test]
     async fn test_metrics_endpoint_returns_prometheus_payload() {
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = WebState::new(Arc::new(hub), None, None);
@@ -3608,8 +3894,9 @@ mod tests {
             workspace
         );
 
-        let command = parse_planned_command(&response, workspace).unwrap();
-        match command {
+        let planned = parse_planned_command(&response, workspace).unwrap();
+        assert_eq!(planned.workspace_path.as_deref(), Some(workspace));
+        match planned.command {
             Command::File(FileCommand::Exists { path }) => {
                 assert_eq!(path, "/tmp/workspace/Cargo.toml");
             }
@@ -3699,6 +3986,132 @@ mod tests {
         assert_eq!(reply, "总结结果");
     }
 
+    #[test]
+    fn test_result_summary_override_returns_file_operation_reply() {
+        let result = CommandResult::success(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "write",
+            "path": "/tmp/report.md",
+            "bytes_written": 12,
+        })));
+
+        assert_eq!(
+            result_summary_override(&result),
+            Some("已保存成功：/tmp/report.md".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_build_task_result_reply_text_prefers_file_operation_override() {
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, mut task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: "这条结果不应该被使用".to_string(),
+            })),
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-file-reply");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(node_id.clone(), tx)
+            .await;
+        hub.handle_node_connection(
+            node_id.clone(),
+            "test-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let task_id = hub
+            .submit_task(
+                Command::File(FileCommand::Write {
+                    path: format!("{}/report.md", workspace_root),
+                    content: "hello world".to_string(),
+                    overwrite: true,
+                }),
+                TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                )
+                .with_intent("保存报告"),
+                Priority::Normal,
+                None,
+                vec![],
+                Some(workspace_root.clone()),
+            )
+            .await
+            .unwrap();
+
+        let assignment = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match assignment {
+            HubToNode::TaskAssignment {
+                task_id: assigned_task_id,
+                command,
+                ..
+            } => {
+                assert_eq!(assigned_task_id, task_id);
+                match command {
+                    Command::File(FileCommand::Write { path, .. }) => {
+                        assert_eq!(path, format!("{}/report.md", workspace_root));
+                    }
+                    other => panic!("unexpected command: {:?}", other),
+                }
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+
+        let result = CommandResult::success(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "write",
+            "path": format!("{}/report.md", workspace_root),
+            "bytes_written": 11,
+        })));
+        hub.handle_node_message(
+            &node_id,
+            NodeToHub::TaskResult {
+                message_id: MessageId::new(),
+                task_id: task_id.clone(),
+                result,
+                metrics: uhorse_protocol::ExecutionMetrics {
+                    duration_ms: 1,
+                    cpu_time_ms: 0,
+                    peak_memory_mb: 0,
+                    bytes_read: 0,
+                    bytes_written: 11,
+                    network_requests: 0,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+        let task_result =
+            tokio::time::timeout(std::time::Duration::from_secs(1), task_result_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        let reply = build_task_result_reply_text(&state, &task_result).await;
+
+        assert_eq!(reply, format!("已保存成功：{}/report.md", workspace_root));
+    }
+
     #[tokio::test]
     async fn test_plan_dingtalk_command_uses_llm_output() {
         let workspace = tempdir().unwrap();
@@ -3720,6 +4133,7 @@ mod tests {
             &state,
             "检查 Cargo.toml 是否存在",
             &workspace_root,
+            &[workspace_root.clone()],
             "main",
             &session_key,
         )
@@ -3729,8 +4143,10 @@ mod tests {
         match decision {
             AgentDecision::ExecuteCommand {
                 command: Command::File(FileCommand::Exists { path }),
+                workspace_path,
             } => {
                 assert_eq!(path, format!("{}/Cargo.toml", workspace_root));
+                assert_eq!(workspace_path.as_deref(), Some(workspace_root.as_str()));
             }
             other => panic!("unexpected decision: {:?}", other),
         }
@@ -3745,7 +4161,7 @@ mod tests {
             Arc::new(hub),
             None,
             Some(Arc::new(StubLlmClient {
-                response: r#"{"command":{"type":"browser","action":"navigate","url":"https://example.com/article"}}"#.to_string(),
+                response: r#"{"command":{"type":"browser","action":"open_system","url":"https://example.com/article"}}"#.to_string(),
             })),
         ));
 
@@ -3754,6 +4170,7 @@ mod tests {
             &state,
             "打开文章页面",
             &workspace_root,
+            &[workspace_root.clone()],
             "main",
             &session_key,
         )
@@ -3762,9 +4179,11 @@ mod tests {
 
         match decision {
             AgentDecision::ExecuteCommand {
-                command: Command::Browser(uhorse_protocol::BrowserCommand::Navigate { url }),
+                command: Command::Browser(uhorse_protocol::BrowserCommand::OpenSystem { url }),
+                workspace_path,
             } => {
                 assert_eq!(url, "https://example.com/article");
+                assert_eq!(workspace_path.as_deref(), Some(workspace_root.as_str()));
             }
             other => panic!("unexpected decision: {:?}", other),
         }
@@ -4267,8 +4686,8 @@ mod tests {
             None,
             Some(Arc::new(StubLlmClient {
                 response: format!(
-                    r#"{{"type":"execute_command","command":{{"type":"file","action":"exists","path":"{}/Cargo.toml"}}}}"#,
-                    workspace_root
+                    r#"{{"type":"execute_command","command":{{"type":"file","action":"exists","path":"{}/Cargo.toml"}},"workspace_path":"{}"}}"#,
+                    workspace_root, workspace_root
                 ),
             })),
             runtime.clone(),
@@ -4410,7 +4829,99 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_submit_dingtalk_task_dispatches_browser_assignment_only_to_browser_capable_node() {
+    async fn test_submit_dingtalk_task_requires_workspace_path_when_multiple_workspaces_online() {
+        let runtime = create_test_runtime().await;
+        let workspace_a = tempdir().unwrap();
+        let workspace_b = tempdir().unwrap();
+        let workspace_a_root = workspace_a.path().to_string_lossy().to_string();
+        let workspace_b_root = workspace_b.path().to_string_lossy().to_string();
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: format!(
+                    r#"{{"type":"execute_command","command":{{"type":"file","action":"exists","path":"{}/Cargo.toml"}}}}"#,
+                    workspace_a_root
+                ),
+            })),
+            runtime,
+        ));
+
+        let node_a_id = uhorse_protocol::NodeId::from_string("node-a");
+        let (node_a_tx, _node_a_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(node_a_id.clone(), node_a_tx)
+            .await;
+        hub.handle_node_connection(
+            node_a_id,
+            "node-a".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                name: "workspace-a".to_string(),
+                path: workspace_a_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let node_b_id = uhorse_protocol::NodeId::from_string("node-b");
+        let (node_b_tx, _node_b_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(node_b_id.clone(), node_b_tx)
+            .await;
+        hub.handle_node_connection(
+            node_b_id,
+            "node-b".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                name: "workspace-b".to_string(),
+                path: workspace_b_root,
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("检查 Cargo.toml 是否存在".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-multi-workspace".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        let error = submit_dingtalk_task(&state, inbound).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Multiple online workspaces available, workspace_path is required"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_dingtalk_task_dispatches_browser_assignment_only_to_browser_capable_node()
+    {
         let runtime = create_test_runtime().await;
         let workspace = tempdir().unwrap();
         let workspace_root = workspace.path().to_string_lossy().to_string();
@@ -4420,7 +4931,10 @@ mod tests {
             hub.clone(),
             None,
             Some(Arc::new(StubLlmClient {
-                response: r#"{"type":"execute_command","command":{"type":"browser","action":"navigate","url":"https://example.com/article"}}"#.to_string(),
+                response: format!(
+                    r#"{{"type":"execute_command","command":{{"type":"browser","action":"open_system","url":"https://example.com/article"}},"workspace_path":"{}"}}"#,
+                    workspace_root
+                ),
             })),
             runtime,
         ));
@@ -4511,7 +5025,7 @@ mod tests {
                 ..
             } => {
                 match command {
-                    Command::Browser(BrowserCommand::Navigate { url }) => {
+                    Command::Browser(BrowserCommand::OpenSystem { url }) => {
                         assert_eq!(url, "https://example.com/article");
                     }
                     other => panic!("unexpected command: {:?}", other),
@@ -4522,9 +5036,11 @@ mod tests {
             other => panic!("unexpected message: {:?}", other),
         };
 
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(200), file_only_rx.recv())
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), file_only_rx.recv())
+                .await
+                .is_err()
+        );
 
         let status = hub.get_task_status(&task_id).await.unwrap();
         assert_eq!(status.status, TaskStatus::Running);
@@ -4553,20 +5069,85 @@ mod tests {
         .await
         .unwrap();
 
-        let task_result = tokio::time::timeout(std::time::Duration::from_secs(1), task_result_rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let task_result =
+            tokio::time::timeout(std::time::Duration::from_secs(1), task_result_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(task_result.task_id, task_id);
         assert!(task_result.result.success);
         assert_eq!(format_task_result_message(&task_result.result), "页面正文");
         assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
 
         let completed_task = hub.get_completed_task(&task_id).await.unwrap();
-        assert_eq!(format_task_result_message(&completed_task.result), "页面正文");
+        assert_eq!(
+            format_task_result_message(&completed_task.result),
+            "页面正文"
+        );
 
         reply_task_result(state.clone(), task_result).await.unwrap();
         assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_reply_target_prefers_session_webhook() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-webhook".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: Some(chrono::Utc::now().timestamp_millis() + 60_000),
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_reply_target(&route),
+            Some(DingTalkReplyTarget::SessionWebhook {
+                webhook: "https://example.com/hook".to_string(),
+                at_user_ids: vec!["staff-1".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_reply_target_falls_back_to_group_message() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-group".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: Some(chrono::Utc::now().timestamp_millis() - 1),
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_reply_target(&route),
+            Some(DingTalkReplyTarget::GroupConversation {
+                conversation_id: "conv-group".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_reply_target_uses_direct_user_for_private_chat() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-direct".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: None,
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_reply_target(&route),
+            Some(DingTalkReplyTarget::DirectUser {
+                user_id: "user-1".to_string(),
+            })
+        );
     }
 
     #[tokio::test]
@@ -5416,6 +5997,14 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     }
 
     #[test]
+    fn test_validate_browser_command_allows_open_system_public_https_url() {
+        let command = uhorse_protocol::BrowserCommand::OpenSystem {
+            url: "https://example.com/article".to_string(),
+        };
+        assert!(validate_browser_command(&command).is_ok());
+    }
+
+    #[test]
     fn test_validate_browser_command_rejects_localhost() {
         let command = uhorse_protocol::BrowserCommand::Navigate {
             url: "http://localhost:3000".to_string(),
@@ -5440,6 +6029,33 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     }
 
     #[test]
+    fn test_format_task_result_message_browser_open_system() {
+        let result = CommandResult::success(CommandOutput::Browser {
+            result: BrowserResult::OpenSystem {
+                url: "https://example.com/article".to_string(),
+            },
+        });
+        assert_eq!(
+            format_task_result_message(&result),
+            "已在系统浏览器打开：https://example.com/article"
+        );
+    }
+
+    #[test]
+    fn test_format_task_result_message_browser_navigate_with_title() {
+        let result = CommandResult::success(CommandOutput::Browser {
+            result: BrowserResult::Navigate {
+                final_url: "https://example.com/article".to_string(),
+                title: Some("Example Article".to_string()),
+            },
+        });
+        assert_eq!(
+            format_task_result_message(&result),
+            "浏览器会话已导航到：https://example.com/article\n标题：Example Article"
+        );
+    }
+
+    #[test]
     fn test_format_task_result_message_browser_text() {
         let result = CommandResult::success(CommandOutput::Browser {
             result: BrowserResult::GetText {
@@ -5447,6 +6063,35 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             },
         });
         assert_eq!(format_task_result_message(&result), "页面正文");
+    }
+
+    #[test]
+    fn test_format_task_result_message_file_write() {
+        let result = CommandResult::success(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "write",
+            "path": "/tmp/demo.md",
+            "bytes_written": 42,
+        })));
+        assert_eq!(
+            format_task_result_message(&result),
+            "已保存成功：/tmp/demo.md"
+        );
+    }
+
+    #[test]
+    fn test_format_task_result_message_file_copy() {
+        let result = CommandResult::success(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "copy",
+            "source_path": "/tmp/source.md",
+            "destination_path": "/tmp/dest.md",
+            "bytes_copied": 42,
+        })));
+        assert_eq!(
+            format_task_result_message(&result),
+            "已复制成功：/tmp/source.md\n到：/tmp/dest.md"
+        );
     }
 
     #[test]

@@ -63,6 +63,9 @@ const Dashboard: React.FC = () => {
       {stopMutation.error instanceof Error ? (
         <Alert type="error" showIcon message="停止失败" description={stopMutation.error.message} />
       ) : null}
+      {status.restart_required ? (
+        <Alert type="warning" showIcon message={status.restart_notice || '运行中的 Node 需要重启后才会应用最新配置'} />
+      ) : null}
 
       <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
         <Typography.Title level={4} style={{ margin: 0 }}>
@@ -123,7 +126,9 @@ const Dashboard: React.FC = () => {
             <Descriptions bordered size="small" column={1}>
               <Descriptions.Item label="节点名称">{status.name}</Descriptions.Item>
               <Descriptions.Item label="节点 ID">{status.node_id || '-'}</Descriptions.Item>
-              <Descriptions.Item label="工作区路径">{status.workspace_path}</Descriptions.Item>
+              <Descriptions.Item label="运行中工作区">{status.workspace_path}</Descriptions.Item>
+              <Descriptions.Item label="已保存工作区">{status.saved_workspace_path}</Descriptions.Item>
+              <Descriptions.Item label="运行时路径">{status.runtime_workspace_path || '-'}</Descriptions.Item>
               <Descriptions.Item label="Hub 地址">{status.hub_url}</Descriptions.Item>
               <Descriptions.Item label="生命周期">
                 <Tag color={lifecycleColor(status.lifecycle_state)}>{status.lifecycle_state}</Tag>

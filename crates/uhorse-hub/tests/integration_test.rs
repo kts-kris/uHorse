@@ -622,3 +622,136 @@ async fn test_local_hub_node_roundtrip_file_exists() {
     let _ = server.await;
     hub.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn test_local_hub_node_roundtrip_file_write() {
+    let workspace = tempdir().unwrap();
+    let target_file = workspace.path().join("nested").join("written.txt");
+    let file_content = "hello roundtrip write";
+
+    let hub_config = HubConfig {
+        hub_id: "roundtrip-write-test-hub".to_string(),
+        bind_address: "127.0.0.1".to_string(),
+        port: 18767,
+        heartbeat_timeout_secs: 10,
+        task_timeout_secs: 30,
+        ..Default::default()
+    };
+
+    let jwt_secret = "roundtrip-write-test-secret-12345";
+    let authenticator = NodeAuthenticator::with_secret(jwt_secret).unwrap();
+    let node_id = NodeId::from_string("roundtrip-write-authenticated-node");
+    let auth_info = authenticator
+        .authenticate_node(&node_id, "roundtrip-credentials")
+        .await
+        .unwrap();
+
+    let security_manager = Arc::new(
+        uhorse_hub::SecurityManager::new(
+            jwt_secret,
+            Arc::new(uhorse_security::ApprovalManager::new()),
+        )
+        .unwrap(),
+    );
+    let (hub, mut task_result_rx) =
+        Hub::new_with_security(hub_config.clone(), Some(security_manager));
+    let hub = Arc::new(hub);
+    hub.start().await.unwrap();
+
+    let web_state = WebState::new(hub.clone(), None, None);
+    let app = create_router(web_state);
+    let listener =
+        tokio::net::TcpListener::bind((hub_config.bind_address.as_str(), hub_config.port))
+            .await
+            .unwrap();
+
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let mut node = Node::new(NodeConfig {
+        node_id: Some(node_id.clone()),
+        name: "roundtrip-write-node".to_string(),
+        workspace_path: workspace.path().to_string_lossy().to_string(),
+        connection: ConnectionConfig {
+            hub_url: format!("ws://127.0.0.1:{}/ws", hub_config.port),
+            reconnect_interval_secs: 1,
+            heartbeat_interval_secs: 1,
+            connect_timeout_secs: 5,
+            max_reconnect_attempts: 1,
+            auth_token: Some(auth_info.access_token.clone()),
+        },
+        require_git_repo: false,
+        ..Default::default()
+    })
+    .unwrap();
+
+    node.start().await.unwrap();
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if hub.get_online_nodes().await.len() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let task_id = hub
+        .submit_task(
+            Command::File(FileCommand::Write {
+                path: target_file.to_string_lossy().to_string(),
+                content: file_content.to_string(),
+                overwrite: true,
+            }),
+            create_test_context("test-user", "roundtrip-write-session"),
+            Priority::Normal,
+            None,
+            vec![],
+            Some(workspace.path().to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+    let result = timeout(Duration::from_secs(10), task_result_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.task_id, task_id);
+    assert!(result.result.success);
+    match &result.result.output {
+        CommandOutput::Json { content } => {
+            assert_eq!(content.get("kind").and_then(|value| value.as_str()), Some("file_operation"));
+            assert_eq!(content.get("action").and_then(|value| value.as_str()), Some("write"));
+            assert_eq!(
+                content.get("path").and_then(|value| value.as_str()),
+                Some(target_file.canonicalize().unwrap().to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                content.get("bytes_written").and_then(|value| value.as_u64()),
+                Some(file_content.len() as u64)
+            );
+        }
+        other => panic!("unexpected output: {:?}", other),
+    }
+    assert_eq!(std::fs::read_to_string(&target_file).unwrap(), file_content);
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            match hub.get_task_status(&task_id).await {
+                Some(status) if format!("{:?}", status.status) == "Completed" => break,
+                _ => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    node.stop().await.unwrap();
+    server.abort();
+    let _ = server.await;
+    hub.shutdown().await.unwrap();
+}

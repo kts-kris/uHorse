@@ -93,6 +93,10 @@ export interface DesktopNodeStatus {
   connection_state: string;
   hub_url: string;
   workspace_path: string;
+  saved_workspace_path: string;
+  runtime_workspace_path: string | null;
+  restart_required: boolean;
+  restart_notice: string | null;
   running_tasks: number;
   max_concurrent_tasks: number;
   pending_approvals: number;
@@ -116,6 +120,9 @@ export interface DesktopWorkspaceStatus {
   internal_work_dir: string;
   allowed_patterns: string[];
   denied_patterns: string[];
+  running_workspace_path: string | null;
+  restart_required: boolean;
+  restart_notice: string | null;
   error: string | null;
 }
 

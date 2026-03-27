@@ -49,7 +49,7 @@ uHorse 当前对外发布口径是 **v4.1.1 Hub-Node 主线**。
 
 - DingTalk 自然语言请求可进入 Hub → Node 链路，并在受控场景下规划为 `BrowserCommand`。
 - Hub 已对浏览器目标执行本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标。
-- Node Desktop 与 runtime 已支持浏览器能力路由，浏览器任务会优先调度到声明 `CommandType::Browser` 的节点。
+- Node Desktop 与 runtime 已支持浏览器能力路由，浏览器任务会优先调度到声明 `CommandType::Browser` 的节点；对于“打开网页”这类 DingTalk 指令，主线契约会规划为 `BrowserCommand::OpenSystem`，以宿主机系统浏览器语义执行。
 - `memory / agent / skill` 支持 `global / tenant / user` 分层共享与隔离。
 - runtime API 与 Web UI 已支持 `source_layer`、`source_scope` 的来源感知展示与按来源详情查询。
 - Node Desktop 当前交付边界是 `bin/ + web/` archive、`desktop-smoke.sh` 与 GitHub release / nightly artifacts，而不是原生 `.app/.dmg`、签名、公证、安装器。
@@ -70,7 +70,7 @@ uHorse 当前对外发布口径是 **v4.1.1 Hub-Node 主线**。
 | 多用户 `memory / agent / skill` 分层作用域 | ✅ | 当前 runtime 已按 `global / tenant / user` 组织共享与隔离边界 |
 | source-aware runtime / UI | ✅ | Skills、Settings 等页面已展示 `source_layer`、`source_scope`，同名多来源资源可区分 |
 | Node Desktop 打包与 smoke | ✅ | 当前交付为 `bin + web` archive，CI / release / nightly 均产出对应 artifact，不包含 `.app/.dmg` |
-| 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 已覆盖真实 Hub + Node + WebSocket 闭环 |
+| 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 与 `test_local_hub_node_roundtrip_file_write` 已覆盖真实 Hub + Node + WebSocket 闭环 |
 | 鉴权拒绝路径 | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` 已覆盖 token 与注册 `node_id` 不一致场景 |
 | DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream；若要镜像 Node Desktop 本地通知，还需配置 `channels.dingtalk.notification_bindings` |
 | DingTalk 浏览器规划链路 | ✅ | Hub 已允许受控 `BrowserCommand`，并可把浏览器任务调度到具备 `CommandType::Browser` 的节点 |
@@ -186,8 +186,11 @@ auth_token = "<access_token>"
 
 如果你要把 Node Desktop 本地通知镜像到钉钉，还需要同时满足两侧配置：
 
-- Node Desktop 本地开启 `mirror_notifications_to_dingtalk`
-- Hub 侧在 `channels.dingtalk.notification_bindings` 中把 `node_id` 绑定到 DingTalk `user_id`
+- Node Desktop 本地开启 `notifications_enabled`
+- 如需在通知中展示更详细内容，再开启 `show_notification_details`
+- 若要把本地通知额外同步到钉钉，再开启 `mirror_notifications_to_dingtalk`
+- Hub 侧在 `channels.dingtalk.notification_bindings` 中把稳定 `node_id` 绑定到 DingTalk `user_id`
+- 若当前运行中的 Node 与新保存配置不一致，Settings / Dashboard 会显示“需重启生效”，重启后才会切换到新的工作区与运行时配置
 
 ### 5. 提交一个最小任务
 

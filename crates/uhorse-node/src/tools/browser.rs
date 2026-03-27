@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 #[cfg(feature = "browser")]
 use tracing::debug;
 use tracing::info;
-use uhorse_protocol::{BrowserCommand, CommandOutput};
+use uhorse_protocol::{BrowserCommand, BrowserResult, CommandOutput};
 
 /// 浏览器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +63,22 @@ struct BrowserSession {
 }
 
 impl BrowserExecutor {
+    fn open_url(url: &str) -> NodeResult<()> {
+        #[cfg(test)]
+        {
+            let _ = url;
+            Ok(())
+        }
+
+        #[cfg(not(test))]
+        {
+            open::that(url).map_err(|e| {
+                NodeError::Execution(format!("Failed to open system browser: {}", e))
+            })?;
+            Ok(())
+        }
+    }
+
     /// 创建新的浏览器执行器
     pub fn new(config: BrowserConfig) -> Self {
         // 确保截图目录存在
@@ -80,12 +96,18 @@ impl BrowserExecutor {
         Self::new(BrowserConfig::default())
     }
 
+    #[cfg_attr(not(feature = "browser"), allow(dead_code))]
+    fn output(result: BrowserResult) -> CommandOutput {
+        CommandOutput::Browser { result }
+    }
+
     /// 执行浏览器命令
     pub async fn execute(&self, cmd: &BrowserCommand) -> NodeResult<CommandOutput> {
         let action = format!("{:?}", cmd);
         info!("Executing browser command: {}", action);
 
         match cmd {
+            BrowserCommand::OpenSystem { url } => self.open_system(url).await,
             BrowserCommand::Navigate { url } => self.navigate(url).await,
             BrowserCommand::Screenshot {
                 selector,
@@ -101,6 +123,14 @@ impl BrowserExecutor {
             BrowserCommand::Evaluate { script } => self.evaluate(script).await,
             BrowserCommand::Close => self.close().await,
         }
+    }
+
+    async fn open_system(&self, url: &str) -> NodeResult<CommandOutput> {
+        Self::open_url(url)?;
+
+        Ok(Self::output(BrowserResult::OpenSystem {
+            url: url.to_string(),
+        }))
     }
 
     /// 导航到 URL
@@ -148,10 +178,15 @@ impl BrowserExecutor {
 
         session.current_url = url.to_string();
 
-        Ok(CommandOutput::json(serde_json::json!({
-            "url": url,
-            "status": "loaded"
-        })))
+        let title = tab
+            .get_title()
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+
+        Ok(Self::output(BrowserResult::Navigate {
+            final_url: url.to_string(),
+            title,
+        }))
     }
 
     /// 导航到 URL (未启用 feature)
@@ -210,7 +245,7 @@ impl BrowserExecutor {
             .click()
             .map_err(|e| NodeError::Execution(format!("Click failed: {}", e)))?;
 
-        Ok(CommandOutput::text("Clicked successfully"))
+        Ok(Self::output(BrowserResult::Ok))
     }
 
     /// 点击元素 (未启用 feature)
@@ -247,7 +282,7 @@ impl BrowserExecutor {
             .type_into(text)
             .map_err(|e| NodeError::Execution(format!("Type failed: {}", e)))?;
 
-        Ok(CommandOutput::text("Typed successfully"))
+        Ok(Self::output(BrowserResult::Ok))
     }
 
     /// 输入文本 (未启用 feature)
@@ -276,7 +311,7 @@ impl BrowserExecutor {
 
         loop {
             if tab.find_element(selector).is_ok() {
-                return Ok(CommandOutput::text("Element found"));
+                return Ok(Self::output(BrowserResult::Ok));
             }
 
             if start.elapsed() > timeout {
@@ -328,7 +363,7 @@ impl BrowserExecutor {
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_default();
 
-        Ok(CommandOutput::text(text))
+        Ok(Self::output(BrowserResult::GetText { text }))
     }
 
     /// 获取文本 (未启用 feature)
@@ -360,9 +395,7 @@ impl BrowserExecutor {
 
         let value = result.value.unwrap_or(serde_json::Value::Null);
 
-        Ok(CommandOutput::json(serde_json::json!({
-            "result": value
-        })))
+        Ok(Self::output(BrowserResult::Evaluate { value }))
     }
 
     /// 执行 JavaScript (未启用 feature)
@@ -385,7 +418,7 @@ impl BrowserExecutor {
             drop(s.browser);
         }
 
-        Ok(CommandOutput::text("Browser closed"))
+        Ok(Self::output(BrowserResult::Ok))
     }
 
     /// 关闭浏览器 (未启用 feature)
@@ -415,5 +448,18 @@ mod tests {
         assert!(config.headless);
         assert_eq!(config.width, 1920);
         assert_eq!(config.height, 1080);
+    }
+
+    #[tokio::test]
+    async fn test_open_system_returns_browser_output() {
+        let executor = BrowserExecutor::default_executor();
+        let result = executor.open_system("https://example.com").await.unwrap();
+
+        match result {
+            CommandOutput::Browser {
+                result: BrowserResult::OpenSystem { url },
+            } => assert_eq!(url, "https://example.com"),
+            other => panic!("unexpected output: {:?}", other),
+        }
     }
 }

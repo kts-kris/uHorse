@@ -170,6 +170,11 @@ impl HealthService {
         self
     }
 
+    /// 获取版本号
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     /// 执行健康检查
     pub async fn check(&self) -> HealthCheck {
         let mut checks = Vec::new();

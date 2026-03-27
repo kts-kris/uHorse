@@ -221,7 +221,7 @@ curl -X POST http://127.0.0.1:8765/api/nodes/office-node-01/permissions \
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `command` | object | 当前支持 `file`、`shell` 等协议命令 |
+| `command` | object | 当前支持 `file`、`shell`、受控 `browser` 等协议命令 |
 | `user_id` | string | 用户标识 |
 | `session_id` | string | 会话标识 |
 | `channel` | string | 渠道，例如 `api`、`dingtalk` |
@@ -261,6 +261,12 @@ curl -X POST http://127.0.0.1:8765/api/tasks \
   "error": null
 }
 ```
+
+浏览器任务补充说明：
+
+- 当前主线会把 DingTalk “打开网页”类请求规划为 `BrowserCommand::OpenSystem`
+- Hub 会先校验目标 URL，拒绝 `file://`、localhost 与私网地址
+- 文件写入成功时，Node 会回传 structured `file_operation` JSON，Hub 侧摘要文案会优先显示“已保存成功：<path>`
 
 ### 2. 查询任务状态：`GET /api/tasks/:task_id`
 

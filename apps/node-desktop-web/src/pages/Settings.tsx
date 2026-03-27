@@ -17,7 +17,7 @@ import {
 } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { desktopApi } from '../services/desktopApi';
-import type { DesktopSettings } from '../types/desktop';
+import type { DesktopSettings, DesktopWorkspaceStatus } from '../types/desktop';
 
 const Settings: React.FC = () => {
   const [form] = Form.useForm<DesktopSettings>();
@@ -73,7 +73,13 @@ const Settings: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['desktop-version-summary'] }),
         queryClient.invalidateQueries({ queryKey: ['desktop-capability-status'] }),
       ]);
-      message.success('设置已保存');
+
+      const latestWorkspaceStatus = queryClient.getQueryData<DesktopWorkspaceStatus>(['desktop-workspace-status']);
+      if (latestWorkspaceStatus?.restart_required) {
+        message.warning(latestWorkspaceStatus.restart_notice || '设置已保存，重启 Node 后生效');
+      } else {
+        message.success('设置已保存');
+      }
     },
   });
 
@@ -134,6 +140,9 @@ const Settings: React.FC = () => {
       ) : null}
       {notificationMutation.error instanceof Error ? (
         <Alert type="error" showIcon message="发送测试通知失败" description={notificationMutation.error.message} />
+      ) : null}
+      {workspaceStatus?.restart_required ? (
+        <Alert type="warning" showIcon message={workspaceStatus.restart_notice || '设置已保存，重启 Node 后生效'} />
       ) : null}
 
       <Typography.Title level={4} style={{ margin: 0 }}>
@@ -275,6 +284,13 @@ const Settings: React.FC = () => {
                 </Descriptions.Item>
                 <Descriptions.Item label="名称">{workspaceStatus?.name || '-'}</Descriptions.Item>
                 <Descriptions.Item label="路径">{workspaceStatus?.normalized_path || workspaceStatus?.path || '-'}</Descriptions.Item>
+                <Descriptions.Item label="运行中工作区">{workspaceStatus?.running_workspace_path || '-'}</Descriptions.Item>
+                <Descriptions.Item label="生效状态">
+                  <Tag color={workspaceStatus?.restart_required ? 'warning' : 'success'}>
+                    {workspaceStatus?.restart_required ? '需重启生效' : '已生效'}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="状态说明">{workspaceStatus?.restart_notice || '当前运行状态已与保存配置一致'}</Descriptions.Item>
                 <Descriptions.Item label="Git 仓库">
                   <Tag color={workspaceStatus?.git_repo ? 'success' : 'default'}>
                     {workspaceStatus?.git_repo ? '是' : '否'}

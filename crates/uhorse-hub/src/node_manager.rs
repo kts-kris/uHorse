@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
@@ -76,6 +77,66 @@ pub struct NodeManager {
     heartbeat_timeout_secs: u64,
     /// 最大节点数
     max_nodes: usize,
+}
+
+fn normalize_workspace_hint_path(path: &str) -> PathBuf {
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        if let Some(normalized) = canonicalize_existing_aware(candidate) {
+            return normalized;
+        }
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in candidate.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::ParentDir => normalized.push(".."),
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn canonicalize_existing_aware(path: &Path) -> Option<PathBuf> {
+    let mut existing_ancestor = Some(path);
+    let ancestor = loop {
+        match existing_ancestor {
+            Some(candidate) if candidate.exists() => break candidate.to_path_buf(),
+            Some(candidate) => existing_ancestor = candidate.parent(),
+            None => return None,
+        }
+    };
+
+    let mut normalized = ancestor.canonicalize().ok()?;
+    let remainder = path.strip_prefix(&ancestor).ok()?;
+
+    for component in remainder.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+
+    Some(normalized)
+}
+
+pub(crate) fn workspace_matches_hint(workspace_path: &str, hint: &str) -> bool {
+    let workspace = normalize_workspace_hint_path(workspace_path);
+    let hint = normalize_workspace_hint_path(hint);
+
+    workspace == hint || workspace.starts_with(&hint)
 }
 
 impl NodeManager {
@@ -213,7 +274,7 @@ impl NodeManager {
                 }
 
                 if let Some(hint) = workspace_hint {
-                    if !n.workspace.path.contains(hint) {
+                    if !workspace_matches_hint(&n.workspace.path, hint) {
                         return false;
                     }
                 }
@@ -290,5 +351,33 @@ impl NodeManager {
         }
 
         stats
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_workspace_matches_hint_requires_path_boundary() {
+        assert!(workspace_matches_hint(
+            "/Users/demo/workspace/project",
+            "/Users/demo/workspace"
+        ));
+        assert!(!workspace_matches_hint(
+            "/Users/demo/workspace-other/project",
+            "/Users/demo/workspace"
+        ));
+    }
+
+    #[test]
+    fn test_workspace_matches_hint_normalizes_var_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().canonicalize().unwrap();
+        let display_path = temp.path().to_string_lossy().to_string();
+        let canonical_path = canonical.to_string_lossy().to_string();
+
+        assert!(workspace_matches_hint(&display_path, &canonical_path));
+        assert!(workspace_matches_hint(&canonical_path, &display_path));
     }
 }

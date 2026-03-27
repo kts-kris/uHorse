@@ -256,6 +256,8 @@ auth_token = ""
 - `auto_git_add_new_files = true`：对新增文件执行本地 `git add`
 - `require_git_repo = true`：要求工作区本身就是 git 仓库
 - `internal_work_dir = ".uhorse"`：内部临时代码目录，默认不会被 watcher 自动加入 git
+- 文件写入会自动创建工作区内缺失的父目录，但仍会拒绝任何越出 `workspace_path` 的父路径逃逸
+- 浏览器命令会区分 `OpenSystem` 与 `Navigate` 语义；当前 DingTalk “打开网页”主链会落到 `OpenSystem`
 
 ### Node CLI 参数
 
@@ -305,7 +307,8 @@ user_id = "your-dingtalk-user-id"
 - 当前主路径是 **Stream 模式**，不依赖公网 webhook 才能接收消息。
 - Hub 仍保留 `GET/POST /api/v1/channels/dingtalk/webhook` 路由，用于兼容或辅助测试。
 - 若要镜像 Node Desktop 本地通知到钉钉，还需要在 `channels.dingtalk.notification_bindings` 中配置稳定 `node_id` 到 DingTalk `user_id` 的映射。
-- DingTalk 文本会先经过 LLM 规划，再转换为单个 `FileCommand` 或 `ShellCommand`。
+- DingTalk 文本会先经过 LLM 规划，再转换为单个安全命令；文件操作、shell，以及受控 `BrowserCommand` 都在当前主线上。
+- 对于“打开网页”这类场景，当前主链会优先规划为 `BrowserCommand::OpenSystem`，而不是自动化浏览器 `Navigate`。
 - Hub 会在本地下发前校验路径范围，并拒绝危险 git 命令。
 
 ### 启用后会发生什么

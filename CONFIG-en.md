@@ -256,6 +256,8 @@ The current `uhorse-node` runtime keeps execution inside `workspace_path` and ad
 - `auto_git_add_new_files = true`: run local `git add` for newly created files
 - `require_git_repo = true`: require the workspace itself to already be a git repository
 - `internal_work_dir = ".uhorse"`: internal temp-code directory that the watcher skips by default
+- file writes automatically create missing parent directories inside the workspace, but still reject any parent-path escape outside `workspace_path`
+- browser commands keep `OpenSystem` and `Navigate` as separate semantics; the current DingTalk “open webpage” path lands on `OpenSystem`
 
 ### Node CLI arguments
 
@@ -305,7 +307,8 @@ user_id = "your-dingtalk-user-id"
 - The main runtime path is **Stream mode** and does not depend on a public webhook to receive inbound messages.
 - Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
 - To mirror Node Desktop local notifications to DingTalk, also configure a stable `node_id` to DingTalk `user_id` mapping in `channels.dingtalk.notification_bindings`.
-- DingTalk text is first planned by the LLM into a single `FileCommand` or `ShellCommand`.
+- DingTalk text is first planned by the LLM into a single safe command; file operations, shell commands, and controlled `BrowserCommand` flows are all part of the current mainline.
+- For requests such as “open a webpage”, the current mainline prefers `BrowserCommand::OpenSystem` instead of automated browser `Navigate`.
 - Hub validates path scope locally before dispatch and rejects dangerous git commands.
 
 ### What happens when enabled

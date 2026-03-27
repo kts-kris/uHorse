@@ -15,7 +15,7 @@ use uhorse_protocol::{
 };
 
 use crate::error::{HubError, HubResult};
-use crate::node_manager::NodeManager;
+use crate::node_manager::{workspace_matches_hint, NodeManager};
 
 /// 队列中的任务
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,7 +288,7 @@ impl TaskScheduler {
                     }
 
                     if let Some(hint) = task.workspace_hint.as_deref() {
-                        if !node.workspace.path.contains(hint) {
+                        if !workspace_matches_hint(&node.workspace.path, hint) {
                             return false;
                         }
                     }

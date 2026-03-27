@@ -320,6 +320,12 @@ impl Default for ResourceUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BrowserResult {
+    /// 系统浏览器打开结果
+    OpenSystem {
+        /// 打开的 URL
+        url: String,
+    },
+
     /// 导航结果
     Navigate {
         /// 最终 URL（可能有重定向）

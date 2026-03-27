@@ -261,10 +261,12 @@ impl CommandExecutor {
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to write file {:?}: {}", path, e)))?;
 
-        Ok(CommandOutput::text(format!(
-            "Written {} bytes",
-            content.len()
-        )))
+        Ok(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "write",
+            "path": path.to_string_lossy().to_string(),
+            "bytes_written": content.len(),
+        })))
     }
 
     /// 追加内容
@@ -291,10 +293,12 @@ impl CommandExecutor {
             NodeError::Execution(format!("Failed to append to file {:?}: {}", path, e))
         })?;
 
-        Ok(CommandOutput::text(format!(
-            "Appended {} bytes",
-            content.len()
-        )))
+        Ok(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "append",
+            "path": path.to_string_lossy().to_string(),
+            "bytes_appended": content.len(),
+        })))
     }
 
     /// 删除文件/目录
@@ -556,11 +560,18 @@ impl CommandExecutor {
             })?;
         }
 
-        tokio::fs::copy(&from, &to)
+        let copied_bytes = tokio::fs::copy(&from, &to)
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to copy: {}", e)))?;
 
-        Ok(CommandOutput::text("Copied successfully"))
+        Ok(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "copy",
+            "path": to.to_string_lossy().to_string(),
+            "source_path": from.to_string_lossy().to_string(),
+            "destination_path": to.to_string_lossy().to_string(),
+            "bytes_copied": copied_bytes,
+        })))
     }
 
     /// 移动文件
@@ -588,7 +599,13 @@ impl CommandExecutor {
             .await
             .map_err(|e| NodeError::Execution(format!("Failed to move: {}", e)))?;
 
-        Ok(CommandOutput::text("Moved successfully"))
+        Ok(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "move",
+            "path": to.to_string_lossy().to_string(),
+            "source_path": from.to_string_lossy().to_string(),
+            "destination_path": to.to_string_lossy().to_string(),
+        })))
     }
 
     /// 获取文件信息
@@ -611,7 +628,12 @@ impl CommandExecutor {
             })?;
         }
 
-        Ok(CommandOutput::text("Directory created"))
+        Ok(CommandOutput::json(serde_json::json!({
+            "kind": "file_operation",
+            "action": "create_dir",
+            "path": path.to_string_lossy().to_string(),
+            "recursive": recursive,
+        })))
     }
 
     /// 检查文件是否存在
@@ -1112,6 +1134,211 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_file_write_returns_structured_path_result() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let result = executor
+            .file_write("notes/todo.md", "hello", true)
+            .await
+            .unwrap();
+
+        match result {
+            CommandOutput::Json { content } => {
+                assert_eq!(content["kind"], "file_operation");
+                assert_eq!(content["action"], "write");
+                assert_eq!(content["bytes_written"], 5);
+                assert_eq!(
+                    content["path"],
+                    temp.path()
+                        .join("notes/todo.md")
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                );
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_append_returns_structured_path_result() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let result = executor
+            .file_append("notes/todo.md", "hello")
+            .await
+            .unwrap();
+
+        match result {
+            CommandOutput::Json { content } => {
+                assert_eq!(content["kind"], "file_operation");
+                assert_eq!(content["action"], "append");
+                assert_eq!(content["bytes_appended"], 5);
+                assert_eq!(
+                    content["path"],
+                    temp.path()
+                        .join("notes/todo.md")
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                );
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_write_creates_parent_directories_and_persists_content() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        executor
+            .file_write("deep/nested/notes.txt", "workspace content", true)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            tokio::fs::read_to_string(temp.path().join("deep/nested/notes.txt"))
+                .await
+                .unwrap(),
+            "workspace content"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_write_rejects_parent_escape_path() {
+        let temp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+        let escaped_path = format!("../{}/escape.txt", outside.path().file_name().unwrap().to_string_lossy());
+
+        let error = executor
+            .file_write(&escaped_path, "blocked", true)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, NodeError::Permission(_)));
+        assert!(!outside.path().join("escape.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_file_copy_returns_structured_paths() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        tokio::fs::write(temp.path().join("from.txt"), "copy me")
+            .await
+            .unwrap();
+        let result = executor
+            .file_copy("from.txt", "nested/to.txt", true)
+            .await
+            .unwrap();
+
+        match result {
+            CommandOutput::Json { content } => {
+                assert_eq!(content["kind"], "file_operation");
+                assert_eq!(content["action"], "copy");
+                assert_eq!(content["bytes_copied"], 7);
+                assert_eq!(
+                    content["source_path"],
+                    temp.path()
+                        .join("from.txt")
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                );
+                assert_eq!(
+                    content["destination_path"],
+                    temp.path()
+                        .join("nested/to.txt")
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                );
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_move_returns_structured_paths() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        tokio::fs::write(temp.path().join("from.txt"), "move me")
+            .await
+            .unwrap();
+        let source_path = temp
+            .path()
+            .join("from.txt")
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let result = executor
+            .file_move("from.txt", "nested/to.txt", true)
+            .await
+            .unwrap();
+
+        match result {
+            CommandOutput::Json { content } => {
+                assert_eq!(content["kind"], "file_operation");
+                assert_eq!(content["action"], "move");
+                assert_eq!(content["source_path"], source_path);
+                assert_eq!(
+                    content["destination_path"],
+                    temp.path()
+                        .join("nested/to.txt")
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                );
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_create_dir_returns_structured_path_result() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let result = executor.file_create_dir("nested/dir", true).await.unwrap();
+
+        match result {
+            CommandOutput::Json { content } => {
+                assert_eq!(content["kind"], "file_operation");
+                assert_eq!(content["action"], "create_dir");
+                assert_eq!(content["recursive"], true);
+                assert_eq!(
+                    content["path"],
+                    temp.path()
+                        .join("nested/dir")
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                );
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
     }
 
     #[tokio::test]

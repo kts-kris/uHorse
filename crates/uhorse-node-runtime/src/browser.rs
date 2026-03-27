@@ -65,6 +65,21 @@ struct BrowserSession {
 }
 
 impl BrowserExecutor {
+    fn open_url(url: &str) -> NodeResult<()> {
+        #[cfg(test)]
+        {
+            let _ = url;
+            Ok(())
+        }
+
+        #[cfg(not(test))]
+        {
+            open::that(url)
+                .map_err(|e| NodeError::Execution(format!("Failed to open system browser: {e}")))?;
+            Ok(())
+        }
+    }
+
     /// 创建浏览器执行器。
     pub(crate) fn new(config: BrowserConfig) -> Self {
         let _ = std::fs::create_dir_all(&config.screenshot_dir);
@@ -81,6 +96,7 @@ impl BrowserExecutor {
         info!("Executing browser command: {:?}", cmd);
 
         match cmd {
+            BrowserCommand::OpenSystem { url } => self.open_system(url).await,
             BrowserCommand::Navigate { url } => self.navigate(url).await,
             BrowserCommand::Screenshot {
                 selector,
@@ -101,6 +117,14 @@ impl BrowserExecutor {
     #[cfg_attr(not(feature = "browser"), allow(dead_code))]
     fn output(result: BrowserResult) -> CommandOutput {
         CommandOutput::Browser { result }
+    }
+
+    async fn open_system(&self, url: &str) -> NodeResult<CommandOutput> {
+        Self::open_url(url)?;
+
+        Ok(Self::output(BrowserResult::OpenSystem {
+            url: url.to_string(),
+        }))
     }
 
     #[cfg(feature = "browser")]
@@ -229,9 +253,9 @@ impl BrowserExecutor {
         debug!("Clicking element: {}", selector);
 
         let tab = self.active_tab().await?;
-        let element = tab.find_element(selector).map_err(|e| {
-            NodeError::Execution(format!("Element not found '{selector}': {e}"))
-        })?;
+        let element = tab
+            .find_element(selector)
+            .map_err(|e| NodeError::Execution(format!("Element not found '{selector}': {e}")))?;
         element
             .click()
             .map_err(|e| NodeError::Execution(format!("Click failed: {e}")))?;
@@ -253,9 +277,9 @@ impl BrowserExecutor {
         debug!("Typing into element: {}", selector);
 
         let tab = self.active_tab().await?;
-        let element = tab.find_element(selector).map_err(|e| {
-            NodeError::Execution(format!("Element not found '{selector}': {e}"))
-        })?;
+        let element = tab
+            .find_element(selector)
+            .map_err(|e| NodeError::Execution(format!("Element not found '{selector}': {e}")))?;
         element
             .click()
             .map_err(|e| NodeError::Execution(format!("Click failed: {e}")))?;
@@ -398,8 +422,20 @@ mod tests {
 
     #[test]
     fn test_selector_script_escapes_quotes() {
-        let script = BrowserExecutor::selector_script("div[data-x='a']", "el.textContent")
-            .unwrap();
+        let script = BrowserExecutor::selector_script("div[data-x='a']", "el.textContent").unwrap();
         assert!(script.contains("document.querySelector(\"div[data-x='a']\")"));
+    }
+
+    #[tokio::test]
+    async fn test_open_system_returns_browser_output() {
+        let executor = BrowserExecutor::default();
+        let result = executor.open_system("https://example.com").await.unwrap();
+
+        match result {
+            CommandOutput::Browser {
+                result: BrowserResult::OpenSystem { url },
+            } => assert_eq!(url, "https://example.com"),
+            other => panic!("unexpected output: {:?}", other),
+        }
     }
 }

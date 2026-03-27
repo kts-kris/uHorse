@@ -221,6 +221,18 @@ impl DesktopAppState {
             "settings.save",
         );
 
+        let (_, restart_required, restart_notice) = runtime_config_status(&app);
+        if restart_required {
+            push_log(
+                &mut app.logs,
+                DesktopLogLevel::Info,
+                restart_notice.clone().unwrap_or_else(|| {
+                    "Settings saved and will take effect after restart".to_string()
+                }),
+                "settings.save",
+            );
+        }
+
         if previous_launch_at_login != app.desktop.launch_at_login {
             let launch_at_login_enabled = app.desktop.launch_at_login;
             push_log(
@@ -474,6 +486,9 @@ impl DesktopAppState {
         let app = self.inner.read().await;
         let config = &app.config;
 
+        let (running_workspace_path, restart_required, restart_notice) =
+            runtime_config_status(&app);
+
         match Workspace::new(&config.workspace_path) {
             Ok(workspace) => DesktopWorkspaceStatusDto {
                 valid: true,
@@ -489,6 +504,9 @@ impl DesktopAppState {
                 internal_work_dir: config.internal_work_dir.clone(),
                 allowed_patterns: workspace.config().allowed_patterns.clone(),
                 denied_patterns: workspace.config().denied_patterns.clone(),
+                running_workspace_path,
+                restart_required,
+                restart_notice,
                 error: None,
             },
             Err(error) => DesktopWorkspaceStatusDto {
@@ -505,6 +523,9 @@ impl DesktopAppState {
                 internal_work_dir: config.internal_work_dir.clone(),
                 allowed_patterns: vec![],
                 denied_patterns: vec![],
+                running_workspace_path,
+                restart_required,
+                restart_notice,
                 error: Some(error.to_string()),
             },
         }
@@ -577,6 +598,8 @@ impl DesktopAppState {
     }
 
     async fn build_status(app: &DesktopApp) -> NodeResult<DesktopNodeStatusDto> {
+        let (runtime_workspace_path, restart_required, restart_notice) = runtime_config_status(app);
+
         if let Some(node) = app.node.as_ref() {
             let metrics = node.get_metrics().await;
             let heartbeat = node
@@ -600,7 +623,13 @@ impl DesktopAppState {
                 lifecycle_state: app.lifecycle_state.clone(),
                 connection_state,
                 hub_url: node.config().connection.hub_url.clone(),
-                workspace_path: node.config().workspace_path.clone(),
+                workspace_path: runtime_workspace_path
+                    .clone()
+                    .unwrap_or_else(|| node.config().workspace_path.clone()),
+                saved_workspace_path: app.config.workspace_path.clone(),
+                runtime_workspace_path,
+                restart_required,
+                restart_notice,
                 running_tasks: node.running_tasks_count().await,
                 max_concurrent_tasks: node.config().max_concurrent_tasks,
                 pending_approvals: node.pending_approvals_count().await,
@@ -626,6 +655,10 @@ impl DesktopAppState {
             connection_state: "disconnected".to_string(),
             hub_url: app.config.connection.hub_url.clone(),
             workspace_path: app.config.workspace_path.clone(),
+            saved_workspace_path: app.config.workspace_path.clone(),
+            runtime_workspace_path,
+            restart_required,
+            restart_notice,
             running_tasks: 0,
             max_concurrent_tasks: app.config.max_concurrent_tasks,
             pending_approvals: 0,
@@ -635,6 +668,39 @@ impl DesktopAppState {
             recent_error: app.recent_error.clone(),
         })
     }
+}
+
+fn runtime_config_status(app: &DesktopApp) -> (Option<String>, bool, Option<String>) {
+    let runtime_config = app.node.as_ref().map(|node| node.config());
+    let runtime_workspace_path = runtime_config.map(|config| config.workspace_path.clone());
+    let restart_required = runtime_config
+        .map(|config| node_config_requires_restart(config, &app.config))
+        .unwrap_or(false);
+    let restart_notice = if restart_required {
+        if runtime_workspace_path.as_deref() != Some(app.config.workspace_path.as_str()) {
+            Some(format!(
+                "设置已保存，需重启 Node 后工作区才会从 {} 切换到 {}",
+                runtime_workspace_path.as_deref().unwrap_or("-"),
+                app.config.workspace_path
+            ))
+        } else {
+            Some("设置已保存，需重启 Node 后运行中的配置才会生效".to_string())
+        }
+    } else {
+        None
+    };
+
+    (runtime_workspace_path, restart_required, restart_notice)
+}
+
+fn node_config_requires_restart(runtime_config: &NodeConfig, saved_config: &NodeConfig) -> bool {
+    runtime_config.name != saved_config.name
+        || runtime_config.connection.hub_url != saved_config.connection.hub_url
+        || runtime_config.workspace_path != saved_config.workspace_path
+        || runtime_config.require_git_repo != saved_config.require_git_repo
+        || runtime_config.watch_workspace != saved_config.watch_workspace
+        || runtime_config.git_protection_enabled != saved_config.git_protection_enabled
+        || runtime_config.auto_git_add_new_files != saved_config.auto_git_add_new_files
 }
 
 fn connection_state_label(state: &ConnectionState) -> String {
@@ -1049,6 +1115,10 @@ mod tests {
         let status = state.runtime_status().await.unwrap();
 
         assert_eq!(status.workspace_path, workspace_path);
+        assert_eq!(status.saved_workspace_path, workspace_path);
+        assert_eq!(status.runtime_workspace_path, None);
+        assert!(!status.restart_required);
+        assert_eq!(status.restart_notice, None);
         assert!(matches!(
             status.lifecycle_state,
             DesktopLifecycleState::Stopped
@@ -1070,6 +1140,9 @@ mod tests {
         assert!(status.valid);
         assert_eq!(status.path, temp.path().to_string_lossy());
         assert!(!status.require_git_repo);
+        assert_eq!(status.running_workspace_path, None);
+        assert!(!status.restart_required);
+        assert_eq!(status.restart_notice, None);
     }
 
     #[tokio::test]
@@ -1105,12 +1178,20 @@ mod tests {
             started.lifecycle_state,
             DesktopLifecycleState::Running
         ));
+        assert_eq!(started.saved_workspace_path, temp.path().to_string_lossy());
+        assert_eq!(
+            started.runtime_workspace_path.as_deref(),
+            Some(temp.path().to_string_lossy().as_ref())
+        );
+        assert!(!started.restart_required);
 
         let stopped = state.stop_node().await.unwrap();
         assert!(matches!(
             stopped.lifecycle_state,
             DesktopLifecycleState::Stopped
         ));
+        assert_eq!(stopped.runtime_workspace_path, None);
+        assert!(!stopped.restart_required);
 
         let logs = state.logs().await;
         assert!(logs
@@ -1195,6 +1276,140 @@ mod tests {
         assert_eq!(notification.title, DESKTOP_NOTIFICATION_TITLE);
         assert_eq!(notification.subtitle.as_deref(), Some("节点停止失败"));
         assert_eq!(notification.message, "permission denied");
+    }
+
+    #[tokio::test]
+    async fn test_save_settings_marks_restart_required_when_runtime_workspace_changes() {
+        let temp = TempDir::new().unwrap();
+        let original_workspace = temp.path().join("workspace-a");
+        let next_workspace = temp.path().join("workspace-b");
+        std::fs::create_dir_all(&original_workspace).unwrap();
+        std::fs::create_dir_all(&next_workspace).unwrap();
+
+        let store = ConfigStore::new(temp.path().join("node-desktop.toml"));
+        let mut config = DesktopConfig::default();
+        config.node.workspace_path = original_workspace.display().to_string();
+        config.node.require_git_repo = false;
+        config.node.connection.hub_url = "ws://127.0.0.1:65535/ws".to_string();
+        config.desktop.notifications_enabled = false;
+        store.save(&config).unwrap();
+
+        let state = DesktopAppState::new(store).unwrap();
+        state.start_node().await.unwrap();
+
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: next_workspace.display().to_string(),
+                hub_url: "ws://127.0.0.1:65535/ws".to_string(),
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: true,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        let runtime = state.runtime_status().await.unwrap();
+        assert_eq!(
+            runtime.saved_workspace_path,
+            next_workspace.display().to_string()
+        );
+        assert_eq!(
+            runtime.workspace_path,
+            original_workspace.display().to_string()
+        );
+        assert_eq!(
+            runtime.runtime_workspace_path.as_deref(),
+            Some(original_workspace.to_string_lossy().as_ref())
+        );
+        assert!(runtime.restart_required);
+        assert_eq!(
+            runtime.restart_notice,
+            Some(format!(
+                "设置已保存，需重启 Node 后工作区才会从 {} 切换到 {}",
+                original_workspace.display(),
+                next_workspace.display()
+            ))
+        );
+
+        let workspace = state.workspace_status().await;
+        assert_eq!(workspace.path, next_workspace.display().to_string());
+        assert_eq!(
+            workspace.running_workspace_path.as_deref(),
+            Some(original_workspace.to_string_lossy().as_ref())
+        );
+        assert!(workspace.restart_required);
+        assert_eq!(workspace.restart_notice, runtime.restart_notice);
+
+        let logs = state.logs().await;
+        assert!(logs.iter().any(|entry| {
+            entry.source == "settings.save"
+                && entry.message
+                    == format!(
+                        "设置已保存，需重启 Node 后工作区才会从 {} 切换到 {}",
+                        original_workspace.display(),
+                        next_workspace.display()
+                    )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_restart_applies_saved_workspace_after_stop_and_start() {
+        let temp = TempDir::new().unwrap();
+        let original_workspace = temp.path().join("workspace-a");
+        let next_workspace = temp.path().join("workspace-b");
+        std::fs::create_dir_all(&original_workspace).unwrap();
+        std::fs::create_dir_all(&next_workspace).unwrap();
+
+        let store = ConfigStore::new(temp.path().join("node-desktop.toml"));
+        let mut config = DesktopConfig::default();
+        config.node.workspace_path = original_workspace.display().to_string();
+        config.node.require_git_repo = false;
+        config.node.connection.hub_url = "ws://127.0.0.1:65535/ws".to_string();
+        config.desktop.notifications_enabled = false;
+        store.save(&config).unwrap();
+
+        let state = DesktopAppState::new(store).unwrap();
+        state.start_node().await.unwrap();
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: next_workspace.display().to_string(),
+                hub_url: "ws://127.0.0.1:65535/ws".to_string(),
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: true,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        state.stop_node().await.unwrap();
+        let restarted = state.start_node().await.unwrap();
+
+        assert_eq!(
+            restarted.saved_workspace_path,
+            next_workspace.display().to_string()
+        );
+        assert_eq!(
+            restarted.workspace_path,
+            next_workspace.display().to_string()
+        );
+        assert_eq!(
+            restarted.runtime_workspace_path.as_deref(),
+            Some(next_workspace.to_string_lossy().as_ref())
+        );
+        assert!(!restarted.restart_required);
+        assert_eq!(restarted.restart_notice, None);
     }
 
     #[tokio::test]
