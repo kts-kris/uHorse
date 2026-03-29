@@ -1221,7 +1221,10 @@ mod tests {
         let outside = TempDir::new().unwrap();
         let executor = create_executor(&temp);
         executor.permission_manager.load_default_rules().await;
-        let escaped_path = format!("../{}/escape.txt", outside.path().file_name().unwrap().to_string_lossy());
+        let escaped_path = format!(
+            "../{}/escape.txt",
+            outside.path().file_name().unwrap().to_string_lossy()
+        );
 
         let error = executor
             .file_write(&escaped_path, "blocked", true)

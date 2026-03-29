@@ -339,7 +339,11 @@ impl LayeredSkillRegistry {
     /// 按可见作用域链解析技能来源条目。
     pub fn get_for_scopes_entry(&self, scopes: &[String], name: &str) -> Option<LayeredSkillEntry> {
         for scope in scopes {
-            if let Some(skill) = self.scoped.get(scope).and_then(|registry| registry.get(name)) {
+            if let Some(skill) = self
+                .scoped
+                .get(scope)
+                .and_then(|registry| registry.get(name))
+            {
                 return Some(LayeredSkillEntry {
                     skill,
                     source_layer: scope_layer_from_scope(scope),
@@ -377,7 +381,11 @@ impl LayeredSkillRegistry {
             _ => source_scope.and_then(|scope| {
                 (scope_layer_from_scope(scope) == source_layer)
                     .then_some(scope)
-                    .and_then(|scope| self.scoped.get(scope).and_then(|registry| registry.get(name)))
+                    .and_then(|scope| {
+                        self.scoped
+                            .get(scope)
+                            .and_then(|registry| registry.get(name))
+                    })
                     .map(|skill| LayeredSkillEntry {
                         skill,
                         source_layer: scope_layer_from_scope(scope),
@@ -445,7 +453,9 @@ impl LayeredSkillRegistry {
             left.skill
                 .name()
                 .cmp(right.skill.name())
-                .then_with(|| scope_layer_rank(left.source_layer).cmp(&scope_layer_rank(right.source_layer)))
+                .then_with(|| {
+                    scope_layer_rank(left.source_layer).cmp(&scope_layer_rank(right.source_layer))
+                })
                 .then_with(|| {
                     left.source_scope
                         .as_deref()
@@ -464,7 +474,11 @@ impl LayeredSkillRegistry {
     /// 返回任意层级中的技能来源条目，优先高优先级作用域 / global。
     pub fn get_any_entry(&self, name: &str) -> Option<LayeredSkillEntry> {
         for scope in sorted_skill_scopes_by_rank(&self.scoped) {
-            if let Some(skill) = self.scoped.get(&scope).and_then(|registry| registry.get(name)) {
+            if let Some(skill) = self
+                .scoped
+                .get(&scope)
+                .and_then(|registry| registry.get(name))
+            {
                 return Some(LayeredSkillEntry {
                     skill,
                     source_layer: scope_layer_from_scope(&scope),
@@ -741,7 +755,8 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         write_skill(&role_dir, "echo", "print('role')").await;
         write_skill(&user_dir, "echo", "print('user')").await;
 
-        let mut layered = LayeredSkillRegistry::new(SkillRegistry::from_dir(global_dir).await.unwrap());
+        let mut layered =
+            LayeredSkillRegistry::new(SkillRegistry::from_dir(global_dir).await.unwrap());
         layered.register_scoped_registry(
             "tenant:dingtalk:corp-1",
             SkillRegistry::from_dir(tenant_dir).await.unwrap(),
@@ -782,7 +797,8 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             "user"
         );
         assert_eq!(
-            layered.get_entry_by_source("echo", "role", Some("role:org-1:manager"))
+            layered
+                .get_entry_by_source("echo", "role", Some("role:org-1:manager"))
                 .unwrap()
                 .skill
                 .execute("ignored")

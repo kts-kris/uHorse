@@ -561,7 +561,10 @@ mod tests {
         .normalized();
 
         assert!(access_context.tenant.is_none());
-        assert_eq!(access_context.enterprise.as_deref(), Some("enterprise:org-1"));
+        assert_eq!(
+            access_context.enterprise.as_deref(),
+            Some("enterprise:org-1")
+        );
         assert_eq!(
             access_context.roles,
             vec![

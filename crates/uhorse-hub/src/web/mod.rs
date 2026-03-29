@@ -157,7 +157,11 @@ impl LayeredAgentCatalog {
         }
     }
 
-    fn register_scoped_catalog(&mut self, scope: impl Into<String>, agents: HashMap<String, Agent>) {
+    fn register_scoped_catalog(
+        &mut self,
+        scope: impl Into<String>,
+        agents: HashMap<String, Agent>,
+    ) {
         let scope = scope.into();
         if agents.is_empty() {
             self.scoped.remove(&scope);
@@ -199,7 +203,11 @@ impl LayeredAgentCatalog {
             _ => source_scope.and_then(|scope| {
                 (scope_layer_from_scope(scope) == source_layer)
                     .then_some(scope)
-                    .and_then(|scope| self.scoped.get(scope).and_then(|catalog| catalog.get(agent_id)))
+                    .and_then(|scope| {
+                        self.scoped
+                            .get(scope)
+                            .and_then(|catalog| catalog.get(agent_id))
+                    })
                     .cloned()
                     .map(|agent| CatalogAgentEntry {
                         agent,
@@ -274,7 +282,9 @@ impl LayeredAgentCatalog {
             left.agent
                 .agent_id()
                 .cmp(right.agent.agent_id())
-                .then_with(|| scope_layer_rank(left.source_layer).cmp(&scope_layer_rank(right.source_layer)))
+                .then_with(|| {
+                    scope_layer_rank(left.source_layer).cmp(&scope_layer_rank(right.source_layer))
+                })
                 .then_with(|| {
                     left.source_scope
                         .as_deref()
@@ -291,7 +301,11 @@ impl LayeredAgentCatalog {
 
     fn get_any_entry(&self, agent_id: &str) -> Option<CatalogAgentEntry> {
         for scope in sorted_catalog_scopes_by_rank(&self.scoped) {
-            if let Some(agent) = self.scoped.get(&scope).and_then(|catalog| catalog.get(agent_id)) {
+            if let Some(agent) = self
+                .scoped
+                .get(&scope)
+                .and_then(|catalog| catalog.get(agent_id))
+            {
                 return Some(CatalogAgentEntry {
                     agent: agent.clone(),
                     source_layer: scope_layer_from_scope(&scope),
@@ -696,11 +710,27 @@ pub async fn init_default_agent_runtime(
         Ok(())
     }
 
-    load_scoped_runtime_dir(&base_dir, "tenants", &mut layered_skills, &mut layered_agents).await?;
-    load_scoped_runtime_dir(&base_dir, "enterprises", &mut layered_skills, &mut layered_agents)
-        .await?;
-    load_scoped_runtime_dir(&base_dir, "departments", &mut layered_skills, &mut layered_agents)
-        .await?;
+    load_scoped_runtime_dir(
+        &base_dir,
+        "tenants",
+        &mut layered_skills,
+        &mut layered_agents,
+    )
+    .await?;
+    load_scoped_runtime_dir(
+        &base_dir,
+        "enterprises",
+        &mut layered_skills,
+        &mut layered_agents,
+    )
+    .await?;
+    load_scoped_runtime_dir(
+        &base_dir,
+        "departments",
+        &mut layered_skills,
+        &mut layered_agents,
+    )
+    .await?;
     load_scoped_runtime_dir(&base_dir, "roles", &mut layered_skills, &mut layered_agents).await?;
     load_scoped_runtime_dir(&base_dir, "users", &mut layered_skills, &mut layered_agents).await?;
 
@@ -761,7 +791,7 @@ fn access_context_from_metadata(metadata: &HashMap<String, String>) -> Option<Ac
         || access_context.enterprise.is_some()
         || access_context.department.is_some()
         || !access_context.roles.is_empty())
-        .then_some(access_context)
+    .then_some(access_context)
 }
 
 fn session_namespace_from_session_key(
@@ -887,18 +917,18 @@ fn write_collaboration_workspace_runtime_metadata(
     collaboration_workspace_id: &str,
     namespace: Option<&SessionNamespace>,
 ) {
-    let scope_owner =
-        collaboration_scope_owner_from_metadata_or_default(collaboration_workspace_id, namespace, metadata);
+    let scope_owner = collaboration_scope_owner_from_metadata_or_default(
+        collaboration_workspace_id,
+        namespace,
+        metadata,
+    );
     let materialization = collaboration_materialization_from_metadata(metadata);
     metadata.insert(
         "collaboration_workspace_id".to_string(),
         collaboration_workspace_id.to_string(),
     );
     metadata.insert("collaboration_scope_owner".to_string(), scope_owner);
-    metadata.insert(
-        "collaboration_materialization".to_string(),
-        materialization,
-    );
+    metadata.insert("collaboration_materialization".to_string(), materialization);
 }
 
 fn resolve_collaboration_workspace(
@@ -966,7 +996,9 @@ fn populate_task_context_runtime_metadata(
 ) {
     let namespace = source_metadata
         .and_then(|metadata| {
-            session_key.and_then(|session_key| session_namespace_from_metadata(Some(session_key), metadata))
+            session_key.and_then(|session_key| {
+                session_namespace_from_metadata(Some(session_key), metadata)
+            })
         })
         .or_else(|| task_context_namespace(session_key, context));
     if let Some(namespace) = namespace.as_ref() {
@@ -983,8 +1015,9 @@ fn populate_task_context_runtime_metadata(
         .collaboration_workspace_id
         .clone()
         .or_else(|| {
-            source_metadata
-                .and_then(|metadata| collaboration_workspace_id_from_metadata(metadata, session_key))
+            source_metadata.and_then(|metadata| {
+                collaboration_workspace_id_from_metadata(metadata, session_key)
+            })
         })
         .or_else(|| collaboration_workspace_id_from_metadata(&context.env, session_key));
     if let Some(collaboration_workspace_id) = collaboration_workspace_id {
@@ -1007,8 +1040,11 @@ fn collaboration_workspace_from_parts(
     let visible_scope_chain = namespace
         .map(SessionNamespace::visibility_chain)
         .unwrap_or_default();
-    let scope_owner =
-        collaboration_scope_owner_from_metadata_or_default(&collaboration_workspace_id, namespace, metadata);
+    let scope_owner = collaboration_scope_owner_from_metadata_or_default(
+        &collaboration_workspace_id,
+        namespace,
+        metadata,
+    );
     let mut members = Vec::new();
     if let Some(sender_user_id) = metadata.get("sender_user_id") {
         members.push(sender_user_id.clone());
@@ -1082,7 +1118,10 @@ fn task_context_namespace(
     }
 
     let mut metadata = context.env.clone();
-    metadata.insert("session_id".to_string(), context.session_id.as_str().to_string());
+    metadata.insert(
+        "session_id".to_string(),
+        context.session_id.as_str().to_string(),
+    );
     session_namespace_from_metadata(None, &metadata)
 }
 
@@ -1293,7 +1332,9 @@ async fn collect_agent_planning_context(
     ));
 
     if let Some(collaboration_workspace) = collaboration_workspace {
-        sections.push(render_collaboration_workspace_context(&collaboration_workspace));
+        sections.push(render_collaboration_workspace_context(
+            &collaboration_workspace,
+        ));
     }
 
     if let Some(scope) = resolve_agent_entry_for_session(state, session_key, Some(agent_id))
@@ -1701,7 +1742,8 @@ async fn execute_local_skill(
     input: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let session_state = load_session_state_for_session(state, session_key).await;
-    let visibility_chain = session_namespace_for_session(session_key, session_state.as_ref()).visibility_chain();
+    let visibility_chain =
+        session_namespace_for_session(session_key, session_state.as_ref()).visibility_chain();
     let skill = state
         .agent_runtime
         .skills
@@ -2249,7 +2291,9 @@ pub async fn submit_dingtalk_task(
             populate_task_context_runtime_metadata(
                 &mut task_context,
                 Some(&session_key),
-                session_state.as_ref().map(|session_state| &session_state.metadata),
+                session_state
+                    .as_ref()
+                    .map(|session_state| &session_state.metadata),
             );
 
             if let Some(entry) =
@@ -3366,12 +3410,18 @@ struct IssueNodeTokenResponse {
 }
 
 /// 列出任务
-fn task_info_from_status_and_context(status: crate::task_scheduler::TaskStatusInfo, context: Option<TaskContext>) -> TaskInfo {
+fn task_info_from_status_and_context(
+    status: crate::task_scheduler::TaskStatusInfo,
+    context: Option<TaskContext>,
+) -> TaskInfo {
     let mut metadata = context
         .as_ref()
         .map(|context| context.env.clone())
         .unwrap_or_default();
-    if let Some(session_id) = context.as_ref().map(|context| context.session_id.as_str().to_string()) {
+    if let Some(session_id) = context
+        .as_ref()
+        .map(|context| context.session_id.as_str().to_string())
+    {
         metadata.insert("session_id".to_string(), session_id);
     }
     if let Some(execution_workspace_id) = context
@@ -4697,7 +4747,10 @@ mod tests {
 
         let namespace = session_namespace_from_metadata(Some(&session_key), &metadata).unwrap();
         assert_eq!(namespace.enterprise.as_deref(), Some("enterprise:org-1"));
-        assert_eq!(namespace.department.as_deref(), Some("department:org-1:sales"));
+        assert_eq!(
+            namespace.department.as_deref(),
+            Some("department:org-1:sales")
+        );
         assert_eq!(namespace.roles, vec!["role:org-1:manager".to_string()]);
         assert_eq!(
             namespace.visibility_chain(),
@@ -5219,7 +5272,10 @@ mod tests {
         )
         .with_env("agent_id", "helper")
         .with_env("namespace_enterprise", enterprise_scope)
-        .with_env("namespace_roles", serde_json::to_string(&vec![role_scope]).unwrap());
+        .with_env(
+            "namespace_roles",
+            serde_json::to_string(&vec![role_scope]).unwrap(),
+        );
 
         let entry = task_context_agent_entry(&state, Some(&session_key), &context).unwrap();
         assert_eq!(entry.source_layer, "role");
@@ -5290,14 +5346,20 @@ mod tests {
             .join("workspace")
             .join("enterprises")
             .join(enterprise_scope);
-        let role_root = runtime_root.join("roles").join(role_scope).join("workspace-helper");
+        let role_root = runtime_root
+            .join("roles")
+            .join(role_scope)
+            .join("workspace-helper");
         tokio::fs::create_dir_all(&enterprise_memory_root)
             .await
             .unwrap();
         tokio::fs::create_dir_all(&role_root).await.unwrap();
-        tokio::fs::write(enterprise_memory_root.join("MEMORY.md"), "enterprise memory")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            enterprise_memory_root.join("MEMORY.md"),
+            "enterprise memory",
+        )
+        .await
+        .unwrap();
         tokio::fs::write(role_root.join("AGENTS.md"), "role instructions")
             .await
             .unwrap();
@@ -5323,14 +5385,12 @@ mod tests {
         session_state
             .metadata
             .insert("current_agent".to_string(), "helper".to_string());
-        session_state.metadata.insert(
-            "agent_source_layer".to_string(),
-            "role".to_string(),
-        );
-        session_state.metadata.insert(
-            "agent_source_scope".to_string(),
-            role_scope.to_string(),
-        );
+        session_state
+            .metadata
+            .insert("agent_source_layer".to_string(), "role".to_string());
+        session_state
+            .metadata
+            .insert("agent_source_scope".to_string(), role_scope.to_string());
         session_state.metadata.insert(
             "namespace_enterprise".to_string(),
             enterprise_scope.to_string(),
@@ -5347,7 +5407,10 @@ mod tests {
         let context = collect_agent_planning_context(&state, "helper", &session_key).await;
         assert!(context.contains("enterprise memory"));
         assert!(context.contains("role instructions"));
-        assert!(context.contains("enterprise: org-1") || context.contains("enterprise: enterprise:org-1"));
+        assert!(
+            context.contains("enterprise: org-1")
+                || context.contains("enterprise: enterprise:org-1")
+        );
         assert!(context.contains(role_scope));
     }
 
@@ -5469,11 +5532,17 @@ mod tests {
             Some("collab:session:dingtalk:actual-user:corp-1")
         );
         assert_eq!(
-            context.env.get("collaboration_workspace_id").map(String::as_str),
+            context
+                .env
+                .get("collaboration_workspace_id")
+                .map(String::as_str),
             Some("collab:session:dingtalk:actual-user:corp-1")
         );
         assert_eq!(
-            context.env.get("collaboration_scope_owner").map(String::as_str),
+            context
+                .env
+                .get("collaboration_scope_owner")
+                .map(String::as_str),
             Some("session:dingtalk:actual-user:corp-1")
         );
         assert_eq!(
@@ -6870,15 +6939,24 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
                     Some(collaboration_workspace_id)
                 );
                 assert_eq!(
-                    context.env.get("execution_workspace_id").map(String::as_str),
+                    context
+                        .env
+                        .get("execution_workspace_id")
+                        .map(String::as_str),
                     Some(execution_workspace_id.as_str())
                 );
                 assert_eq!(
-                    context.env.get("collaboration_workspace_id").map(String::as_str),
+                    context
+                        .env
+                        .get("collaboration_workspace_id")
+                        .map(String::as_str),
                     Some(collaboration_workspace_id)
                 );
                 assert_eq!(
-                    context.env.get("collaboration_scope_owner").map(String::as_str),
+                    context
+                        .env
+                        .get("collaboration_scope_owner")
+                        .map(String::as_str),
                     Some("session:api:api-user")
                 );
                 assert_eq!(

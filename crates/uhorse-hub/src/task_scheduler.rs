@@ -338,8 +338,14 @@ impl TaskScheduler {
                                 user_id: task_ref.context.user_id.clone(),
                                 session_id: task_ref.context.session_id.clone(),
                                 channel: task_ref.context.channel.clone(),
-                                execution_workspace_id: task_ref.context.execution_workspace_id.clone(),
-                                collaboration_workspace_id: task_ref.context.collaboration_workspace_id.clone(),
+                                execution_workspace_id: task_ref
+                                    .context
+                                    .execution_workspace_id
+                                    .clone(),
+                                collaboration_workspace_id: task_ref
+                                    .context
+                                    .collaboration_workspace_id
+                                    .clone(),
                                 intent: task_ref.context.intent.clone(),
                                 env: task_ref.context.env.clone(),
                                 created_at: task_ref.context.created_at,

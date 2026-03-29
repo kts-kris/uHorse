@@ -199,12 +199,17 @@ async fn test_execution_workspace_id_routes_task_to_bound_node() {
         .unwrap()
         .unwrap();
     match assigned {
-        uhorse_protocol::HubToNode::TaskAssignment { task_id: assigned_task_id, .. } => {
+        uhorse_protocol::HubToNode::TaskAssignment {
+            task_id: assigned_task_id,
+            ..
+        } => {
             assert_eq!(assigned_task_id, task_id);
         }
         other => panic!("unexpected message: {:?}", other),
     }
-    assert!(timeout(Duration::from_millis(200), node_a_rx.recv()).await.is_err());
+    assert!(timeout(Duration::from_millis(200), node_a_rx.recv())
+        .await
+        .is_err());
 }
 
 /// 测试文件命令
@@ -799,14 +804,28 @@ async fn test_local_hub_node_roundtrip_file_write() {
     assert!(result.result.success);
     match &result.result.output {
         CommandOutput::Json { content } => {
-            assert_eq!(content.get("kind").and_then(|value| value.as_str()), Some("file_operation"));
-            assert_eq!(content.get("action").and_then(|value| value.as_str()), Some("write"));
             assert_eq!(
-                content.get("path").and_then(|value| value.as_str()),
-                Some(target_file.canonicalize().unwrap().to_string_lossy().as_ref())
+                content.get("kind").and_then(|value| value.as_str()),
+                Some("file_operation")
             );
             assert_eq!(
-                content.get("bytes_written").and_then(|value| value.as_u64()),
+                content.get("action").and_then(|value| value.as_str()),
+                Some("write")
+            );
+            assert_eq!(
+                content.get("path").and_then(|value| value.as_str()),
+                Some(
+                    target_file
+                        .canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .as_ref()
+                )
+            );
+            assert_eq!(
+                content
+                    .get("bytes_written")
+                    .and_then(|value| value.as_u64()),
                 Some(file_content.len() as u64)
             );
         }

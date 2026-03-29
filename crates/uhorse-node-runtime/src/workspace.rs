@@ -524,7 +524,10 @@ mod tests {
         let workspace = Workspace::new(temp.path()).unwrap();
         let resolved = workspace.resolve_path("../outside.txt").unwrap();
 
-        assert_eq!(resolved, workspace.root().parent().unwrap().join("outside.txt"));
+        assert_eq!(
+            resolved,
+            workspace.root().parent().unwrap().join("outside.txt")
+        );
         assert!(!workspace.contains("../outside.txt"));
         assert!(!workspace.can_access("../outside.txt", true).unwrap());
     }
