@@ -1169,8 +1169,8 @@ prefix = "/openclaw"  # 兼容 API 前缀
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
+git clone https://github.com/kts-kris/uHorse
+cd uHorse
 
 # 2. 构建项目
 cargo build --release
@@ -1188,7 +1188,7 @@ curl http://localhost:8765/api/health
 ### B. 参考链接
 
 - [官方文档](https://docs.uhorse.ai)
-- [GitHub 仓库](https://github.com/uhorse/uhorse-rs)
+- [GitHub 仓库](https://github.com/kts-kris/uHorse)
 - [API 文档](https://api.uhorse.ai/docs)
 - [社区论坛](https://community.uhorse.ai)
 

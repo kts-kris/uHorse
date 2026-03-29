@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.3] - 2026-03-29
+
+### Changed
+
+- the official repository entry points and package metadata are now aligned to the real public repository `https://github.com/kts-kris/uHorse`
+- the release baseline has now been rerun and confirmed with `cargo test --workspace`, `./scripts/package-node-desktop.sh`, `./scripts/desktop-smoke.sh`, and `cargo build --release -p uhorse-hub -p uhorse-node-desktop`
+- the formal release fact for the current HEAD is now closed as `v4.1.3`, avoiding drift between the already published `v4.1.2` tag and the follow-up documentation / metadata corrections
+
 ## [4.1.2] - 2026-03-29
 
 ### Changed
@@ -255,7 +263,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.2...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.3...HEAD
+[4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3
 [4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1
 [4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0

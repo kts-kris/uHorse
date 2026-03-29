@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.3] - 2026-03-29
+
+### Changed
+
+- 正式发布前的仓库入口与包元数据已统一指向当前真实仓库 `https://github.com/kts-kris/uHorse`
+- 补跑并确认 `cargo test --workspace`、`./scripts/package-node-desktop.sh`、`./scripts/desktop-smoke.sh` 与 `cargo build --release -p uhorse-hub -p uhorse-node-desktop` 发布基线通过
+- 基于当前 HEAD 的正式发布事实已收口为 `v4.1.3`，避免已发布 `v4.1.2` tag 与后续修正文档/元数据脱节
+
 ## [4.1.2] - 2026-03-29
 
 ### Changed
@@ -255,7 +263,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.2...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.3...HEAD
+[4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3
 [4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1
 [4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0

@@ -575,7 +575,7 @@ google,workspace,productivity
 - [Amantus Machina](https://amantus.com)
 
 ### uHorse
-- [GitHub Repository](https://github.com/uhorse/uhorse-rs)
+- [GitHub Repository](https://github.com/kts-kris/uHorse)
 - [文档](https://docs.uhorse.dev)
 
 ### 相关协议

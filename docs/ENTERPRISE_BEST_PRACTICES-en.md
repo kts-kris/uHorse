@@ -925,8 +925,8 @@ Start Selection
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
+git clone https://github.com/kts-kris/uHorse
+cd uHorse
 
 # 2. Build project
 cargo build --release
@@ -944,7 +944,7 @@ curl http://localhost:8765/api/health
 ### B. Reference Links
 
 - [Official Documentation](https://docs.uhorse.ai)
-- [GitHub Repository](https://github.com/uhorse/uhorse-rs)
+- [GitHub Repository](https://github.com/kts-kris/uHorse)
 - [API Documentation](https://api.uhorse.ai/docs)
 - [Community Forum](https://community.uhorse.ai)
 

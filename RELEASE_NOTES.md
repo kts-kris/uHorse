@@ -1,41 +1,36 @@
-## uHorse 4.1.2 发布
+## uHorse 4.1.3 发布
 
 **发布日期**：2026-03-29
 
 ### 本次发布重点
 
-`v4.1.2` 的目标不是扩展新的产品线，而是把当前已经完成的 Hub-Node 主线、DingTalk 浏览器链路与 Node Desktop 交付边界正式收口为一版可发布的主线版本。
+`v4.1.3` 是基于 `v4.1.2` 的正式发布收口补丁版本，不扩展新的产品线，目标是把当前 HEAD 上已经完成的仓库入口修正、包元数据对齐、验证基线结果与正式 Release 事实重新统一起来。
 
-### 主要新增
-
-- DingTalk 自然语言请求现在可以在受控场景下规划为 `BrowserCommand`
-- Hub 会对浏览器目标执行本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标
-- `uhorse-node-runtime` 已接入正式浏览器执行路径
-- `uhorse-node-desktop` 默认启用 `browser` feature，并通过 `CommandType::Browser` 参与能力路由
-- GitHub release / nightly workflow 现在为 `uhorse-hub` 与 `uhorse-node-desktop` 生成主流平台 archive 产物
-- `channels.dingtalk.notification_bindings` 已纳入当前主线说明，用于将稳定 `node_id` 绑定到 DingTalk `user_id`
+功能面延续 `v4.1.2` 的当前 Hub-Node 主线、DingTalk 浏览器链路与 Node Desktop 交付边界；`v4.1.3` 新增的重点是**发布事实对齐**，而不是新的主线能力扩展。
 
 ### 主要变更
 
-- Node Desktop 当前正式交付边界已固定为 `bin + web` archive
-- README / INSTALL / CHANNELS / scripts / release 文档已统一到 `v4.1.2` 口径
-- 每日构建与正式发布链路已统一使用 `Cargo.toml` 版本与 `CHANGELOG.md` 版本段作为发布事实源
-- `memory / agent / skill` 的 4.1 叙事已升级为 `global / tenant / enterprise / department / role / user / session` 分层共享链
-- 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`
-- runtime API 与 Web UI 已通过 `source_layer`、`source_scope` 暴露来源感知信息，`/api/v1/sessions*` 也可返回 `namespace`、`memory_context_chain`、`visibility_chain` 与 `collaboration_workspace`
+- README / INSTALL / CONTRIBUTING / 部署与附属文档中的官方仓库入口已统一指向当前真实仓库 `https://github.com/kts-kris/uHorse`
+- `Cargo.toml` 的 `repository` 包元数据已与当前 GitHub 仓库一致
+- 已补跑并确认以下正式发布验证基线通过：
+  - `cargo test --workspace`
+  - `./scripts/package-node-desktop.sh`
+  - `./scripts/desktop-smoke.sh`
+  - `cargo build --release -p uhorse-hub -p uhorse-node-desktop`
+- 当前 HEAD 的正式发布事实已收口为 `v4.1.3`，避免已发布 `v4.1.2` tag 与后续仓库入口 / 元数据修正脱节
 
-### 主交付物
+### 当前主交付物
 
-本次发布的主交付物是：
+本次发布的主交付物仍然是：
 
 - `uhorse-hub`
 - `uhorse-node-desktop`
 
-其中 `uhorse-node-desktop` 继续以 `bin + web` archive 形式发布，面向主流平台提供 `.tar.gz` 或 `.zip` 包。
+其中 `uhorse-node-desktop` 继续以 `bin + web` archive 形式发布；GitHub Release / nightly 继续提供多平台 archive 产物。
 
 ### 不包含内容
 
-`v4.1.2` 明确 **不包含**：
+`v4.1.3` 明确 **不包含**：
 
 - 原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
 - 旧时代 `agent / skill / memory` 独立平台的全面回归
@@ -43,7 +38,7 @@
 
 ### 验证基线
 
-发布前已完成并建议持续复核的验证基线包括：
+本次发布前已完成并确认通过的基线包括：
 
 ```bash
 cargo test --workspace

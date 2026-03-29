@@ -6,7 +6,7 @@
 
 ### 报告 Bug
 
-如果你发现了 bug，请通过 [GitHub Issues](https://github.com/uhorse/uhorse-rs/issues) 提交报告。提交前请：
+如果你发现了 bug，请通过 [GitHub Issues](https://github.com/kts-kris/uHorse/issues) 提交报告。提交前请：
 
 1. 搜索现有的 issues，确认没有重复
 2. 使用 Bug Report 模板
@@ -23,8 +23,8 @@
 #### 1. Fork 并克隆仓库
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/uhorse-rs
-cd uhorse-rs
+git clone https://github.com/YOUR_USERNAME/uHorse
+cd uHorse
 ```
 
 #### 2. 创建分支

@@ -240,8 +240,8 @@ project_key = "PROJ"
 
 [integration.github]
 api_token = "ghp_xxx"
-default_owner = "uhorse"
-default_repo = "uhorse-rs"
+default_owner = "kts-kris"
+default_repo = "uHorse"
 
 [integration.slack]
 bot_token = "xoxb-xxx"

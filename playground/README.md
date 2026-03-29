@@ -106,5 +106,5 @@ playground/
 ## 🔗 相关链接
 
 - [完整文档](https://uhorse.ai/docs)
-- [GitHub](https://github.com/uhorse/uhorse-rs)
-- [问题反馈](https://github.com/uhorse/uhorse-rs/issues)
+- [GitHub](https://github.com/kts-kris/uHorse)
+- [问题反馈](https://github.com/kts-kris/uHorse/issues)

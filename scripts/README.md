@@ -1,6 +1,6 @@
 # uHorse 主线脚本说明
 
-本目录脚本围绕 **当前 `v4.1.2` Hub + Node 主线** 组织，不再默认验证旧单体 `uhorse`、旧 `/health/live`、旧 `/health/ready`。
+本目录脚本围绕 **当前 `v4.1.3` Hub + Node 主线** 组织，不再默认验证旧单体 `uhorse`、旧 `/health/live`、旧 `/health/ready`。
 
 ## 可用脚本
 
@@ -65,7 +65,7 @@
 
 打包 Node Desktop 宿主与前端静态资源。
 
-这是当前 `v4.1.2` Node Desktop 交付链路里的正式打包入口，交付形态是 `bin + web` archive，而不是原生 `.app/.dmg`、签名、公证或安装器：
+这是当前 `v4.1.3` Node Desktop 交付链路里的正式打包入口，交付形态是 `bin + web` archive，而不是原生 `.app/.dmg`、签名、公证或安装器：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -84,7 +84,7 @@
 
 运行 Node Desktop 宿主 API + 静态资源 smoke。
 
-这是当前 `v4.1.2` Node Desktop 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
+这是当前 `v4.1.3` Node Desktop 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
 
 ```bash
 ./scripts/desktop-smoke.sh

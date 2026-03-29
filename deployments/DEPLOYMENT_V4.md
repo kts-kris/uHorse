@@ -71,8 +71,8 @@
 ## 1. 编译二进制
 
 ```bash
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
+git clone https://github.com/kts-kris/uHorse
+cd uHorse
 cargo build --release -p uhorse-hub -p uhorse-node
 ```
 

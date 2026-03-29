@@ -1,6 +1,6 @@
 # uHorse Channel Guide
 
-This document only describes the **channel path that is actually wired into the current `v4.1.2` mainline runtime**.
+This document only describes the **channel path that is actually wired into the current `v4.1.3` mainline runtime**.
 
 The most important and recommended path today is:
 
@@ -109,7 +109,7 @@ So DingTalk messages do not stop at the channel layer. They first go through LLM
 
 ## Source-aware runtime
 
-Under the current `v4.1.2` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
+Under the current `v4.1.3` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
 
 The goal is not to turn DingTalk into a management surface for `memory / agent / skill`, but to let the runtime distinguish where a resource came from and what sharing or isolation boundary it should follow.
 

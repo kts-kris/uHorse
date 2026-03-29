@@ -1,6 +1,6 @@
 # uHorse API 使用指南
 
-本文档只描述 **当前仓库已经实现并用于 v4.1.2 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
+本文档只描述 **当前仓库已经实现并用于 v4.1.3 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
 
 ## 目录
 
@@ -75,7 +75,7 @@
 ```json
 {
   "status": "healthy",
-  "version": "4.1.2"
+  "version": "4.1.3"
 }
 ```
 
@@ -96,7 +96,7 @@ curl http://127.0.0.1:8765/api/health
 ```json
 {
   "status": "healthy",
-  "version": "4.1.2"
+  "version": "4.1.3"
 }
 ```
 
@@ -351,7 +351,7 @@ curl http://127.0.0.1:8765/api/tasks/task-0
 - 当前实现已经保证 `command_type` 与 `priority` 返回**真实任务元数据**，不再写死为默认值。
 - `command_type` 来自调度器里的真实命令类型，例如 `file`、`shell`。
 - `execution_workspace_id` 表示真实执行工作空间标识；`collaboration_workspace` 是 Hub 侧逻辑协作工作空间视图，不等于 Node 实际目录。
-- `collaboration_workspace.materialization` 当前固定为 `none`，表示 v4.1.2 只维护逻辑协作层，不在 Hub 侧物化真实目录。
+- `collaboration_workspace.materialization` 当前固定为 `none`，表示 v4.1.3 只维护逻辑协作层，不在 Hub 侧物化真实目录。
 
 ### 3. 取消任务：`POST /api/tasks/:task_id/cancel`
 

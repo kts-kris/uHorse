@@ -1,6 +1,6 @@
 # uHorse 安装指南
 
-本文档只描述 **当前仓库主线 `v4.1.2` Hub-Node 架构** 的真实安装路径。
+本文档只描述 **当前仓库主线 `v4.1.3` Hub-Node 架构** 的真实安装路径。
 
 当前最推荐、也最贴近已验证代码路径的安装方式是：
 
@@ -54,8 +54,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
+git clone https://github.com/kts-kris/uHorse
+cd uHorse
 ```
 
 ### 2. 编译主线二进制
@@ -108,7 +108,7 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 
 如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本。
 
-`v4.1.2` 当前已经固定的交付边界是：**`bin + web` archive、`desktop-smoke.sh`、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive 与 smoke 验证，但**不包含**原生 `.app/.dmg`、签名、公证、安装器。
+`v4.1.3` 当前已经固定的交付边界是：**`bin + web` archive、`desktop-smoke.sh`、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive 与 smoke 验证，但**不包含**原生 `.app/.dmg`、签名、公证、安装器。
 
 可以直接使用仓库内置脚本：
 
@@ -192,9 +192,9 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
 - 一个文件存在性命令 roundtrip
 - 一个真实写文件 roundtrip（包含落盘与 structured file_operation 返回）
 
-### 5. 验证 Node Desktop `v4.1.2` archive 边界
+### 5. 验证 Node Desktop `v4.1.3` archive 边界
 
-如果你正在验收 `v4.1.2` 的 Node Desktop 交付件，请额外执行：
+如果你正在验收 `v4.1.3` 的 Node Desktop 交付件，请额外执行：
 
 ```bash
 ./scripts/package-node-desktop.sh

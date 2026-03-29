@@ -9,7 +9,7 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>v4.1.2 Hub-Node mainline release</strong>
+  <strong>v4.1.3 Hub-Node mainline release</strong>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.1.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.1.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-released-green" alt="Status">
@@ -35,7 +35,7 @@
 
 ## Overview
 
-The current public release line is **v4.1.2 Hub-Node mainline**.
+The current public release line is **v4.1.3 Hub-Node mainline**.
 
 Core components and primary deliverables:
 
@@ -45,7 +45,7 @@ Core components and primary deliverables:
 - `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
 - `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
-The `v4.1.2` capabilities already visible and validated in the repository include:
+The `v4.1.3` capabilities already visible and validated in the repository include:
 
 - DingTalk natural-language requests can enter the Hub → Node pipeline and, in controlled cases, be planned into a `BrowserCommand`.
 - Hub locally validates browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets.
@@ -55,7 +55,7 @@ The `v4.1.2` capabilities already visible and validated in the repository includ
 - the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
 - Node Desktop is delivered as a `bin/ + web/` archive together with `desktop-smoke.sh` and GitHub release / nightly artifacts, not as native `.app/.dmg`, code signing, notarization, or installers.
 
-These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.1.2` as a return to the old monolithic Agent platform.
+These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.1.3` as a return to the old monolithic Agent platform.
 
 ## Current Status
 
@@ -82,8 +82,8 @@ These docs are aligned to what is **actually implemented and exercised in the re
 ### 1. Build the mainline binaries
 
 ```bash
-git clone https://github.com/uhorse/uhorse-rs
-cd uhorse-rs
+git clone https://github.com/kts-kris/uHorse
+cd uHorse
 cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 ```
 
@@ -264,7 +264,7 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 
 | Document | Description |
 |----------|-------------|
-| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.1.2` release facts, documentation sync notes, and explicit non-goals |
+| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.1.3` release facts, documentation sync notes, and explicit non-goals |
 | [INSTALL-en.md](INSTALL-en.md) | current Hub-Node install path plus the Node Desktop archive / smoke boundary |
 | [API-en.md](API-en.md) | current implemented Hub-Node API surface |
 | [LOCAL_SETUP.md](LOCAL_SETUP.md) | local dual-process setup, JWT bootstrap, approval, and reconnect regression |
@@ -272,7 +272,7 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 | [CHANNELS-en.md](CHANNELS-en.md) | current channel status, DingTalk Stream, browser planning path, and notification mirroring |
 | [scripts/README.md](scripts/README.md) | mainline scripts, including Node Desktop package / smoke and CI / release aligned usage |
 | [TESTING.md](TESTING.md) | package tests, workspace tests, and manual regression order |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.1.2` release notes |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.1.3` release notes |
 | [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4 Hub-Node deployment guide |
 | [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4 architecture details |
 
