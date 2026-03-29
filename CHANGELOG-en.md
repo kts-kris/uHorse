@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-03-29
+
+### Changed
+
+- README / INSTALL / CHANNELS / scripts / release docs are now aligned to `v4.1.2` and match the current Hub-Node, DingTalk, and Node Desktop implementation
+- the layered `memory / agent / skill` sharing docs are now aligned to the implemented chain `global / tenant / enterprise / department / role / user / session`
+- task context, runtime session, and Web API docs are now aligned to the current `execution_workspace_id`, `collaboration_workspace_id`, `CollaborationWorkspace`, and `/api/v1/sessions*` response shape
+
 ## [4.1.1] - 2026-03-27
 
 ### Added
@@ -247,7 +255,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.1...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.2...HEAD
+[4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1
 [4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/kts-kris/uHorse/compare/v2.0.0...v3.0.0

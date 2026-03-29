@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.2] - 2026-03-29
+
+### Changed
+
+- README / INSTALL / CHANNELS / scripts / release 说明已统一升级到 `v4.1.2` 口径，并与当前 Hub-Node、DingTalk、Node Desktop 实现保持一致
+- `memory / agent / skill` 的分层共享链文档已与当前实现对齐为 `global / tenant / enterprise / department / role / user / session`
+- 任务上下文、运行时 session 与 Web API 文档已对齐当前 `execution_workspace_id`、`collaboration_workspace_id`、`CollaborationWorkspace` 与 `/api/v1/sessions*` 返回结构
+
 ## [4.1.1] - 2026-03-27
 
 ### Added
@@ -247,7 +255,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.1...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.2...HEAD
+[4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1
 [4.0.0]: https://github.com/kts-kris/uHorse/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/kts-kris/uHorse/compare/v2.0.0...v3.0.0

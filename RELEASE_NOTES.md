@@ -1,10 +1,10 @@
-## uHorse 4.1.1 发布
+## uHorse 4.1.2 发布
 
-**发布日期**：2026-03-27
+**发布日期**：2026-03-29
 
 ### 本次发布重点
 
-`v4.1.1` 的目标不是扩展新的产品线，而是把当前已经完成的 Hub-Node 主线、DingTalk 浏览器链路与 Node Desktop 交付边界正式收口为一版可发布的主线版本。
+`v4.1.2` 的目标不是扩展新的产品线，而是把当前已经完成的 Hub-Node 主线、DingTalk 浏览器链路与 Node Desktop 交付边界正式收口为一版可发布的主线版本。
 
 ### 主要新增
 
@@ -18,7 +18,7 @@
 ### 主要变更
 
 - Node Desktop 当前正式交付边界已固定为 `bin + web` archive
-- README / INSTALL / CHANNELS / scripts / release 文档已统一到 `v4.1.1` 口径
+- README / INSTALL / CHANNELS / scripts / release 文档已统一到 `v4.1.2` 口径
 - 每日构建与正式发布链路已统一使用 `Cargo.toml` 版本与 `CHANGELOG.md` 版本段作为发布事实源
 - `memory / agent / skill` 的 4.1 叙事已升级为 `global / tenant / enterprise / department / role / user / session` 分层共享链
 - 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`
@@ -35,7 +35,7 @@
 
 ### 不包含内容
 
-`v4.1.1` 明确 **不包含**：
+`v4.1.2` 明确 **不包含**：
 
 - 原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
 - 旧时代 `agent / skill / memory` 独立平台的全面回归

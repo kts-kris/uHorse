@@ -1,6 +1,6 @@
 # uHorse API Reference
 
-This document only covers the APIs that are **actually implemented and used by the current v4.1.1 Hub-Node mainline**. Examples assume the Hub is reachable at `http://127.0.0.1:8765`.
+This document only covers the APIs that are **actually implemented and used by the current v4.1.2 Hub-Node mainline**. Examples assume the Hub is reachable at `http://127.0.0.1:8765`.
 
 ## Table of Contents
 
@@ -75,7 +75,7 @@ The health endpoint returns plain JSON instead of `ApiResponse<T>`:
 ```json
 {
   "status": "healthy",
-  "version": "4.1.1"
+  "version": "4.1.2"
 }
 ```
 
@@ -96,7 +96,7 @@ Successful response:
 ```json
 {
   "status": "healthy",
-  "version": "4.1.1"
+  "version": "4.1.2"
 }
 ```
 
@@ -351,7 +351,7 @@ Notes:
 - The current implementation now returns the **real** `command_type` and `priority` from scheduler state instead of hard-coded defaults.
 - `command_type` comes from the actual queued/running/completed task metadata, such as `file` or `shell`.
 - `execution_workspace_id` is the real execution workspace identity, while `collaboration_workspace` is the Hub-side logical collaboration view and not the Node's actual directory.
-- `collaboration_workspace.materialization` is currently fixed to `none`, which means v4.1.1 only keeps a logical collaboration layer and does not materialize real directories on the Hub side.
+- `collaboration_workspace.materialization` is currently fixed to `none`, which means v4.1.2 only keeps a logical collaboration layer and does not materialize real directories on the Hub side.
 
 ### 3. Cancel a task: `POST /api/tasks/:task_id/cancel`
 

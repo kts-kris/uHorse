@@ -1,6 +1,6 @@
 # uHorse Installation Guide
 
-This document only describes the **current `v4.1.1` Hub-Node mainline** installation path that matches the repository as it exists today.
+This document only describes the **current `v4.1.2` Hub-Node mainline** installation path that matches the repository as it exists today.
 
 The recommended path is:
 
@@ -108,7 +108,7 @@ Terminal 2:
 
 If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script.
 
-The fixed `v4.1.1` delivery boundary is: **`bin + web` archive delivery, `desktop-smoke.sh`, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging and smoke validation, but it does **not** include native `.app/.dmg`, code signing, notarization, or installers.
+The fixed `v4.1.2` delivery boundary is: **`bin + web` archive delivery, `desktop-smoke.sh`, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging and smoke validation, but it does **not** include native `.app/.dmg`, code signing, notarization, or installers.
 
 Use the built-in packaging script:
 
@@ -192,9 +192,9 @@ These tests start real:
 - a file existence roundtrip task
 - a real file write roundtrip, including on-disk persistence and structured `file_operation` output
 
-### 5. Verify the Node Desktop `v4.1.1` archive boundary
+### 5. Verify the Node Desktop `v4.1.2` archive boundary
 
-If you are validating the `v4.1.1` Node Desktop deliverable, also run:
+If you are validating the `v4.1.2` Node Desktop deliverable, also run:
 
 ```bash
 ./scripts/package-node-desktop.sh
