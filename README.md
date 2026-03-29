@@ -50,7 +50,8 @@ uHorse 当前对外发布口径是 **v4.1.1 Hub-Node 主线**。
 - DingTalk 自然语言请求可进入 Hub → Node 链路，并在受控场景下规划为 `BrowserCommand`。
 - Hub 已对浏览器目标执行本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标。
 - Node Desktop 与 runtime 已支持浏览器能力路由，浏览器任务会优先调度到声明 `CommandType::Browser` 的节点；对于“打开网页”这类 DingTalk 指令，主线契约会规划为 `BrowserCommand::OpenSystem`，以宿主机系统浏览器语义执行。
-- `memory / agent / skill` 支持 `global / tenant / user` 分层共享与隔离。
+- `memory / agent / skill` 已支持 `global / tenant / enterprise / department / role / user / session` 分层共享链；`memory_context_chain` 从共享读到私有，`visibility_chain` 从私有回退到共享。
+- 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`；前者决定真实执行边界，后者仅承载协作上下文与默认绑定。
 - runtime API 与 Web UI 已支持 `source_layer`、`source_scope` 的来源感知展示与按来源详情查询。
 - Node Desktop 当前交付边界是 `bin/ + web/` archive、`desktop-smoke.sh` 与 GitHub release / nightly artifacts，而不是原生 `.app/.dmg`、签名、公证、安装器。
 
@@ -67,7 +68,8 @@ uHorse 当前对外发布口径是 **v4.1.1 Hub-Node 主线**。
 | Node → Hub 结果回传 | ✅ | Node 回传完整 `NodeToHub::TaskResult` |
 | 审批闭环 | ✅ | `ApprovalRequest -> /api/approvals -> ApprovalResponse -> TaskResult` |
 | Hub 重启后 Node 重连 | ✅ | Node 具备自动重连与重新注册能力 |
-| 多用户 `memory / agent / skill` 分层作用域 | ✅ | 当前 runtime 已按 `global / tenant / user` 组织共享与隔离边界 |
+| 多用户 `memory / agent / skill` 分层作用域 | ✅ | 当前 runtime 已按 `global / tenant / enterprise / department / role / user / session` 组织共享与隔离边界 |
+| 运行时 session / 协作工作空间 API | ✅ | `/api/v1/sessions*` 已返回 `namespace`、`memory_context_chain`、`visibility_chain` 与 `collaboration_workspace` |
 | source-aware runtime / UI | ✅ | Skills、Settings 等页面已展示 `source_layer`、`source_scope`，同名多来源资源可区分 |
 | Node Desktop 打包与 smoke | ✅ | 当前交付为 `bin + web` archive，CI / release / nightly 均产出对应 artifact，不包含 `.app/.dmg` |
 | 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 与 `test_local_hub_node_roundtrip_file_write` 已覆盖真实 Hub + Node + WebSocket 闭环 |

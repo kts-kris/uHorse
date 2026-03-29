@@ -14,7 +14,7 @@
 //! ```
 
 use crate::error::AgentResult;
-use crate::session_key::SessionKey;
+use crate::session_key::{scope_layer_from_scope, SessionKey, SessionNamespace};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use uhorse_core::SessionId;
@@ -127,7 +127,7 @@ impl FileMemory {
 /// 推导 `global / tenant / user / session` 四层视图：
 /// - `store_message` 继续写入 session history；
 /// - `store_kv` 默认写入 user scope；
-/// - `get_context` 按 `global -> tenant -> user -> session` 聚合。
+/// - `get_context` 按 namespace 的共享链聚合。
 #[derive(Clone)]
 pub struct LayeredMemoryStore {
     workspace_dir: PathBuf,
@@ -148,25 +148,75 @@ impl LayeredMemoryStore {
         FileMemory::new(self.workspace_dir.clone())
     }
 
-    fn tenant_memory(&self, tenant_scope: &str) -> FileMemory {
-        FileMemory::new(self.workspace_dir.join("tenants").join(tenant_scope))
+    fn scoped_memory(&self, scope: &str) -> FileMemory {
+        match scope_layer_from_scope(scope) {
+            "tenant" => FileMemory::new(self.workspace_dir.join("tenants").join(scope)),
+            "enterprise" => FileMemory::new(self.workspace_dir.join("enterprises").join(scope)),
+            "department" => FileMemory::new(self.workspace_dir.join("departments").join(scope)),
+            "role" => FileMemory::new(self.workspace_dir.join("roles").join(scope)),
+            "user" => FileMemory::new(self.workspace_dir.join("users").join(scope)),
+            _ => self.global_memory(),
+        }
     }
 
-    fn user_memory(&self, user_scope: &str) -> FileMemory {
-        FileMemory::new(self.workspace_dir.join("users").join(user_scope))
-    }
-
-    fn namespace_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Option<crate::session_key::SessionNamespace> {
+    fn namespace_for_session(&self, session_id: &SessionId) -> Option<SessionNamespace> {
         SessionKey::parse(session_id.as_str())
             .ok()
             .map(|session_key| session_key.namespace())
     }
 
+    /// 使用显式 namespace 获取上下文。
+    pub async fn get_context_for_namespace(
+        &self,
+        session_id: &SessionId,
+        namespace: &SessionNamespace,
+    ) -> AgentResult<String> {
+        let mut sections = Vec::new();
+        for scope in namespace.memory_context_chain() {
+            let memory = if scope == namespace.global {
+                Self::read_scope_memory(&self.global_memory()).await
+            } else if scope == namespace.session {
+                String::new()
+            } else {
+                Self::read_scope_memory(&self.scoped_memory(&scope)).await
+            };
+            if !memory.is_empty() {
+                sections.push(format!(
+                    "=== {} Memory ===\n{}",
+                    Self::named_scope_label(&scope),
+                    memory
+                ));
+            }
+        }
+
+        let session_history = Self::read_session_history(&self.global_memory(), session_id).await;
+        if !session_history.is_empty() {
+            sections.push(format!("=== Session History ===\n{}", session_history));
+        }
+
+        Ok(sections.join("\n\n"))
+    }
+
     fn scope_session_id(scope: &str) -> SessionId {
         SessionId::from_string(scope.to_string())
+    }
+
+    fn named_scope_label(scope: &str) -> String {
+        match scope_layer_from_scope(scope) {
+            "global" => "Global".to_string(),
+            "tenant" => "Tenant".to_string(),
+            "enterprise" => "Enterprise".to_string(),
+            "department" => "Department".to_string(),
+            "role" => "Role".to_string(),
+            "user" => "User".to_string(),
+            other => {
+                let mut chars = other.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => "Scope".to_string(),
+                }
+            }
+        }
     }
 
     async fn read_scope_memory(store: &FileMemory) -> String {
@@ -203,30 +253,7 @@ impl MemoryStore for LayeredMemoryStore {
             return self.global_memory().get_context(session_id).await;
         };
 
-        let mut sections = Vec::new();
-        let global_memory = Self::read_scope_memory(&self.global_memory()).await;
-        if !global_memory.is_empty() {
-            sections.push(format!("=== Global Memory ===\n{}", global_memory));
-        }
-
-        if let Some(tenant_scope) = namespace.tenant.as_deref() {
-            let tenant_memory = Self::read_scope_memory(&self.tenant_memory(tenant_scope)).await;
-            if !tenant_memory.is_empty() {
-                sections.push(format!("=== Tenant Memory ===\n{}", tenant_memory));
-            }
-        }
-
-        let user_memory = Self::read_scope_memory(&self.user_memory(&namespace.user)).await;
-        if !user_memory.is_empty() {
-            sections.push(format!("=== User Memory ===\n{}", user_memory));
-        }
-
-        let session_history = Self::read_session_history(&self.global_memory(), session_id).await;
-        if !session_history.is_empty() {
-            sections.push(format!("=== Session History ===\n{}", session_history));
-        }
-
-        Ok(sections.join("\n\n"))
+        self.get_context_for_namespace(session_id, &namespace).await
     }
 
     async fn store_kv(&self, session_id: &SessionId, key: &str, value: &str) -> AgentResult<()> {
@@ -234,7 +261,7 @@ impl MemoryStore for LayeredMemoryStore {
             return self.global_memory().store_kv(session_id, key, value).await;
         };
 
-        self.user_memory(&namespace.user)
+        self.scoped_memory(&namespace.user)
             .store_kv(&Self::scope_session_id(&namespace.user), key, value)
             .await
     }
@@ -244,30 +271,22 @@ impl MemoryStore for LayeredMemoryStore {
             return self.global_memory().get_kv(session_id, key).await;
         };
 
-        if let Some(value) = self
-            .user_memory(&namespace.user)
-            .get_kv(&Self::scope_session_id(&namespace.user), key)
-            .await?
-        {
-            return Ok(Some(value));
-        }
-
-        if let Some(tenant_scope) = namespace.tenant.as_deref() {
-            if let Some(value) = self
-                .tenant_memory(tenant_scope)
-                .get_kv(&Self::scope_session_id(tenant_scope), key)
+        for scope in namespace.visibility_chain() {
+            if scope == namespace.global {
+                if let Some(value) = self
+                    .global_memory()
+                    .get_kv(&Self::scope_session_id(&scope), key)
+                    .await?
+                {
+                    return Ok(Some(value));
+                }
+            } else if let Some(value) = self
+                .scoped_memory(&scope)
+                .get_kv(&Self::scope_session_id(&scope), key)
                 .await?
             {
                 return Ok(Some(value));
             }
-        }
-
-        if let Some(value) = self
-            .global_memory()
-            .get_kv(&Self::scope_session_id(&namespace.global), key)
-            .await?
-        {
-            return Ok(Some(value));
         }
 
         self.global_memory().get_kv(session_id, key).await
@@ -508,6 +527,58 @@ mod tests {
         assert!(context.contains("user facts"));
         assert!(context.contains("=== Session History ==="));
         assert!(context.contains("**User:** hello"));
+    }
+
+    #[tokio::test]
+    async fn test_layered_memory_get_context_for_expanded_namespace() {
+        let memory = create_layered_memory();
+        memory.init_workspace().await.unwrap();
+
+        tokio::fs::write(memory.workspace_dir.join("MEMORY.md"), "global facts")
+            .await
+            .unwrap();
+        for (dir, scope, content) in [
+            ("tenants", "tenant:dingtalk:corp-1", "tenant facts"),
+            ("enterprises", "enterprise:org-1", "enterprise facts"),
+            ("departments", "department:org-1:sales", "department facts"),
+            ("roles", "role:org-1:manager", "role facts"),
+            ("users", "user:dingtalk:user-1", "user facts"),
+        ] {
+            let scope_dir = memory.workspace_dir.join(dir).join(scope);
+            tokio::fs::create_dir_all(&scope_dir).await.unwrap();
+            tokio::fs::write(scope_dir.join("MEMORY.md"), content)
+                .await
+                .unwrap();
+        }
+
+        let session_id = SessionId::from_string("dingtalk:user-1:corp-1".to_string());
+        memory
+            .store_message(&session_id, "hello", "world")
+            .await
+            .unwrap();
+
+        let namespace = SessionKey::with_team("dingtalk", "user-1", "corp-1")
+            .namespace_with_access_context(Some(&crate::session_key::AccessContext {
+                tenant: None,
+                enterprise: Some("enterprise:org-1".to_string()),
+                department: Some("department:org-1:sales".to_string()),
+                roles: vec!["role:org-1:manager".to_string()],
+            }));
+        let context = memory
+            .get_context_for_namespace(&session_id, &namespace)
+            .await
+            .unwrap();
+
+        assert!(context.contains("=== Tenant Memory ==="));
+        assert!(context.contains("tenant facts"));
+        assert!(context.contains("=== Enterprise Memory ==="));
+        assert!(context.contains("enterprise facts"));
+        assert!(context.contains("=== Department Memory ==="));
+        assert!(context.contains("department facts"));
+        assert!(context.contains("=== Role Memory ==="));
+        assert!(context.contains("role facts"));
+        assert!(context.contains("=== User Memory ==="));
+        assert!(context.contains("user facts"));
     }
 
     #[tokio::test]

@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The formal Node Desktop delivery boundary is now fixed as a `bin + web` archive together with `package-node-desktop.sh`, `desktop-smoke.sh`, and release artifacts
 - README / INSTALL / CHANNELS / scripts / release docs are now aligned to `v4.1.1` and match the current Hub-Node, DingTalk, and Node Desktop implementation
 - Daily build and formal release flows now use the `Cargo.toml` version and the `CHANGELOG.md` version section as the release source of truth
-- the 4.1 `memory / agent / skill` narrative is explicitly documented as layered sharing and isolation across `global / tenant / user` scopes, not as a return to the old monolithic Agent platform
-- the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished
+- the 4.1 `memory / agent / skill` narrative is now aligned to the layered chain `global / tenant / enterprise / department / role / user / session`, not to a return of the old monolithic Agent platform
+- task context and runtime sessions now explicitly distinguish the stable `execution_workspace_id` from the Hub-side logical `collaboration_workspace_id` / `CollaborationWorkspace`
+- the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished; `/api/v1/sessions*` also return `namespace`, `memory_context_chain`, `visibility_chain`, and `collaboration_workspace`
 
 ### Not Included
 

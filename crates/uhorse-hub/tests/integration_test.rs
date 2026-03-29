@@ -18,6 +18,7 @@ use uhorse_protocol::{
 /// 创建测试用的工作空间信息
 fn create_test_workspace(name: &str, path: &str) -> WorkspaceInfo {
     WorkspaceInfo {
+        workspace_id: None,
         name: name.to_string(),
         path: path.to_string(),
         read_only: false,
@@ -81,6 +82,10 @@ async fn test_node_registration() {
     let nodes = hub.get_online_nodes().await;
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].node_id, node_id);
+    assert_eq!(
+        nodes[0].workspace.workspace_id.as_deref(),
+        Some("exec:test-node-1:test-workspace")
+    );
 }
 
 /// 测试任务提交
@@ -130,6 +135,76 @@ async fn test_task_submission() {
 
     // 验证任务已创建
     assert!(!task_id.as_str().is_empty());
+}
+
+/// 测试执行工作空间标识优先于 workspace_hint
+#[tokio::test]
+async fn test_execution_workspace_id_routes_task_to_bound_node() {
+    let config = HubConfig {
+        hub_id: "test-hub".to_string(),
+        ..Default::default()
+    };
+
+    let (hub, _rx) = Hub::new(config);
+
+    let node_a_id = NodeId::from_string("node-a");
+    let node_b_id = NodeId::from_string("node-b");
+    let workspace_path = "/tmp/shared-workspace";
+
+    let (node_a_tx, mut node_a_rx) = tokio::sync::mpsc::channel(8);
+    hub.message_router()
+        .register_node_sender(node_a_id.clone(), node_a_tx)
+        .await;
+    hub.handle_node_connection(
+        node_a_id.clone(),
+        "Node A".to_string(),
+        NodeCapabilities::default(),
+        create_test_workspace("workspace-a", workspace_path),
+        vec![],
+    )
+    .await
+    .unwrap();
+    let (node_b_tx, mut node_b_rx) = tokio::sync::mpsc::channel(8);
+    hub.message_router()
+        .register_node_sender(node_b_id.clone(), node_b_tx)
+        .await;
+    hub.handle_node_connection(
+        node_b_id.clone(),
+        "Node B".to_string(),
+        NodeCapabilities::default(),
+        create_test_workspace("workspace-b", workspace_path),
+        vec![],
+    )
+    .await
+    .unwrap();
+
+    let context = create_test_context("test-user", "test-session")
+        .with_execution_workspace_id("exec:node-b:workspace-b");
+    let task_id = hub
+        .submit_task(
+            Command::File(FileCommand::Exists {
+                path: "/tmp/test.txt".to_string(),
+            }),
+            context,
+            Priority::Normal,
+            None,
+            vec![],
+            Some(workspace_path.to_string()),
+        )
+        .await
+        .unwrap();
+
+    let assigned = timeout(Duration::from_secs(2), node_b_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match assigned {
+        uhorse_protocol::HubToNode::TaskAssignment { task_id: assigned_task_id, .. } => {
+            assert_eq!(assigned_task_id, task_id);
+        }
+        other => panic!("unexpected message: {:?}", other),
+    }
+    assert!(timeout(Duration::from_millis(200), node_a_rx.recv()).await.is_err());
 }
 
 /// 测试文件命令

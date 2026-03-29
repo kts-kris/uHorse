@@ -292,6 +292,11 @@ impl Hub {
         self.task_scheduler.get_task_status(task_id).await
     }
 
+    /// 获取任务上下文
+    pub async fn get_task_context(&self, task_id: &TaskId) -> Option<TaskContext> {
+        self.task_scheduler.get_task_context(task_id).await
+    }
+
     /// 获取已完成任务详情
     pub async fn get_completed_task(&self, task_id: &TaskId) -> Option<CompletedTask> {
         self.task_scheduler.get_completed_task(task_id).await
@@ -392,6 +397,7 @@ mod tests {
             "Test Node".to_string(),
             NodeCapabilities::default(),
             WorkspaceInfo {
+                workspace_id: None,
                 name: "workspace".to_string(),
                 path: "/tmp/workspace".to_string(),
                 read_only: false,

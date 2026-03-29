@@ -37,16 +37,61 @@ pub struct SessionKey {
     pub team_id: Option<String>,
 }
 
+/// 访问上下文。
+///
+/// 在不改变 `SessionKey` 字符串格式的前提下，为 session 补充企业级共享链所需的
+/// `tenant / enterprise / department / role` 作用域信息。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessContext {
+    /// 可选租户作用域键。
+    #[serde(default)]
+    pub tenant: Option<String>,
+    /// 可选企业作用域键。
+    #[serde(default)]
+    pub enterprise: Option<String>,
+    /// 可选部门作用域键。
+    #[serde(default)]
+    pub department: Option<String>,
+    /// 可选角色作用域键集合。
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+impl AccessContext {
+    /// 创建空访问上下文。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 返回规范化后的访问上下文。
+    pub fn normalized(mut self) -> Self {
+        self.tenant = normalize_optional_scope(self.tenant);
+        self.enterprise = normalize_optional_scope(self.enterprise);
+        self.department = normalize_optional_scope(self.department);
+        self.roles = normalize_role_scopes(self.roles);
+        self
+    }
+}
+
 /// 会话运行时命名空间。
 ///
 /// 在不改变 `SessionKey` 字符串格式的前提下，提供统一的
-/// `global / tenant / user / session` 四层作用域键。
+/// `global / tenant / enterprise / department / role / user / session` 作用域键。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionNamespace {
     /// 全局共享作用域键。
     pub global: String,
     /// 租户共享作用域键。
     pub tenant: Option<String>,
+    /// 企业共享作用域键。
+    #[serde(default)]
+    pub enterprise: Option<String>,
+    /// 部门共享作用域键。
+    #[serde(default)]
+    pub department: Option<String>,
+    /// 角色共享作用域键。
+    #[serde(default)]
+    pub roles: Vec<String>,
     /// 用户私有作用域键。
     pub user: String,
     /// 会话私有作用域键。
@@ -54,12 +99,47 @@ pub struct SessionNamespace {
 }
 
 impl SessionNamespace {
+    /// 根据 SessionKey 生成基础命名空间。
+    pub fn from_session_key(session_key: &SessionKey) -> Self {
+        Self {
+            global: "global".to_string(),
+            tenant: session_key.tenant_key(),
+            enterprise: None,
+            department: None,
+            roles: Vec::new(),
+            user: format!("user:{}", session_key.user_key()),
+            session: format!("session:{}", session_key.as_str()),
+        }
+    }
+
+    /// 使用访问上下文补充企业级作用域信息。
+    pub fn with_access_context(mut self, access_context: Option<&AccessContext>) -> Self {
+        let Some(access_context) = access_context.cloned().map(AccessContext::normalized) else {
+            return self;
+        };
+
+        if self.tenant.is_none() {
+            self.tenant = access_context.tenant;
+        }
+        self.enterprise = access_context.enterprise;
+        self.department = access_context.department;
+        self.roles = access_context.roles;
+        self
+    }
+
     /// 返回 memory 上下文从共享到私有的读取顺序。
     pub fn memory_context_chain(&self) -> Vec<String> {
         let mut scopes = vec![self.global.clone()];
         if let Some(tenant) = &self.tenant {
             scopes.push(tenant.clone());
         }
+        if let Some(enterprise) = &self.enterprise {
+            scopes.push(enterprise.clone());
+        }
+        if let Some(department) = &self.department {
+            scopes.push(department.clone());
+        }
+        scopes.extend(self.roles.iter().cloned());
         scopes.push(self.user.clone());
         scopes.push(self.session.clone());
         scopes
@@ -68,11 +148,73 @@ impl SessionNamespace {
     /// 返回 agent / skill 从私有到共享的解析顺序。
     pub fn visibility_chain(&self) -> Vec<String> {
         let mut scopes = vec![self.user.clone()];
+        scopes.extend(self.roles.iter().cloned());
+        if let Some(department) = &self.department {
+            scopes.push(department.clone());
+        }
+        if let Some(enterprise) = &self.enterprise {
+            scopes.push(enterprise.clone());
+        }
         if let Some(tenant) = &self.tenant {
             scopes.push(tenant.clone());
         }
         scopes.push(self.global.clone());
         scopes
+    }
+}
+
+fn normalize_optional_scope(scope: Option<String>) -> Option<String> {
+    scope.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+fn normalize_role_scopes(roles: Vec<String>) -> Vec<String> {
+    let mut normalized = roles
+        .into_iter()
+        .filter_map(|role| {
+            let trimmed = role.trim().to_string();
+            (!trimmed.is_empty()).then_some(trimmed)
+        })
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+/// 根据作用域键推导层级名称。
+pub fn scope_layer_from_scope(scope: &str) -> &'static str {
+    if scope == "global" {
+        "global"
+    } else if scope.starts_with("session:") {
+        "session"
+    } else if scope.starts_with("user:") {
+        "user"
+    } else if scope.starts_with("role:") {
+        "role"
+    } else if scope.starts_with("department:") {
+        "department"
+    } else if scope.starts_with("enterprise:") {
+        "enterprise"
+    } else if scope.starts_with("tenant:") {
+        "tenant"
+    } else {
+        "scope"
+    }
+}
+
+/// 返回作用域层级的优先级，值越小优先级越高。
+pub fn scope_layer_rank(layer: &str) -> usize {
+    match layer {
+        "session" => 0,
+        "user" => 1,
+        "role" => 2,
+        "department" => 3,
+        "enterprise" => 4,
+        "tenant" => 5,
+        "global" => 6,
+        _ => 7,
     }
 }
 
@@ -158,12 +300,15 @@ impl SessionKey {
 
     /// 获取运行时命名空间。
     pub fn namespace(&self) -> SessionNamespace {
-        SessionNamespace {
-            global: "global".to_string(),
-            tenant: self.tenant_key(),
-            user: format!("user:{}", self.user_key()),
-            session: format!("session:{}", self.as_str()),
-        }
+        SessionNamespace::from_session_key(self)
+    }
+
+    /// 使用访问上下文生成运行时命名空间。
+    pub fn namespace_with_access_context(
+        &self,
+        access_context: Option<&AccessContext>,
+    ) -> SessionNamespace {
+        self.namespace().with_access_context(access_context)
     }
 }
 
@@ -287,6 +432,9 @@ mod tests {
 
         assert_eq!(namespace.global, "global");
         assert!(namespace.tenant.is_none());
+        assert!(namespace.enterprise.is_none());
+        assert!(namespace.department.is_none());
+        assert!(namespace.roles.is_empty());
         assert_eq!(namespace.user, "user:telegram:user123");
         assert_eq!(namespace.session, "session:telegram:user123");
         assert_eq!(
@@ -317,6 +465,9 @@ mod tests {
             namespace.tenant,
             Some("tenant:dingtalk:corp789".to_string())
         );
+        assert!(namespace.enterprise.is_none());
+        assert!(namespace.department.is_none());
+        assert!(namespace.roles.is_empty());
         assert_eq!(namespace.user, "user:dingtalk:user456");
         assert_eq!(namespace.session, "session:dingtalk:user456:corp789");
         assert_eq!(
@@ -334,6 +485,88 @@ mod tests {
                 "user:dingtalk:user456".to_string(),
                 "tenant:dingtalk:corp789".to_string(),
                 "global".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_session_namespace_with_access_context_extends_enterprise_chain() {
+        let key = SessionKey::with_team("dingtalk", "user456", "corp789");
+        let namespace = key.namespace_with_access_context(Some(&AccessContext {
+            tenant: Some("tenant:override:ignored".to_string()),
+            enterprise: Some("enterprise:org-1".to_string()),
+            department: Some("department:org-1:sales".to_string()),
+            roles: vec![
+                "role:org-1:approver".to_string(),
+                "role:org-1:manager".to_string(),
+            ],
+        }));
+
+        assert_eq!(
+            namespace.tenant,
+            Some("tenant:dingtalk:corp789".to_string())
+        );
+        assert_eq!(namespace.enterprise.as_deref(), Some("enterprise:org-1"));
+        assert_eq!(
+            namespace.department.as_deref(),
+            Some("department:org-1:sales")
+        );
+        assert_eq!(
+            namespace.roles,
+            vec![
+                "role:org-1:approver".to_string(),
+                "role:org-1:manager".to_string()
+            ]
+        );
+        assert_eq!(
+            namespace.memory_context_chain(),
+            vec![
+                "global".to_string(),
+                "tenant:dingtalk:corp789".to_string(),
+                "enterprise:org-1".to_string(),
+                "department:org-1:sales".to_string(),
+                "role:org-1:approver".to_string(),
+                "role:org-1:manager".to_string(),
+                "user:dingtalk:user456".to_string(),
+                "session:dingtalk:user456:corp789".to_string()
+            ]
+        );
+        assert_eq!(
+            namespace.visibility_chain(),
+            vec![
+                "user:dingtalk:user456".to_string(),
+                "role:org-1:approver".to_string(),
+                "role:org-1:manager".to_string(),
+                "department:org-1:sales".to_string(),
+                "enterprise:org-1".to_string(),
+                "tenant:dingtalk:corp789".to_string(),
+                "global".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_access_context_normalizes_roles_and_empty_values() {
+        let access_context = AccessContext {
+            tenant: Some(" ".to_string()),
+            enterprise: Some(" enterprise:org-1 ".to_string()),
+            department: Some("department:org-1:sales".to_string()),
+            roles: vec![
+                "role:org-1:manager".to_string(),
+                " ".to_string(),
+                "role:org-1:approver".to_string(),
+                "role:org-1:manager".to_string(),
+            ],
+        }
+        .normalized();
+
+        assert!(access_context.tenant.is_none());
+        assert_eq!(access_context.enterprise.as_deref(), Some("enterprise:org-1"));
+        assert_eq!(
+            access_context.roles,
+            vec![
+                "role:org-1:approver".to_string(),
+                "role:org-1:manager".to_string()
             ]
         );
     }

@@ -325,6 +325,10 @@ pub enum CommandType {
 /// 工作空间信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceInfo {
+    /// 稳定执行工作空间标识
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+
     /// 工作空间名称
     pub name: String,
 
@@ -457,6 +461,14 @@ pub struct TaskContext {
     /// 消息来源渠道
     pub channel: String,
 
+    /// 目标执行工作空间标识
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_workspace_id: Option<String>,
+
+    /// 逻辑协作工作空间标识
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_workspace_id: Option<String>,
+
     /// 用户意图描述
     pub intent: Option<String>,
 
@@ -474,10 +486,24 @@ impl TaskContext {
             user_id,
             session_id,
             channel: channel.into(),
+            execution_workspace_id: None,
+            collaboration_workspace_id: None,
             intent: None,
             env: HashMap::new(),
             created_at: Utc::now(),
         }
+    }
+
+    /// 设置执行工作空间标识
+    pub fn with_execution_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.execution_workspace_id = Some(workspace_id.into());
+        self
+    }
+
+    /// 设置协作工作空间标识
+    pub fn with_collaboration_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.collaboration_workspace_id = Some(workspace_id.into());
+        self
     }
 
     /// 设置意图

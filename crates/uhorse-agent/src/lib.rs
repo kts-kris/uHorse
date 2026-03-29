@@ -50,7 +50,10 @@ pub use error::{AgentError, AgentResult};
 pub use gateway::{Gateway, GatewayConfig, GatewayEvent};
 pub use memory::{FileMemory, LayeredMemoryStore, MemoryStore};
 pub use router::{Route, RouteTarget, Router};
-pub use session_key::{ChannelType, SessionKey, SessionNamespace};
+pub use session_key::{
+    scope_layer_from_scope, scope_layer_rank, AccessContext, ChannelType, SessionKey,
+    SessionNamespace,
+};
 pub use skill::{
     LayeredSkillEntry, LayeredSkillRegistry, Skill, SkillExecutor, SkillManifest, SkillRegistry,
 };

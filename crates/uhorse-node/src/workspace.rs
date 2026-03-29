@@ -353,6 +353,7 @@ impl Workspace {
     /// 转换为协议类型
     pub fn to_protocol(&self) -> uhorse_protocol::WorkspaceInfo {
         uhorse_protocol::WorkspaceInfo {
+            workspace_id: None,
             name: self.config.name.clone(),
             path: self.config.root_path.to_string_lossy().to_string(),
             read_only: self.config.read_only,

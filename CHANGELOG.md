@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node Desktop 当前正式交付边界已收口为 `bin + web` archive，配套 `package-node-desktop.sh`、`desktop-smoke.sh` 与 release artifacts
 - README / INSTALL / CHANNELS / scripts / release 说明已统一到 `v4.1.1` 口径，并与当前 Hub-Node、DingTalk、Node Desktop 实现保持一致
 - 每日构建与正式发布链路已统一使用 `Cargo.toml` 版本与 `CHANGELOG.md` 版本段作为发布事实源
-- `memory / agent / skill` 的 4.1 叙事已明确为 `global / tenant / user` 分层共享与隔离，而不是旧单体 Agent 平台回归
-- runtime API 与 Web UI 已以 `source_layer`、`source_scope` 暴露来源感知信息，便于区分同名多来源资源
+- `memory / agent / skill` 的 4.1 叙事已升级为 `global / tenant / enterprise / department / role / user / session` 分层共享链，而不是旧单体 Agent 平台回归
+- 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`
+- runtime API 与 Web UI 已以 `source_layer`、`source_scope` 暴露来源感知信息，便于区分同名多来源资源；`/api/v1/sessions*` 也已返回 `namespace`、`memory_context_chain`、`visibility_chain` 与 `collaboration_workspace`
 
 ### Not Included
 

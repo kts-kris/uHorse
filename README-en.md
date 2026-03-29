@@ -50,7 +50,8 @@ The `v4.1.1` capabilities already visible and validated in the repository includ
 - DingTalk natural-language requests can enter the Hub → Node pipeline and, in controlled cases, be planned into a `BrowserCommand`.
 - Hub locally validates browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets.
 - Node Desktop and the runtime support browser-capability routing, so browser tasks are dispatched to nodes that declare `CommandType::Browser`; for DingTalk requests such as “open a webpage”, the mainline contract now plans them as `BrowserCommand::OpenSystem` so they execute with host system browser semantics.
-- `memory / agent / skill` support layered sharing and isolation across `global / tenant / user` scopes.
+- `memory / agent / skill` now support the layered chain `global / tenant / enterprise / department / role / user / session`; `memory_context_chain` reads from shared to private, while `visibility_chain` resolves from private back to shared.
+- task context and runtime sessions now explicitly distinguish the stable `execution_workspace_id` from the Hub-side logical `collaboration_workspace_id` / `CollaborationWorkspace`; the former defines the real execution boundary, while the latter only carries collaboration context and default binding.
 - the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
 - Node Desktop is delivered as a `bin/ + web/` archive together with `desktop-smoke.sh` and GitHub release / nightly artifacts, not as native `.app/.dmg`, code signing, notarization, or installers.
 
@@ -67,7 +68,8 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Node → Hub result return | ✅ | Node sends full `NodeToHub::TaskResult` |
 | Approval loop | ✅ | `ApprovalRequest -> /api/approvals -> ApprovalResponse -> TaskResult` |
 | Node reconnect after Hub restart | ✅ | Node reconnects and re-registers automatically |
-| Layered `memory / agent / skill` scopes | ✅ | the runtime now organizes sharing and isolation across `global / tenant / user` scopes |
+| Layered `memory / agent / skill` scopes | ✅ | the runtime now organizes sharing and isolation across `global / tenant / enterprise / department / role / user / session` scopes |
+| Runtime session / collaboration workspace APIs | ✅ | `/api/v1/sessions*` now return `namespace`, `memory_context_chain`, `visibility_chain`, and `collaboration_workspace` |
 | Source-aware runtime / UI | ✅ | runtime pages such as Skills and Settings expose `source_layer` and `source_scope` so same-name multi-source resources can be distinguished |
 | Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive, and CI / release / nightly all publish matching artifacts; `.app/.dmg` is outside the current boundary |
 | Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` and `test_local_hub_node_roundtrip_file_write` cover real Hub + Node + WebSocket roundtrips |

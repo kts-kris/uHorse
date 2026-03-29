@@ -20,8 +20,9 @@
 - Node Desktop 当前正式交付边界已固定为 `bin + web` archive
 - README / INSTALL / CHANNELS / scripts / release 文档已统一到 `v4.1.1` 口径
 - 每日构建与正式发布链路已统一使用 `Cargo.toml` 版本与 `CHANGELOG.md` 版本段作为发布事实源
-- `memory / agent / skill` 的 4.1 叙事已明确为 `global / tenant / user` 分层共享与隔离
-- runtime API 与 Web UI 已通过 `source_layer`、`source_scope` 暴露来源感知信息
+- `memory / agent / skill` 的 4.1 叙事已升级为 `global / tenant / enterprise / department / role / user / session` 分层共享链
+- 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`
+- runtime API 与 Web UI 已通过 `source_layer`、`source_scope` 暴露来源感知信息，`/api/v1/sessions*` 也可返回 `namespace`、`memory_context_chain`、`visibility_chain` 与 `collaboration_workspace`
 
 ### 主交付物
 

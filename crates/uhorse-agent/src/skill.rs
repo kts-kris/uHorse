@@ -13,6 +13,7 @@
 //! ```
 
 use crate::error::{AgentError, AgentResult};
+use crate::session_key::{scope_layer_from_scope, scope_layer_rank};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -286,8 +287,7 @@ impl SkillRegistry {
 #[derive(Clone, Default)]
 pub struct LayeredSkillRegistry {
     global: SkillRegistry,
-    tenant: HashMap<String, SkillRegistry>,
-    user: HashMap<String, SkillRegistry>,
+    scoped: HashMap<String, SkillRegistry>,
 }
 
 /// 分层技能条目。
@@ -295,7 +295,7 @@ pub struct LayeredSkillRegistry {
 pub struct LayeredSkillEntry {
     /// 技能定义。
     pub skill: Skill,
-    /// 来源层级：`global`、`tenant`、`user`。
+    /// 来源层级：`global`、`tenant`、`enterprise`、`department`、`role`、`user`。
     pub source_layer: &'static str,
     /// 来源作用域。
     pub source_scope: Option<String>,
@@ -306,45 +306,43 @@ impl LayeredSkillRegistry {
     pub fn new(global: SkillRegistry) -> Self {
         Self {
             global,
-            tenant: HashMap::new(),
-            user: HashMap::new(),
+            scoped: HashMap::new(),
+        }
+    }
+
+    /// 注册指定作用域的技能表。
+    pub fn register_scoped_registry(&mut self, scope: impl Into<String>, registry: SkillRegistry) {
+        let scope = scope.into();
+        if registry.is_empty() {
+            self.scoped.remove(&scope);
+        } else {
+            self.scoped.insert(scope, registry);
         }
     }
 
     /// 注册 tenant 级技能表。
     pub fn register_tenant_registry(&mut self, scope: impl Into<String>, registry: SkillRegistry) {
-        self.tenant.insert(scope.into(), registry);
+        self.register_scoped_registry(scope, registry);
     }
 
     /// 注册 user 级技能表。
     pub fn register_user_registry(&mut self, scope: impl Into<String>, registry: SkillRegistry) {
-        self.user.insert(scope.into(), registry);
+        self.register_scoped_registry(scope, registry);
     }
 
-    /// 按 `user > tenant > global` 解析技能。
+    /// 按可见作用域链解析技能。
     pub fn get_for_scopes(&self, scopes: &[String], name: &str) -> Option<Skill> {
         self.get_for_scopes_entry(scopes, name)
             .map(|entry| entry.skill)
     }
 
-    /// 按 `user > tenant > global` 解析技能来源条目。
+    /// 按可见作用域链解析技能来源条目。
     pub fn get_for_scopes_entry(&self, scopes: &[String], name: &str) -> Option<LayeredSkillEntry> {
         for scope in scopes {
-            if let Some(skill) = self.user.get(scope).and_then(|registry| registry.get(name)) {
+            if let Some(skill) = self.scoped.get(scope).and_then(|registry| registry.get(name)) {
                 return Some(LayeredSkillEntry {
                     skill,
-                    source_layer: "user",
-                    source_scope: Some(scope.clone()),
-                });
-            }
-            if let Some(skill) = self
-                .tenant
-                .get(scope)
-                .and_then(|registry| registry.get(name))
-            {
-                return Some(LayeredSkillEntry {
-                    skill,
-                    source_layer: "tenant",
+                    source_layer: scope_layer_from_scope(scope),
                     source_scope: Some(scope.clone()),
                 });
             }
@@ -365,26 +363,6 @@ impl LayeredSkillRegistry {
         source_scope: Option<&str>,
     ) -> Option<LayeredSkillEntry> {
         match source_layer {
-            "user" => source_scope.and_then(|scope| {
-                self.user
-                    .get(scope)
-                    .and_then(|registry| registry.get(name))
-                    .map(|skill| LayeredSkillEntry {
-                        skill,
-                        source_layer: "user",
-                        source_scope: Some(scope.to_string()),
-                    })
-            }),
-            "tenant" => source_scope.and_then(|scope| {
-                self.tenant
-                    .get(scope)
-                    .and_then(|registry| registry.get(name))
-                    .map(|skill| LayeredSkillEntry {
-                        skill,
-                        source_layer: "tenant",
-                        source_scope: Some(scope.to_string()),
-                    })
-            }),
             "global" => {
                 if source_scope.is_some() {
                     None
@@ -396,18 +374,24 @@ impl LayeredSkillRegistry {
                     })
                 }
             }
-            _ => None,
+            _ => source_scope.and_then(|scope| {
+                (scope_layer_from_scope(scope) == source_layer)
+                    .then_some(scope)
+                    .and_then(|scope| self.scoped.get(scope).and_then(|registry| registry.get(name)))
+                    .map(|skill| LayeredSkillEntry {
+                        skill,
+                        source_layer: scope_layer_from_scope(scope),
+                        source_scope: Some(scope.to_string()),
+                    })
+            }),
         }
     }
 
-    /// 按 `user > tenant > global` 列出可见技能。
+    /// 按可见作用域链列出可见技能。
     pub fn list_names_for_scopes(&self, scopes: &[String]) -> Vec<String> {
         let mut names = self.global.list_names();
         for scope in scopes.iter().rev() {
-            if let Some(registry) = self.tenant.get(scope) {
-                names.extend(registry.list_names());
-            }
-            if let Some(registry) = self.user.get(scope) {
+            if let Some(registry) = self.scoped.get(scope) {
                 names.extend(registry.list_names());
             }
         }
@@ -425,10 +409,7 @@ impl LayeredSkillRegistry {
     /// 列出所有层级中的技能名称。
     pub fn list_all_names(&self) -> Vec<String> {
         let mut names = self.global.list_names();
-        for registry in self.tenant.values() {
-            names.extend(registry.list_names());
-        }
-        for registry in self.user.values() {
+        for registry in self.scoped.values() {
             names.extend(registry.list_names());
         }
         names.sort();
@@ -447,23 +428,13 @@ impl LayeredSkillRegistry {
                 source_scope: None,
             });
         }
-        for scope in sorted_skill_scopes(&self.tenant) {
-            if let Some(registry) = self.tenant.get(&scope) {
+        for scope in sorted_skill_scopes(&self.scoped) {
+            if let Some(registry) = self.scoped.get(&scope) {
+                let source_layer = scope_layer_from_scope(&scope);
                 for skill in registry.skills.values() {
                     entries.push(LayeredSkillEntry {
                         skill: skill.clone(),
-                        source_layer: "tenant",
-                        source_scope: Some(scope.clone()),
-                    });
-                }
-            }
-        }
-        for scope in sorted_skill_scopes(&self.user) {
-            if let Some(registry) = self.user.get(&scope) {
-                for skill in registry.skills.values() {
-                    entries.push(LayeredSkillEntry {
-                        skill: skill.clone(),
-                        source_layer: "user",
+                        source_layer,
                         source_scope: Some(scope.clone()),
                     });
                 }
@@ -474,7 +445,7 @@ impl LayeredSkillRegistry {
             left.skill
                 .name()
                 .cmp(right.skill.name())
-                .then_with(|| left.source_layer.cmp(right.source_layer))
+                .then_with(|| scope_layer_rank(left.source_layer).cmp(&scope_layer_rank(right.source_layer)))
                 .then_with(|| {
                     left.source_scope
                         .as_deref()
@@ -485,35 +456,18 @@ impl LayeredSkillRegistry {
         entries
     }
 
-    /// 返回任意层级中的技能定义，优先 user / tenant / global。
+    /// 返回任意层级中的技能定义，优先高优先级作用域 / global。
     pub fn get_any(&self, name: &str) -> Option<Skill> {
         self.get_any_entry(name).map(|entry| entry.skill)
     }
 
-    /// 返回任意层级中的技能来源条目，优先 user / tenant / global。
+    /// 返回任意层级中的技能来源条目，优先高优先级作用域 / global。
     pub fn get_any_entry(&self, name: &str) -> Option<LayeredSkillEntry> {
-        for scope in sorted_skill_scopes(&self.user) {
-            if let Some(skill) = self
-                .user
-                .get(&scope)
-                .and_then(|registry| registry.get(name))
-            {
+        for scope in sorted_skill_scopes_by_rank(&self.scoped) {
+            if let Some(skill) = self.scoped.get(&scope).and_then(|registry| registry.get(name)) {
                 return Some(LayeredSkillEntry {
                     skill,
-                    source_layer: "user",
-                    source_scope: Some(scope),
-                });
-            }
-        }
-        for scope in sorted_skill_scopes(&self.tenant) {
-            if let Some(skill) = self
-                .tenant
-                .get(&scope)
-                .and_then(|registry| registry.get(name))
-            {
-                return Some(LayeredSkillEntry {
-                    skill,
-                    source_layer: "tenant",
+                    source_layer: scope_layer_from_scope(&scope),
                     source_scope: Some(scope),
                 });
             }
@@ -529,6 +483,16 @@ impl LayeredSkillRegistry {
 fn sorted_skill_scopes<T>(catalog: &HashMap<String, T>) -> Vec<String> {
     let mut scopes = catalog.keys().cloned().collect::<Vec<_>>();
     scopes.sort();
+    scopes
+}
+
+fn sorted_skill_scopes_by_rank<T>(catalog: &HashMap<String, T>) -> Vec<String> {
+    let mut scopes = catalog.keys().cloned().collect::<Vec<_>>();
+    scopes.sort_by(|left, right| {
+        scope_layer_rank(scope_layer_from_scope(left))
+            .cmp(&scope_layer_rank(scope_layer_from_scope(right)))
+            .then_with(|| left.cmp(right))
+    });
     scopes
 }
 
@@ -683,32 +647,32 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(output, "hello");
     }
 
+    async fn write_skill(root: &std::path::Path, name: &str, command: &str) {
+        let skill_dir = root.join(name);
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        tokio::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!(
+                "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
+                name, name
+            ),
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            skill_dir.join("skill.toml"),
+            format!(
+                "enabled = true\ntimeout = 5\nexecutable = \"python3\"\nargs = [\"-c\", \"{}\"]\n",
+                command
+            ),
+        )
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn test_layered_skill_registry_resolves_user_before_tenant_before_global() {
         let tempdir = tempdir().unwrap();
-
-        async fn write_skill(root: &std::path::Path, name: &str, command: &str) {
-            let skill_dir = root.join(name);
-            tokio::fs::create_dir_all(&skill_dir).await.unwrap();
-            tokio::fs::write(
-                skill_dir.join("SKILL.md"),
-                format!(
-                    "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
-                    name, name
-                ),
-            )
-            .await
-            .unwrap();
-            tokio::fs::write(
-                skill_dir.join("skill.toml"),
-                format!(
-                    "enabled = true\ntimeout = 5\nexecutable = \"python3\"\nargs = [\"-c\", \"{}\"]\n",
-                    command
-                ),
-            )
-            .await
-            .unwrap();
-        }
 
         let global_dir = tempdir.path().join("global");
         let tenant_dir = tempdir.path().join("tenant");
@@ -747,5 +711,88 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             layered.list_names_for_scopes(&scopes),
             vec!["echo".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn test_layered_skill_registry_resolves_full_scope_precedence() {
+        let tempdir = tempdir().unwrap();
+
+        let global_dir = tempdir.path().join("global");
+        let tenant_dir = tempdir.path().join("tenant");
+        let enterprise_dir = tempdir.path().join("enterprise");
+        let department_dir = tempdir.path().join("department");
+        let role_dir = tempdir.path().join("role");
+        let user_dir = tempdir.path().join("user");
+        for dir in [
+            &global_dir,
+            &tenant_dir,
+            &enterprise_dir,
+            &department_dir,
+            &role_dir,
+            &user_dir,
+        ] {
+            tokio::fs::create_dir_all(dir).await.unwrap();
+        }
+
+        write_skill(&global_dir, "echo", "print('global')").await;
+        write_skill(&tenant_dir, "echo", "print('tenant')").await;
+        write_skill(&enterprise_dir, "echo", "print('enterprise')").await;
+        write_skill(&department_dir, "echo", "print('department')").await;
+        write_skill(&role_dir, "echo", "print('role')").await;
+        write_skill(&user_dir, "echo", "print('user')").await;
+
+        let mut layered = LayeredSkillRegistry::new(SkillRegistry::from_dir(global_dir).await.unwrap());
+        layered.register_scoped_registry(
+            "tenant:dingtalk:corp-1",
+            SkillRegistry::from_dir(tenant_dir).await.unwrap(),
+        );
+        layered.register_scoped_registry(
+            "enterprise:org-1",
+            SkillRegistry::from_dir(enterprise_dir).await.unwrap(),
+        );
+        layered.register_scoped_registry(
+            "department:org-1:sales",
+            SkillRegistry::from_dir(department_dir).await.unwrap(),
+        );
+        layered.register_scoped_registry(
+            "role:org-1:manager",
+            SkillRegistry::from_dir(role_dir).await.unwrap(),
+        );
+        layered.register_scoped_registry(
+            "user:dingtalk:user-1",
+            SkillRegistry::from_dir(user_dir).await.unwrap(),
+        );
+
+        let scopes = vec![
+            "user:dingtalk:user-1".to_string(),
+            "role:org-1:manager".to_string(),
+            "department:org-1:sales".to_string(),
+            "enterprise:org-1".to_string(),
+            "tenant:dingtalk:corp-1".to_string(),
+            "global".to_string(),
+        ];
+
+        assert_eq!(
+            layered
+                .get_for_scopes(&scopes, "echo")
+                .unwrap()
+                .execute("ignored")
+                .await
+                .unwrap(),
+            "user"
+        );
+        assert_eq!(
+            layered.get_entry_by_source("echo", "role", Some("role:org-1:manager"))
+                .unwrap()
+                .skill
+                .execute("ignored")
+                .await
+                .unwrap(),
+            "role"
+        );
+        assert!(layered
+            .get_entry_by_source("echo", "global", Some("tenant:dingtalk:corp-1"))
+            .is_none());
+        assert_eq!(layered.get_any_entry("echo").unwrap().source_layer, "user");
     }
 }

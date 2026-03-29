@@ -14,6 +14,7 @@ use uhorse_protocol::{
 /// 创建测试用的工作空间信息
 fn create_test_workspace(name: &str, path: &str) -> WorkspaceInfo {
     WorkspaceInfo {
+        workspace_id: None,
         name: name.to_string(),
         path: path.to_string(),
         read_only: false,

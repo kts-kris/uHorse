@@ -310,6 +310,7 @@ impl HubConnection {
             name: node_name.to_string(),
             capabilities: uhorse_protocol::NodeCapabilities::default(),
             workspace: uhorse_protocol::WorkspaceInfo {
+                workspace_id: None,
                 name: workspace_name,
                 path: workspace_path.to_string(),
                 read_only: false,

@@ -19,6 +19,7 @@ use uhorse_security::{ApprovalLevel, ApprovalManager, ApprovalStatus, Encryption
 /// 创建测试用的工作空间信息
 fn create_test_workspace(name: &str, path: &str) -> WorkspaceInfo {
     WorkspaceInfo {
+        workspace_id: None,
         name: name.to_string(),
         path: path.to_string(),
         read_only: false,
@@ -617,6 +618,7 @@ async fn test_sensitive_command_submission() {
 async fn test_workspace_access_control() {
     // 只读工作空间
     let readonly_workspace = WorkspaceInfo {
+        workspace_id: None,
         name: "readonly-workspace".to_string(),
         path: "/readonly".to_string(),
         read_only: true,
@@ -635,6 +637,7 @@ async fn test_workspace_access_control() {
 
     // 完全访问工作空间
     let full_workspace = WorkspaceInfo {
+        workspace_id: None,
         name: "full-workspace".to_string(),
         path: "/full".to_string(),
         read_only: false,

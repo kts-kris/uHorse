@@ -73,6 +73,8 @@ pub struct NodeManagerStats {
 pub struct NodeManager {
     /// 已注册的节点
     nodes: Arc<RwLock<HashMap<NodeId, NodeInfo>>>,
+    /// 执行工作空间到节点的映射
+    workspace_index: Arc<RwLock<HashMap<String, NodeId>>>,
     /// 心跳超时（秒）
     heartbeat_timeout_secs: u64,
     /// 最大节点数
@@ -139,11 +141,16 @@ pub(crate) fn workspace_matches_hint(workspace_path: &str, hint: &str) -> bool {
     workspace == hint || workspace.starts_with(&hint)
 }
 
+pub(crate) fn derive_workspace_id(node_id: &NodeId, workspace_name: &str) -> String {
+    format!("exec:{}:{}", node_id, workspace_name)
+}
+
 impl NodeManager {
     /// 创建新的节点管理器
     pub fn new(max_nodes: usize, heartbeat_timeout_secs: u64) -> Self {
         Self {
             nodes: Arc::new(RwLock::new(HashMap::new())),
+            workspace_index: Arc::new(RwLock::new(HashMap::new())),
             heartbeat_timeout_secs,
             max_nodes,
         }
@@ -155,13 +162,24 @@ impl NodeManager {
         node_id: NodeId,
         name: String,
         capabilities: NodeCapabilities,
-        workspace: WorkspaceInfo,
+        mut workspace: WorkspaceInfo,
         tags: Vec<String>,
     ) -> HubResult<()> {
         let mut nodes = self.nodes.write().await;
+        let mut workspace_index = self.workspace_index.write().await;
 
         if nodes.len() >= self.max_nodes && !nodes.contains_key(&node_id) {
             return Err(HubError::NodeLimitReached);
+        }
+
+        if workspace.workspace_id.is_none() {
+            workspace.workspace_id = Some(derive_workspace_id(&node_id, &workspace.name));
+        }
+
+        if let Some(previous) = nodes.get(&node_id) {
+            if let Some(previous_workspace_id) = previous.workspace.workspace_id.as_ref() {
+                workspace_index.remove(previous_workspace_id);
+            }
         }
 
         let now = Utc::now();
@@ -180,6 +198,10 @@ impl NodeManager {
             failed_tasks: 0,
         };
 
+        if let Some(workspace_id) = info.workspace.workspace_id.as_ref() {
+            workspace_index.insert(workspace_id.clone(), node_id.clone());
+        }
+
         nodes.insert(node_id.clone(), info);
         info!("Node registered: {}", node_id);
         Ok(())
@@ -188,8 +210,12 @@ impl NodeManager {
     /// 注销节点
     pub async fn unregister_node(&self, node_id: &NodeId) -> HubResult<()> {
         let mut nodes = self.nodes.write().await;
+        let mut workspace_index = self.workspace_index.write().await;
 
-        if nodes.remove(node_id).is_some() {
+        if let Some(node) = nodes.remove(node_id) {
+            if let Some(workspace_id) = node.workspace.workspace_id.as_ref() {
+                workspace_index.remove(workspace_id);
+            }
             info!("Node unregistered: {}", node_id);
             Ok(())
         } else {
@@ -242,6 +268,16 @@ impl NodeManager {
     pub async fn get_all_nodes(&self) -> Vec<NodeInfo> {
         let nodes = self.nodes.read().await;
         nodes.values().cloned().collect()
+    }
+
+    /// 根据执行工作空间标识获取节点
+    pub async fn get_node_by_workspace_id(&self, workspace_id: &str) -> Option<NodeInfo> {
+        let node_id = {
+            let workspace_index = self.workspace_index.read().await;
+            workspace_index.get(workspace_id).cloned()
+        }?;
+
+        self.get_node(&node_id).await
     }
 
     /// 选择最适合执行任务的节点

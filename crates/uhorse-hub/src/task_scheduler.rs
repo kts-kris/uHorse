@@ -269,9 +269,22 @@ impl TaskScheduler {
             };
 
             if let Some(task) = task {
-                let mut candidates = self.node_manager.get_online_nodes().await;
+                let execution_workspace_id = task.context.execution_workspace_id.clone();
+                let mut candidates = if let Some(workspace_id) = execution_workspace_id.as_deref() {
+                    self.node_manager
+                        .get_node_by_workspace_id(workspace_id)
+                        .await
+                        .into_iter()
+                        .collect()
+                } else {
+                    self.node_manager.get_online_nodes().await
+                };
                 candidates.retain(|node| {
                     if !senders.contains_key(&node.node_id) {
+                        return false;
+                    }
+
+                    if node.state != crate::node_manager::NodeState::Online {
                         return false;
                     }
 
@@ -287,7 +300,11 @@ impl TaskScheduler {
                         return false;
                     }
 
-                    if let Some(hint) = task.workspace_hint.as_deref() {
+                    if let Some(workspace_id) = execution_workspace_id.as_deref() {
+                        if node.workspace.workspace_id.as_deref() != Some(workspace_id) {
+                            return false;
+                        }
+                    } else if let Some(hint) = task.workspace_hint.as_deref() {
                         if !workspace_matches_hint(&node.workspace.path, hint) {
                             return false;
                         }
@@ -321,6 +338,8 @@ impl TaskScheduler {
                                 user_id: task_ref.context.user_id.clone(),
                                 session_id: task_ref.context.session_id.clone(),
                                 channel: task_ref.context.channel.clone(),
+                                execution_workspace_id: task_ref.context.execution_workspace_id.clone(),
+                                collaboration_workspace_id: task_ref.context.collaboration_workspace_id.clone(),
                                 intent: task_ref.context.intent.clone(),
                                 env: task_ref.context.env.clone(),
                                 created_at: task_ref.context.created_at,
@@ -579,6 +598,34 @@ impl TaskScheduler {
                         completed_at: None,
                         error: None,
                     });
+                }
+            }
+        }
+
+        None
+    }
+
+    /// 获取任务上下文
+    pub async fn get_task_context(&self, task_id: &TaskId) -> Option<TaskContext> {
+        {
+            let running_tasks = self.running_tasks.read().await;
+            if let Some(running) = running_tasks.get(task_id) {
+                return Some(running.context.clone());
+            }
+        }
+
+        {
+            let completed_tasks = self.completed_tasks.read().await;
+            if let Some(completed) = completed_tasks.get(task_id) {
+                return Some(completed.context.clone());
+            }
+        }
+
+        {
+            let pending = self.pending_tasks.read().await;
+            for queue in pending.values() {
+                if let Some(task) = queue.iter().find(|task| &task.task_id == task_id) {
+                    return Some(task.context.clone());
                 }
             }
         }
