@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>v4.1.3 Hub-Node 主线发布</strong>
+  <strong>基于 v4.1.3 的当前 Hub-Node 主线</strong>
 </p>
 
 <p align="center">
-  <em>Hub 负责调度与通道接入，Node 负责本地执行与结果回传；当前主交付物为 `uhorse-hub` 与 `uhorse-node-desktop`，文档同步覆盖 DingTalk 浏览器链路与 Node Desktop 打包边界。</em>
+  <em>Hub 负责调度与通道接入，Node 负责本地执行与结果回传；当前仓库 HEAD 以 `v4.1.3` 为正式发布基线，并包含后续主线收口，主交付物为 `uhorse-hub` 与 `uhorse-node-desktop`。</em>
 </p>
 
 <p align="center">

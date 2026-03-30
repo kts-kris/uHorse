@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>v4.1.3 Hub-Node mainline release</strong>
+  <strong>Current Hub-Node mainline on top of v4.1.3</strong>
 </p>
 
 <p align="center">
-  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the primary deliverables are now `uhorse-hub` and `uhorse-node-desktop`, and these docs cover the DingTalk browser pipeline plus the Node Desktop packaging boundary.</em>
+  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the current repository HEAD keeps `v4.1.3` as the formal released baseline and includes subsequent mainline follow-up work, with `uhorse-hub` and `uhorse-node-desktop` as the primary deliverables.</em>
 </p>
 
 <p align="center">
