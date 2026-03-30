@@ -16,7 +16,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{Html, IntoResponse},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use clap::{Parser, Subcommand};
@@ -30,8 +30,8 @@ use uhorse_node_runtime::{NodeError, NodeResult, Workspace};
 use app_state::DesktopAppState;
 use config_store::ConfigStore;
 use dto::{
-    ApiResponse, DefaultSettingsDto, DesktopCapabilityStatusDto, DesktopLogEntryDto,
-    DesktopSettingsDto, DirectoryPickerResponseDto, WorkspaceValidationRequest,
+    ApiResponse, CancelAccountPairingRequest, DefaultSettingsDto, DesktopCapabilityStatusDto,
+    DesktopLogEntryDto, DesktopSettingsDto, DirectoryPickerResponseDto, WorkspaceValidationRequest,
 };
 
 const DESKTOP_WEB_DIR_ENV: &str = "UHORSE_NODE_DESKTOP_WEB_DIR";
@@ -125,6 +125,10 @@ fn build_app(state: DesktopAppState, web_assets_dir: Option<PathBuf>) -> Router 
         .route("/api/runtime/status", get(get_runtime_status))
         .route("/api/runtime/start", post(start_node))
         .route("/api/runtime/stop", post(stop_node))
+        .route("/api/account/pairing/start", post(start_account_pairing))
+        .route("/api/account/pairing/cancel", post(cancel_account_pairing))
+        .route("/api/account/status", get(get_account_status))
+        .route("/api/account/binding", delete(delete_account_binding))
         .route("/api/versioning/summary", get(get_version_summary))
         .route("/api/logs", get(get_logs))
         .with_state(state)
@@ -280,6 +284,25 @@ async fn stop_node(State(state): State<DesktopAppState>) -> impl IntoResponse {
     into_api_response(state.stop_node().await)
 }
 
+async fn start_account_pairing(State(state): State<DesktopAppState>) -> impl IntoResponse {
+    into_api_response(state.start_account_pairing().await)
+}
+
+async fn cancel_account_pairing(
+    State(state): State<DesktopAppState>,
+    Json(payload): Json<CancelAccountPairingRequest>,
+) -> impl IntoResponse {
+    into_api_response(state.cancel_account_pairing(payload.request_id).await)
+}
+
+async fn get_account_status(State(state): State<DesktopAppState>) -> impl IntoResponse {
+    into_api_response(state.account_status().await)
+}
+
+async fn delete_account_binding(State(state): State<DesktopAppState>) -> impl IntoResponse {
+    into_api_response(state.delete_account_binding().await)
+}
+
 async fn get_version_summary(
     State(state): State<DesktopAppState>,
 ) -> Json<ApiResponse<dto::DesktopVersionSummaryDto>> {
@@ -416,6 +439,16 @@ mod tests {
         let (status, text, _) = get_text(app, "/dashboard").await;
         assert_eq!(status, StatusCode::OK);
         assert!(text.contains("desktop-ui"));
+    }
+
+    #[tokio::test]
+    async fn test_build_app_preserves_account_routes() {
+        let temp = TempDir::new().unwrap();
+        let app = build_app(create_state(&temp), None);
+        let (status, body) = get_json(app, "/api/account/status").await;
+
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["success"], Value::Bool(false));
     }
 
     #[tokio::test]

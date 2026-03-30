@@ -86,7 +86,7 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 - `hub.toml`：Hub 地址、端口、调度参数
 - `node.toml`：Node 名称、工作目录、Hub WebSocket 地址
 
-完整字段见 [CONFIG.md](CONFIG.md)。如果你要验证 Node Desktop 真实通知镜像到钉钉，除了配置 DingTalk 凭据外，还需要在 Hub 侧补充 `channels.dingtalk.notification_bindings`。
+完整字段见 [CONFIG.md](CONFIG.md)。如果你要验证 Node Desktop 真实通知镜像到钉钉，除 DingTalk 凭据外，还需启用 pairing 并在桌面端完成绑定；`channels.dingtalk.notification_bindings` 仅用于兼容 seed/fallback。
 
 ### 5. 启动程序
 

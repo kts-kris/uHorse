@@ -149,6 +149,7 @@ app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
 
+# 可选：仅在需要兼容 seed/fallback 时保留静态绑定
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
@@ -286,10 +287,13 @@ app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
 
+# 可选：仅在需要兼容 seed/fallback 时保留静态绑定
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
 ```
+
+> Node Desktop 通知镜像当前主路径是 pairing 运行时绑定；这里的静态 `notification_bindings` 仅用于兼容 seed/fallback。
 
 当前主推荐是：
 
@@ -425,7 +429,7 @@ sudo systemctl enable --now uhorse-node
 部署时需要特别注意以下边界：
 
 - 当前统一配置并不会覆盖所有 Hub 专属调度字段
-- `server.health.path` 需要与当前主线路由保持一致，推荐直接配置为 `/api/health`
+- 当 `server.health.enabled = true` 时，`server.health.path` 会决定 Hub 暴露的健康检查路由；未覆盖时默认是 `/api/health`
 - `deployments/k8s/base/*` 仍偏旧单体视角，不应直接当作当前 v4.0 生产模板
 - 若要在你自己的环境复现 DingTalk 最后一跳，仍需要准备你自己的真实企业凭据
 

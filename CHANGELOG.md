@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hub 已为浏览器目标增加本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标
 - `uhorse-node-runtime` 已接入正式浏览器执行路径，`uhorse-node-desktop` 默认启用 `browser` feature，并可通过 `CommandType::Browser` 参与能力路由
 - GitHub release / nightly workflow 现在会为 `uhorse-hub` 与 `uhorse-node-desktop` 生成主流平台 archive 产物
-- `channels.dingtalk.notification_bindings` 已纳入当前主线说明，用于将稳定 `node_id` 绑定到 DingTalk `user_id`，补齐 Node Desktop 本地通知镜像回传路径
+- Node Desktop DingTalk 通知镜像当前已支持 pairing 驱动的运行时绑定闭环，`channels.dingtalk.notification_bindings` 调整为兼容 seed/fallback 说明
 
 ### Changed
 

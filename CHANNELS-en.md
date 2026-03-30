@@ -139,7 +139,7 @@ If the LLM returns invalid JSON, an out-of-workspace path, an invalid browser ta
 
 ## Reply path
 
-If Node Desktop local notification mirroring is enabled, the current mainline also supports a `channels.dingtalk.notification_bindings` mapping from stable `node_id` values to DingTalk `user_id` values so the “node notification -> DingTalk user” path can be completed.
+If Node Desktop local notification mirroring is enabled, the current main path is for Node Desktop to start pairing and for the user to confirm it in DingTalk, which writes a runtime binding; `channels.dingtalk.notification_bindings` is retained only as a compatibility seed/fallback for the “node notification -> DingTalk user” path.
 
 The current result handling keeps the full execution result and tries to get back to the original DingTalk session in this order:
 

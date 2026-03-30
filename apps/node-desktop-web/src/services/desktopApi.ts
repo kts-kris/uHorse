@@ -1,10 +1,13 @@
 import type {
   ApiError,
   ApiResponse,
+  CancelAccountPairingRequest,
   DefaultSettings,
+  DesktopAccountStatus,
   DesktopCapabilityStatus,
   DesktopLogEntry,
   DesktopNodeStatus,
+  DesktopPairingRequest,
   DesktopSettings,
   DesktopVersionSummary,
   DesktopWorkspaceStatus,
@@ -117,5 +120,24 @@ export const desktopApi = {
   },
   getLogs(): Promise<DesktopLogEntry[]> {
     return request('/api/logs', undefined, '加载日志失败');
+  },
+  startAccountPairing(): Promise<DesktopPairingRequest> {
+    return request('/api/account/pairing/start', { method: 'POST' }, '发起账号绑定失败');
+  },
+  cancelAccountPairing(payload: CancelAccountPairingRequest): Promise<string> {
+    return request(
+      '/api/account/pairing/cancel',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      '取消账号绑定失败',
+    );
+  },
+  getAccountStatus(): Promise<DesktopAccountStatus> {
+    return request('/api/account/status', undefined, '加载账号绑定状态失败');
+  },
+  deleteAccountBinding(): Promise<string> {
+    return request('/api/account/binding', { method: 'DELETE' }, '解绑账号失败');
   },
 };

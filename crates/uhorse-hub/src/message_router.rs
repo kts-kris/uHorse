@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uhorse_channel::DingTalkChannel;
-use uhorse_config::DingTalkNotificationBinding;
 use uhorse_core::{Channel, MessageContent};
 use uhorse_protocol::{
     CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub,
@@ -17,6 +16,7 @@ use uhorse_security::ApprovalLevel;
 
 use crate::error::{HubError, HubResult};
 use crate::node_manager::NodeManager;
+use crate::notification_binding::NotificationBindingManager;
 use crate::security_integration::SecurityManager;
 use crate::task_scheduler::TaskScheduler;
 use tokio::sync::mpsc;
@@ -33,7 +33,7 @@ pub struct MessageRouter {
     /// DingTalk 通道
     dingtalk_channel: Option<Arc<DingTalkChannel>>,
     /// 节点通知绑定
-    notification_bindings: Arc<HashMap<String, String>>,
+    notification_bindings: Arc<NotificationBindingManager>,
     /// 节点消息发送器映射 (用于 WebSocket 连接)
     node_senders: Arc<RwLock<HashMap<NodeId, mpsc::Sender<HubToNode>>>>,
 }
@@ -44,18 +44,13 @@ impl MessageRouter {
         node_manager: Arc<NodeManager>,
         task_scheduler: Arc<TaskScheduler>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
-        notification_bindings: Vec<DingTalkNotificationBinding>,
+        notification_bindings: Arc<NotificationBindingManager>,
     ) -> Self {
         Self {
             node_manager,
             task_scheduler,
             dingtalk_channel,
-            notification_bindings: Arc::new(
-                notification_bindings
-                    .into_iter()
-                    .map(|binding| (binding.node_id, binding.user_id))
-                    .collect(),
-            ),
+            notification_bindings,
             node_senders: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -299,7 +294,11 @@ impl MessageRouter {
             return Ok(());
         };
 
-        let Some(user_id) = self.notification_bindings.get(node_id.as_str()) else {
+        let Some(user_id) = self
+            .notification_bindings
+            .get_user_id(node_id.as_str())
+            .await
+        else {
             warn!(
                 node_id = %node_id,
                 event_id = %event.event_id,
@@ -310,7 +309,7 @@ impl MessageRouter {
 
         channel
             .send_message(
-                user_id,
+                &user_id,
                 &MessageContent::Text(Self::render_notification_message(node_id, event)),
             )
             .await
@@ -415,7 +414,12 @@ mod tests {
     async fn test_notification_without_binding_is_ignored() {
         let node_manager = Arc::new(NodeManager::new(10, 30));
         let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
-        let router = MessageRouter::new(node_manager, Arc::new(task_scheduler), None, vec![]);
+        let router = MessageRouter::new(
+            node_manager,
+            Arc::new(task_scheduler),
+            None,
+            Arc::new(NotificationBindingManager::default()),
+        );
         let node_id = NodeId::from_string("node-desktop-test");
         let event = NotificationEvent::new(NotificationEventKind::Info, "标题", "内容", true);
 

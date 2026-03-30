@@ -74,7 +74,7 @@ uHorse 当前对外发布口径是 **v4.1.3 Hub-Node 主线**。
 | Node Desktop 打包与 smoke | ✅ | 当前交付为 `bin + web` archive + macOS `.pkg` + Windows installer，CI / release / nightly 均产出对应 artifact，不包含 `.app/.dmg`、`.msi` 或 Linux 原生安装器 |
 | 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 与 `test_local_hub_node_roundtrip_file_write` 已覆盖真实 Hub + Node + WebSocket 闭环 |
 | 鉴权拒绝路径 | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` 已覆盖 token 与注册 `node_id` 不一致场景 |
-| DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream；若要镜像 Node Desktop 本地通知，还需配置 `channels.dingtalk.notification_bindings` |
+| DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream；Node Desktop 可通过 pairing 发起运行时绑定，`channels.dingtalk.notification_bindings` 仅作为兼容 seed/fallback |
 | DingTalk 浏览器规划链路 | ✅ | Hub 已允许受控 `BrowserCommand`，并可把浏览器任务调度到具备 `CommandType::Browser` 的节点 |
 
 ## 快速开始
@@ -191,7 +191,8 @@ auth_token = "<access_token>"
 - Node Desktop 本地开启 `notifications_enabled`
 - 如需在通知中展示更详细内容，再开启 `show_notification_details`
 - 若要把本地通知额外同步到钉钉，再开启 `mirror_notifications_to_dingtalk`
-- Hub 侧在 `channels.dingtalk.notification_bindings` 中把稳定 `node_id` 绑定到 DingTalk `user_id`
+- 在 Node Desktop 中发起 pairing，并在 DingTalk 中使用绑定码确认运行时绑定
+- `channels.dingtalk.notification_bindings` 仅在需要兼容 seed/fallback 时配置
 - 若当前运行中的 Node 与新保存配置不一致，Settings / Dashboard 会显示“需重启生效”，重启后才会切换到新的工作区与运行时配置
 
 ### 5. 提交一个最小任务

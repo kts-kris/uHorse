@@ -306,7 +306,7 @@ user_id = "your-dingtalk-user-id"
 
 - 当前主路径是 **Stream 模式**，不依赖公网 webhook 才能接收消息。
 - Hub 仍保留 `GET/POST /api/v1/channels/dingtalk/webhook` 路由，用于兼容或辅助测试。
-- 若要镜像 Node Desktop 本地通知到钉钉，还需要在 `channels.dingtalk.notification_bindings` 中配置稳定 `node_id` 到 DingTalk `user_id` 的映射。
+- 若要镜像 Node Desktop 本地通知到钉钉，当前主路径是启用 pairing，并在 Node Desktop 中发起绑定、在 DingTalk 中确认；`channels.dingtalk.notification_bindings` 仅用于兼容 seed/fallback。
 - DingTalk 文本会先经过 LLM 规划，再转换为单个安全命令；文件操作、shell，以及受控 `BrowserCommand` 都在当前主线上。
 - 对于“打开网页”这类场景，当前主链会优先规划为 `BrowserCommand::OpenSystem`，而不是自动化浏览器 `Navigate`。
 - Hub 会在本地下发前校验路径范围，并拒绝危险 git 命令。
@@ -392,7 +392,7 @@ curl http://127.0.0.1:8765/api/health
 curl http://127.0.0.1:8765/api/nodes
 ```
 
-注意：虽然统一配置里存在 `server.health.path` 字段，但当前 `uhorse-hub` Web 路由实际暴露的健康检查路径是：
+注意：当前 `uhorse-hub` 仅在 `server.health.enabled = true` 时暴露统一配置里的 `server.health.path`；如果未显式配置，则默认使用：
 
 ```text
 /api/health

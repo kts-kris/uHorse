@@ -12,17 +12,17 @@ use tracing::{error, info, warn};
 use uhorse_observability::{
     init_full_observability, HealthService, MetricsCollector, MetricsExporter, OtelConfig,
 };
-use uhorse_security::ApprovalManager;
+use uhorse_security::{ApprovalManager, DevicePairingManager};
 
 use uhorse_channel::DingTalkChannel;
 use uhorse_config::{loader::create_default_loader, DingTalkNotificationBinding, UHorseConfig};
 use uhorse_core::Channel;
 use uhorse_hub::{
-    create_router,
+    create_router_with_health_config,
     web::{
         init_default_agent_runtime, reply_dingtalk_error, reply_task_result, submit_dingtalk_task,
     },
-    Hub, HubConfig, SecurityManager, WebState,
+    Hub, HubConfig, NotificationBindingManager, SecurityManager, WebState,
 };
 use uhorse_llm::{LLMClient, OpenAIClient};
 
@@ -32,7 +32,7 @@ use uhorse_llm::{LLMClient, OpenAIClient};
 #[command(author = "uHorse Contributors")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "uHorse Cloud Hub - Node management and task orchestration", long_about = None)]
-struct Args {
+pub(crate) struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -69,9 +69,9 @@ enum Commands {
 }
 
 /// Hub 运行时配置
-struct RuntimeConfig {
-    app_config: UHorseConfig,
-    hub_config: HubConfig,
+pub(crate) struct RuntimeConfig {
+    pub(crate) app_config: UHorseConfig,
+    pub(crate) hub_config: HubConfig,
 }
 
 fn hub_service_name(config: &UHorseConfig) -> String {
@@ -119,11 +119,13 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .map(|config| config.notification_bindings.clone())
         .unwrap_or_default();
+    let notification_binding_manager =
+        Arc::new(NotificationBindingManager::new(notification_bindings));
     let (hub, mut task_result_rx) = Hub::new_with_components(
         runtime_config.hub_config.clone(),
         security_manager,
         dingtalk_channel.clone(),
-        notification_bindings,
+        notification_binding_manager,
     );
     let hub = Arc::new(hub);
 
@@ -146,6 +148,12 @@ async fn main() -> anyhow::Result<()> {
     let health_service = Arc::new(HealthService::new(env!("CARGO_PKG_VERSION").to_string()));
     let metrics_collector = Arc::new(MetricsCollector::default());
     let metrics_exporter = Arc::new(MetricsExporter::new(Arc::clone(&metrics_collector)));
+    let pairing_manager = runtime_config.app_config.security.pairing_enabled.then(|| {
+        Arc::new(
+            DevicePairingManager::new()
+                .with_pairing_ttl(runtime_config.app_config.security.pairing_expiry),
+        )
+    });
     let web_state = WebState::new_with_runtime_and_health(
         hub.clone(),
         health_service,
@@ -153,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
         metrics_exporter,
         dingtalk_channel.clone(),
         llm_client,
+        pairing_manager,
         agent_runtime,
     );
     let shared_web_state = Arc::new(web_state.clone());
@@ -204,7 +213,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 创建路由
-    let app = create_router(web_state);
+    let app = create_router_with_health_config(web_state, &runtime_config.app_config.server.health);
 
     // 绑定地址
     let addr: SocketAddr = format!(
@@ -253,7 +262,7 @@ fn init_logging(config: &UHorseConfig, fallback_level: &str) -> anyhow::Result<(
 }
 
 /// 加载配置
-fn load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
+pub(crate) fn load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
     let config_path = Path::new(path);
 
     if config_path.exists() {
@@ -264,7 +273,7 @@ fn load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
                 .load()
                 .with_context(|| format!("Failed to load unified config from: {}", path))?;
 
-            if app_config.server.health.path == "/health" {
+            if app_config.server.health.path.trim().is_empty() {
                 app_config.server.health.path = "/api/health".to_string();
             }
             if app_config.observability.service_name.trim().is_empty()
@@ -421,6 +430,25 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
     std::fs::write(output, content)?;
     println!("✅ Generated config file: {}", output);
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn test_args() -> Args {
+    Args {
+        command: None,
+        config: "hub.toml".to_string(),
+        log_level: "info".to_string(),
+        host: "0.0.0.0".to_string(),
+        port: 8765,
+        hub_id: "default-hub".to_string(),
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn test_load_config(path: &str, args: &Args) -> anyhow::Result<RuntimeConfig> {
+    load_config(path, args)
 }
 
 /// 等待关闭信号

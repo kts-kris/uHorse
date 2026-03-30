@@ -38,6 +38,7 @@ pub mod error;
 pub mod hub;
 pub mod message_router;
 pub mod node_manager;
+pub mod notification_binding;
 pub mod orchestrator;
 pub mod security_integration;
 pub mod task_scheduler;
@@ -48,6 +49,7 @@ pub use error::{HubError, HubResult};
 pub use hub::{Hub, HubConfig, HubStats};
 pub use message_router::MessageRouter;
 pub use node_manager::{NodeInfo, NodeManager, NodeManagerStats, NodeState};
+pub use notification_binding::NotificationBindingManager;
 pub use orchestrator::{
     OrchestrationPlan, OrchestrationResult, Orchestrator, SubTask, SubTaskResult,
 };
@@ -60,7 +62,10 @@ pub use task_scheduler::{
 };
 
 // Web 管理界面
-pub use web::{create_router, start_server, ApiResponse, TaskInfo, WebConfig, WebState};
+pub use web::{
+    create_router, create_router_with_health_config, create_router_with_health_path, start_server,
+    ApiResponse, TaskInfo, WebConfig, WebState,
+};
 
 // 重新导出复用的 3.x 模块（方便下游使用）
 pub use uhorse_agent as agent;

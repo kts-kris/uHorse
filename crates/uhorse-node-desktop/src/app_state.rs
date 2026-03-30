@@ -7,6 +7,8 @@ use std::{
 };
 
 use chrono::Utc;
+use reqwest::StatusCode;
+use serde::de::DeserializeOwned;
 use tokio::sync::RwLock;
 use uhorse_node_runtime::{
     ConnectionState, Node, NodeConfig, NodeError, NodeResult, NotificationEventKind,
@@ -17,14 +19,16 @@ use crate::config_store::{
     current_computer_name, ConfigStore, DesktopConfig, DesktopPreferencesConfig,
 };
 use crate::dto::{
-    DefaultSettingsDto, DesktopCapabilityStatusDto, DesktopCheckpointDto, DesktopHeartbeatDto,
-    DesktopLifecycleState, DesktopLogEntryDto, DesktopLogLevel, DesktopMetricsDto,
-    DesktopNodeStatusDto, DesktopSettingsDto, DesktopVersionEntryDto, DesktopVersionSummaryDto,
-    DesktopWorkspaceStatusDto, WorkspaceValidationDto,
+    ApiResponse, CancelAccountPairingRequest, DefaultSettingsDto, DesktopAccountStatusDto,
+    DesktopCapabilityStatusDto, DesktopCheckpointDto, DesktopHeartbeatDto, DesktopLifecycleState,
+    DesktopLogEntryDto, DesktopLogLevel, DesktopMetricsDto, DesktopNodeStatusDto,
+    DesktopPairingRequestDto, DesktopSettingsDto, DesktopVersionEntryDto, DesktopVersionSummaryDto,
+    DesktopWorkspaceStatusDto, StartAccountPairingRequest, WorkspaceValidationDto,
 };
 
 const DESKTOP_LAUNCH_AGENT_ID: &str = "com.uhorse.node-desktop";
 const DEFAULT_DESKTOP_LISTEN: &str = "127.0.0.1:8757";
+const DEFAULT_DEVICE_TYPE: &str = "desktop";
 
 #[derive(Clone)]
 pub struct DesktopAppState {
@@ -597,6 +601,113 @@ impl DesktopAppState {
         app.logs.iter().cloned().collect()
     }
 
+    pub async fn start_account_pairing(&self) -> NodeResult<DesktopPairingRequestDto> {
+        let (hub_url, node_id, node_name) = {
+            let app = self.inner.read().await;
+            let node_id = app
+                .config
+                .node_id
+                .as_ref()
+                .map(ToString::to_string)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
+            (
+                app.config.connection.hub_url.clone(),
+                node_id,
+                app.config.name.clone(),
+            )
+        };
+
+        let request = StartAccountPairingRequest {
+            node_id,
+            node_name,
+            device_type: DEFAULT_DEVICE_TYPE.to_string(),
+        };
+        let response = post_hub_api::<_, DesktopPairingRequestDto>(
+            &hub_url,
+            "/api/account/pairing/start",
+            &request,
+        )
+        .await?;
+
+        let mut app = self.inner.write().await;
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Info,
+            format!(
+                "Account pairing started for node {} with code {}",
+                response.node_id, response.pairing_code
+            ),
+            "account.pairing.start",
+        );
+        Ok(response)
+    }
+
+    pub async fn cancel_account_pairing(&self, request_id: String) -> NodeResult<String> {
+        let hub_url = {
+            let app = self.inner.read().await;
+            app.config.connection.hub_url.clone()
+        };
+
+        let request = CancelAccountPairingRequest {
+            request_id: request_id.clone(),
+        };
+        let response =
+            post_hub_api::<_, String>(&hub_url, "/api/account/pairing/cancel", &request).await?;
+
+        let mut app = self.inner.write().await;
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Info,
+            format!("Account pairing cancelled: {}", request_id),
+            "account.pairing.cancel",
+        );
+        Ok(response)
+    }
+
+    pub async fn account_status(&self) -> NodeResult<DesktopAccountStatusDto> {
+        let (hub_url, node_id) = {
+            let app = self.inner.read().await;
+            let node_id = app
+                .config
+                .node_id
+                .as_ref()
+                .map(ToString::to_string)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
+            (app.config.connection.hub_url.clone(), node_id)
+        };
+
+        get_hub_api(&hub_url, &format!("/api/account/status/{}", node_id)).await
+    }
+
+    pub async fn delete_account_binding(&self) -> NodeResult<String> {
+        let (hub_url, node_id) = {
+            let app = self.inner.read().await;
+            let node_id = app
+                .config
+                .node_id
+                .as_ref()
+                .map(ToString::to_string)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
+            (app.config.connection.hub_url.clone(), node_id)
+        };
+
+        let response =
+            delete_hub_api::<String>(&hub_url, &format!("/api/account/binding/{}", node_id))
+                .await?;
+
+        let mut app = self.inner.write().await;
+        push_log(
+            &mut app.logs,
+            DesktopLogLevel::Info,
+            format!("Account binding removed for node {}", node_id),
+            "account.binding.delete",
+        );
+        Ok(response)
+    }
+
     async fn build_status(app: &DesktopApp) -> NodeResult<DesktopNodeStatusDto> {
         let (runtime_workspace_path, restart_required, restart_notice) = runtime_config_status(app);
 
@@ -668,6 +779,86 @@ impl DesktopAppState {
             recent_error: app.recent_error.clone(),
         })
     }
+}
+
+fn hub_http_base_url(hub_url: &str) -> NodeResult<String> {
+    if let Some(rest) = hub_url.strip_prefix("ws://") {
+        let host = rest.strip_suffix("/ws").unwrap_or(rest);
+        return Ok(format!("http://{}", host.trim_end_matches('/')));
+    }
+    if let Some(rest) = hub_url.strip_prefix("wss://") {
+        let host = rest.strip_suffix("/ws").unwrap_or(rest);
+        return Ok(format!("https://{}", host.trim_end_matches('/')));
+    }
+    if hub_url.starts_with("http://") || hub_url.starts_with("https://") {
+        return Ok(hub_url.trim_end_matches('/').to_string());
+    }
+    Err(NodeError::Config(format!(
+        "Unsupported Hub URL: {}",
+        hub_url
+    )))
+}
+
+async fn parse_hub_response<T: DeserializeOwned>(response: reqwest::Response) -> NodeResult<T> {
+    let status = response.status();
+    let text = response.text().await.map_err(|error| {
+        NodeError::Connection(format!("Failed to read Hub response: {}", error))
+    })?;
+    let payload: ApiResponse<T> = serde_json::from_str(&text).map_err(NodeError::Serialization)?;
+
+    if status.is_success() {
+        payload
+            .data
+            .ok_or_else(|| NodeError::Internal("Hub response missing data field".to_string()))
+    } else {
+        let message = payload
+            .error
+            .unwrap_or_else(|| format!("Hub request failed with status {}", status));
+        Err(match status {
+            StatusCode::BAD_REQUEST => NodeError::Config(message),
+            StatusCode::FORBIDDEN => NodeError::Permission(message),
+            StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE => {
+                NodeError::Connection(message)
+            }
+            _ if status.is_server_error() => NodeError::Internal(message),
+            _ => NodeError::Connection(message),
+        })
+    }
+}
+
+async fn get_hub_api<T: DeserializeOwned>(hub_url: &str, path: &str) -> NodeResult<T> {
+    let base_url = hub_http_base_url(hub_url)?;
+    let response = reqwest::Client::new()
+        .get(format!("{}{}", base_url, path))
+        .send()
+        .await
+        .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
+    parse_hub_response(response).await
+}
+
+async fn post_hub_api<P: serde::Serialize, T: DeserializeOwned>(
+    hub_url: &str,
+    path: &str,
+    payload: &P,
+) -> NodeResult<T> {
+    let base_url = hub_http_base_url(hub_url)?;
+    let response = reqwest::Client::new()
+        .post(format!("{}{}", base_url, path))
+        .json(payload)
+        .send()
+        .await
+        .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
+    parse_hub_response(response).await
+}
+
+async fn delete_hub_api<T: DeserializeOwned>(hub_url: &str, path: &str) -> NodeResult<T> {
+    let base_url = hub_http_base_url(hub_url)?;
+    let response = reqwest::Client::new()
+        .delete(format!("{}{}", base_url, path))
+        .send()
+        .await
+        .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
+    parse_hub_response(response).await
 }
 
 fn runtime_config_status(app: &DesktopApp) -> (Option<String>, bool, Option<String>) {
@@ -1028,7 +1219,12 @@ fn pick_workspace_directory() -> NodeResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        routing::{delete, get, post},
+        Json, Router,
+    };
     use tempfile::TempDir;
+    use uhorse_node_runtime::NodeId;
 
     #[tokio::test]
     async fn test_save_settings_persists_config() {
@@ -1410,6 +1606,122 @@ mod tests {
         );
         assert!(!restarted.restart_required);
         assert_eq!(restarted.restart_notice, None);
+    }
+
+    fn create_account_test_state(temp: &TempDir) -> DesktopAppState {
+        let config_path = temp.path().join("node-desktop.toml");
+        let store = ConfigStore::new(&config_path);
+        let mut config = DesktopConfig::default();
+        config.node.node_id = Some(NodeId::from_string("node-desktop-test"));
+        config.node.workspace_path = temp.path().to_string_lossy().to_string();
+        config.node.require_git_repo = false;
+        config.node.connection.hub_url = "http://127.0.0.1:18080".to_string();
+        config.desktop.notifications_enabled = false;
+        store.save(&config).unwrap();
+        DesktopAppState::new(store).unwrap()
+    }
+
+    fn create_mock_hub_router() -> Router {
+        Router::new()
+            .route(
+                "/api/account/pairing/start",
+                post(|| async {
+                    Json(ApiResponse::success(DesktopPairingRequestDto {
+                        request_id: "req-1".to_string(),
+                        node_id: "node-desktop-test".to_string(),
+                        node_name: "Desktop Node".to_string(),
+                        device_type: "desktop".to_string(),
+                        pairing_code: "123456".to_string(),
+                        status: "pending".to_string(),
+                        created_at: 1,
+                        expires_at: 2,
+                        bound_user_id: None,
+                    }))
+                }),
+            )
+            .route(
+                "/api/account/pairing/cancel",
+                post(|| async { Json(ApiResponse::success("Pairing cancelled".to_string())) }),
+            )
+            .route(
+                "/api/account/status/node-desktop-test",
+                get(|| async {
+                    Json(ApiResponse::success(DesktopAccountStatusDto {
+                        node_id: "node-desktop-test".to_string(),
+                        pairing_enabled: true,
+                        bound_user_id: Some("ding-user-1".to_string()),
+                        pairing: None,
+                    }))
+                }),
+            )
+            .route(
+                "/api/account/binding/node-desktop-test",
+                delete(|| async { Json(ApiResponse::success("Binding removed".to_string())) }),
+            )
+    }
+
+    async fn spawn_mock_hub_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, create_mock_hub_router())
+                .await
+                .unwrap();
+        });
+        format!("http://{}", address)
+    }
+
+    #[tokio::test]
+    async fn test_account_api_methods_proxy_to_hub() {
+        let temp = TempDir::new().unwrap();
+        let state = create_account_test_state(&temp);
+        let hub_url = spawn_mock_hub_server().await;
+
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: temp.path().to_string_lossy().to_string(),
+                hub_url,
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: false,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        let pairing = state.start_account_pairing().await.unwrap();
+        assert_eq!(pairing.node_id, "node-desktop-test");
+        assert_eq!(pairing.pairing_code, "123456");
+
+        let status = state.account_status().await.unwrap();
+        assert_eq!(status.node_id, "node-desktop-test");
+        assert_eq!(status.bound_user_id.as_deref(), Some("ding-user-1"));
+        assert!(status.pairing.is_none());
+
+        let cancel = state
+            .cancel_account_pairing("req-1".to_string())
+            .await
+            .unwrap();
+        assert_eq!(cancel, "Pairing cancelled");
+
+        let deleted = state.delete_account_binding().await.unwrap();
+        assert_eq!(deleted, "Binding removed");
+
+        let logs = state.logs().await;
+        assert!(logs
+            .iter()
+            .any(|entry| entry.source == "account.pairing.start"));
+        assert!(logs
+            .iter()
+            .any(|entry| entry.source == "account.pairing.cancel"));
+        assert!(logs
+            .iter()
+            .any(|entry| entry.source == "account.binding.delete"));
     }
 
     #[tokio::test]

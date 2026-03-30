@@ -27,6 +27,7 @@ use uhorse_agent::{
     SessionKey, SessionNamespace, SessionState, SkillRegistry,
 };
 use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
+use uhorse_config::HealthConfig;
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
 use uhorse_llm::{ChatMessage, LLMClient};
 use uhorse_observability::{HealthService, HealthStatus, MetricsCollector, MetricsExporter};
@@ -35,7 +36,7 @@ use uhorse_protocol::{
     NodeCapabilities, PermissionRule as ProtocolPermissionRule, Priority, SessionId, TaskContext,
     TaskId, UserId,
 };
-use uhorse_security::ApprovalRequest;
+use uhorse_security::{ApprovalRequest, DevicePairingManager, PairingRequest, PairingStatus};
 
 use crate::{
     node_manager::workspace_matches_hint,
@@ -565,6 +566,8 @@ pub struct WebState {
     pub dingtalk_channel: Option<Arc<DingTalkChannel>>,
     /// LLM 客户端
     pub llm_client: Option<Arc<dyn LLMClient>>,
+    /// 设备绑定管理器
+    pub pairing_manager: Option<Arc<DevicePairingManager>>,
     /// Agent 运行时
     pub agent_runtime: Arc<WebAgentRuntime>,
     /// 任务回传路由
@@ -578,10 +581,21 @@ impl WebState {
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
         llm_client: Option<Arc<dyn LLMClient>>,
     ) -> Self {
+        Self::new_with_pairing(hub, dingtalk_channel, llm_client, None)
+    }
+
+    /// 创建带设备绑定管理器的 Web 状态
+    pub fn new_with_pairing(
+        hub: Arc<Hub>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
+    ) -> Self {
         Self::new_with_runtime(
             hub,
             dingtalk_channel,
             llm_client,
+            pairing_manager,
             Arc::new(default_agent_runtime()),
         )
     }
@@ -591,6 +605,7 @@ impl WebState {
         hub: Arc<Hub>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
         llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
         agent_runtime: Arc<WebAgentRuntime>,
     ) -> Self {
         let metrics_collector = Arc::new(MetricsCollector::default());
@@ -602,6 +617,7 @@ impl WebState {
             metrics_exporter,
             dingtalk_channel,
             llm_client,
+            pairing_manager,
             agent_runtime,
         )
     }
@@ -614,6 +630,7 @@ impl WebState {
         metrics_exporter: Arc<MetricsExporter>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
         llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
         agent_runtime: Arc<WebAgentRuntime>,
     ) -> Self {
         Self {
@@ -623,6 +640,7 @@ impl WebState {
             metrics_exporter,
             dingtalk_channel,
             llm_client,
+            pairing_manager,
             agent_runtime,
             dingtalk_routes: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -1966,6 +1984,21 @@ impl<T: Serialize> ApiResponse<T> {
 
 /// 创建 Web 路由
 pub fn create_router(state: WebState) -> Router {
+    create_router_with_health_config(state, &HealthConfig::default())
+}
+
+/// 使用指定健康检查路径创建 Web 路由
+pub fn create_router_with_health_path(state: WebState, health_path: &str) -> Router {
+    let health_config = HealthConfig {
+        enabled: true,
+        path: health_path.to_string(),
+        ..HealthConfig::default()
+    };
+    create_router_with_health_config(state, &health_config)
+}
+
+/// 使用健康检查配置创建 Web 路由
+pub fn create_router_with_health_config(state: WebState, health_config: &HealthConfig) -> Router {
     let shared_state = Arc::new(state);
     let metrics_state = Arc::clone(&shared_state);
     let mut router = Router::new()
@@ -1996,7 +2029,13 @@ pub fn create_router(state: WebState) -> Router {
         .route("/api/approvals/:request_id/approve", post(approve_approval))
         .route("/api/approvals/:request_id/reject", post(reject_approval))
         .route("/api/node-auth/token", post(issue_node_token))
-        .route("/api/health", get(health_check))
+        .route("/api/account/pairing/start", post(start_account_pairing))
+        .route("/api/account/pairing/cancel", post(cancel_account_pairing))
+        .route("/api/account/status/:node_id", get(get_account_status))
+        .route(
+            "/api/account/binding/:node_id",
+            axum::routing::delete(delete_account_binding),
+        )
         .route("/metrics", get(metrics_handler))
         .route("/api/v1/agents", get(list_runtime_agents))
         .route("/api/v1/agents/:agent_id", get(get_runtime_agent))
@@ -2007,19 +2046,22 @@ pub fn create_router(state: WebState) -> Router {
         .route(
             "/api/v1/sessions/:session_id/messages",
             get(get_runtime_session_messages),
-        )
-        .with_state(shared_state);
+        );
+
+    if health_config.enabled {
+        router = router.route(&health_config.path, get(health_check));
+    }
+
+    let router: Router = router.with_state(shared_state);
 
     // 添加 CORS、HTTP tracing 与 metrics
-    router = router
+    router
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn_with_state(
             metrics_state,
             track_api_metrics,
-        ));
-
-    router
+        ))
 }
 
 /// 首页
@@ -2102,8 +2144,8 @@ async fn dingtalk_webhook(
 
     match channel.handle_event_with_metadata(&event).await {
         Ok(Some(inbound)) => {
-            if let Err(error) = submit_dingtalk_task(&state, inbound).await {
-                error!("Failed to submit DingTalk task: {}", error);
+            if let Err(error) = handle_dingtalk_inbound(&state, inbound).await {
+                error!("Failed to handle DingTalk inbound message: {}", error);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
@@ -2139,6 +2181,17 @@ async fn dingtalk_webhook(
 /// DingTalk webhook 验证端点
 async fn dingtalk_webhook_verify() -> &'static str {
     "DingTalk webhook endpoint is ready"
+}
+
+async fn handle_dingtalk_inbound(
+    state: &Arc<WebState>,
+    inbound: DingTalkInboundMessage,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if try_handle_dingtalk_pairing_command(state, &inbound).await? {
+        return Ok(());
+    }
+
+    submit_dingtalk_task(state, inbound).await
 }
 
 /// 将 DingTalk 入站消息转换为 Hub 任务并提交执行
@@ -3409,6 +3462,41 @@ struct IssueNodeTokenResponse {
     expires_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StartPairingPayload {
+    node_id: String,
+    #[serde(default)]
+    node_name: Option<String>,
+    #[serde(default)]
+    device_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PairingRequestResponse {
+    request_id: String,
+    node_id: String,
+    node_name: String,
+    device_type: String,
+    pairing_code: String,
+    status: String,
+    created_at: u64,
+    expires_at: u64,
+    bound_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccountStatusResponse {
+    node_id: String,
+    pairing_enabled: bool,
+    bound_user_id: Option<String>,
+    pairing: Option<PairingRequestResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CancelPairingPayload {
+    request_id: String,
+}
+
 /// 列出任务
 fn task_info_from_status_and_context(
     status: crate::task_scheduler::TaskStatusInfo,
@@ -3519,6 +3607,119 @@ async fn submit_task_api(
     }
 }
 
+fn pairing_enabled(state: &WebState) -> bool {
+    state.pairing_manager.is_some()
+}
+
+fn pairing_status_label(status: &PairingStatus) -> &'static str {
+    match status {
+        PairingStatus::Pending => "pending",
+        PairingStatus::AwaitingConfirmation => "awaiting_confirmation",
+        PairingStatus::Paired => "paired",
+        PairingStatus::Rejected => "rejected",
+        PairingStatus::Expired => "expired",
+        PairingStatus::Cancelled => "cancelled",
+    }
+}
+
+fn pairing_request_response(request: PairingRequest) -> PairingRequestResponse {
+    PairingRequestResponse {
+        request_id: request.request_id,
+        node_id: request.device_id.to_string(),
+        node_name: request.device_name,
+        device_type: request.device_type,
+        pairing_code: request.pairing_code,
+        status: pairing_status_label(&request.status).to_string(),
+        created_at: request.created_at,
+        expires_at: request.expires_at,
+        bound_user_id: request.user_id,
+    }
+}
+
+fn resolve_pairing_command(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if trimmed.len() == 6 && trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return Some(trimmed);
+    }
+
+    let normalized = trimmed
+        .strip_prefix("绑定码")
+        .or_else(|| trimmed.strip_prefix("pair"))
+        .or_else(|| trimmed.strip_prefix("bind"))
+        .map(str::trim)
+        .unwrap_or(trimmed);
+
+    if normalized.len() == 6 && normalized.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+async fn process_dingtalk_pairing_command(
+    state: &Arc<WebState>,
+    inbound: &DingTalkInboundMessage,
+) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(pairing_manager) = state.pairing_manager.as_ref() else {
+        return Ok(None);
+    };
+
+    let Some(text) = inbound.message.content.as_text().map(str::trim) else {
+        return Ok(None);
+    };
+    let Some(code) = resolve_pairing_command(text) else {
+        return Ok(None);
+    };
+
+    let Some(user_id) = inbound
+        .sender_user_id
+        .clone()
+        .or_else(|| inbound.sender_staff_id.clone())
+    else {
+        return Err("DingTalk sender identity is missing".into());
+    };
+
+    let reply_text = match pairing_manager.confirm_pairing(code, user_id.clone()).await {
+        Ok(device) => {
+            state
+                .hub
+                .notification_bindings()
+                .set_binding(device.id.as_str(), user_id)
+                .await;
+            format!("绑定成功，设备 {} 已关联当前 DingTalk 账号。", device.name)
+        }
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("expired") {
+                "绑定失败：绑定码已过期，请在桌面端重新发起绑定。".to_string()
+            } else if message.contains("Invalid pairing code") {
+                "绑定失败：绑定码无效，请检查后重试。".to_string()
+            } else {
+                format!("绑定失败：{}", message)
+            }
+        }
+    };
+
+    Ok(Some(reply_text))
+}
+
+async fn try_handle_dingtalk_pairing_command(
+    state: &Arc<WebState>,
+    inbound: &DingTalkInboundMessage,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(reply_text) = process_dingtalk_pairing_command(state, inbound).await? else {
+        return Ok(false);
+    };
+
+    let route = reply_route_from_inbound(inbound);
+    let Some(channel) = state.dingtalk_channel.as_ref() else {
+        return Err("DingTalk channel is not configured".into());
+    };
+
+    send_dingtalk_reply(channel, &route, &reply_text).await?;
+    Ok(true)
+}
+
 async fn issue_node_token(
     State(state): State<Arc<WebState>>,
     Json(payload): Json<IssueNodeTokenPayload>,
@@ -3552,6 +3753,126 @@ async fn issue_node_token(
             Json(ApiResponse::error(&error.to_string())),
         ),
     }
+}
+
+async fn start_account_pairing(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<StartPairingPayload>,
+) -> (StatusCode, Json<ApiResponse<PairingRequestResponse>>) {
+    let Some(pairing_manager) = state.pairing_manager.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::error("Pairing manager not configured")),
+        );
+    };
+
+    let device_id = uhorse_core::DeviceId::from_string(payload.node_id.clone());
+    let device_name = payload.node_name.unwrap_or_else(|| payload.node_id.clone());
+    let device_type = payload.device_type.unwrap_or_else(|| "desktop".to_string());
+
+    match pairing_manager
+        .initiate_pairing(device_id, device_name, device_type)
+        .await
+    {
+        Ok(request) => (
+            StatusCode::OK,
+            Json(ApiResponse::success(pairing_request_response(request))),
+        ),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error(&error.to_string())),
+        ),
+    }
+}
+
+async fn cancel_account_pairing(
+    State(state): State<Arc<WebState>>,
+    Json(payload): Json<CancelPairingPayload>,
+) -> (StatusCode, Json<ApiResponse<&'static str>>) {
+    let Some(pairing_manager) = state.pairing_manager.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::error("Pairing manager not configured")),
+        );
+    };
+
+    match pairing_manager.cancel_pairing(&payload.request_id).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(ApiResponse::success("Pairing cancelled")),
+        ),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error(&error.to_string())),
+        ),
+    }
+}
+
+async fn get_account_status(
+    State(state): State<Arc<WebState>>,
+    Path(node_id): Path<String>,
+) -> (StatusCode, Json<ApiResponse<AccountStatusResponse>>) {
+    let bound_user_id = state
+        .hub
+        .notification_bindings()
+        .get_user_id(&node_id)
+        .await;
+
+    let pairing = if let Some(pairing_manager) = state.pairing_manager.as_ref() {
+        match pairing_manager
+            .get_pairing_status(&uhorse_core::DeviceId::from_string(node_id.clone()))
+            .await
+        {
+            Ok(PairingStatus::Paired) => None,
+            Ok(_) => pairing_manager
+                .list_pending_requests()
+                .await
+                .ok()
+                .and_then(|requests| {
+                    requests
+                        .into_iter()
+                        .find(|request| request.device_id.as_str() == node_id)
+                })
+                .map(pairing_request_response),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success(AccountStatusResponse {
+            node_id,
+            pairing_enabled: pairing_enabled(&state),
+            bound_user_id,
+            pairing,
+        })),
+    )
+}
+
+async fn delete_account_binding(
+    State(state): State<Arc<WebState>>,
+    Path(node_id): Path<String>,
+) -> (StatusCode, Json<ApiResponse<&'static str>>) {
+    state
+        .hub
+        .notification_bindings()
+        .unbind(node_id.clone())
+        .await;
+
+    if let Some(pairing_manager) = state.pairing_manager.as_ref() {
+        let _ = uhorse_core::DeviceManager::unpair_device(
+            pairing_manager.as_ref(),
+            &uhorse_core::DeviceId::from_string(node_id),
+        )
+        .await;
+    }
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success("Binding removed")),
+    )
 }
 
 async fn update_node_permissions(
@@ -4010,6 +4331,7 @@ mod tests {
             Some(Arc::new(StubLlmClient {
                 response: llm_response.to_string(),
             })),
+            None,
             runtime.clone(),
         ));
 
@@ -4050,7 +4372,13 @@ mod tests {
         );
         let (hub, _rx) = Hub::new_with_security(HubConfig::default(), Some(security_manager));
         let hub = Arc::new(hub);
-        let state = Arc::new(WebState::new(hub.clone(), None, None));
+        let pairing_manager = Arc::new(DevicePairingManager::new());
+        let state = Arc::new(WebState::new_with_pairing(
+            hub.clone(),
+            None,
+            None,
+            Some(pairing_manager),
+        ));
         let node_id = uhorse_protocol::NodeId::from_string("node-approval-web");
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         hub.message_router()
@@ -4069,7 +4397,12 @@ mod tests {
         let workspace = tempdir().unwrap();
         let (hub, _rx) = Hub::new(HubConfig::default());
         let hub = Arc::new(hub);
-        let state = Arc::new(WebState::new(hub.clone(), None, None));
+        let state = Arc::new(WebState::new_with_pairing(
+            hub.clone(),
+            None,
+            None,
+            Some(Arc::new(DevicePairingManager::new())),
+        ));
         let node_id = uhorse_protocol::NodeId::from_string("node-web-runtime");
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         hub.message_router()
@@ -4176,6 +4509,19 @@ mod tests {
         (status, json)
     }
 
+    async fn delete_json(app: Router, path: &str) -> (StatusCode, serde_json::Value) {
+        let request = Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json = serde_json::from_slice(&body).unwrap();
+        (status, json)
+    }
+
     async fn get_text(app: Router, path: &str) -> (StatusCode, String, Option<String>) {
         let request = Request::builder()
             .method("GET")
@@ -4239,6 +4585,38 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], json!("healthy"));
         assert_eq!(body["version"], json!(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[tokio::test]
+    async fn test_health_check_supports_custom_configured_path() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = WebState::new(Arc::new(hub), None, None);
+        let app = create_router_with_health_path(state, "/custom-health");
+
+        let (custom_status, body) = get_json(app.clone(), "/custom-health").await;
+        let (legacy_status, _, _) = get_text(app, "/api/health").await;
+
+        assert_eq!(custom_status, StatusCode::OK);
+        assert_eq!(body["status"], json!("healthy"));
+        assert_eq!(legacy_status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_can_be_disabled() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = WebState::new(Arc::new(hub), None, None);
+        let app = create_router_with_health_config(
+            state,
+            &HealthConfig {
+                enabled: false,
+                path: "/api/health".to_string(),
+                verbose: false,
+            },
+        );
+
+        let (status, _, _) = get_text(app, "/api/health").await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -4623,6 +5001,7 @@ mod tests {
             Arc::new(hub),
             None,
             None,
+            None,
             runtime.clone(),
         ));
         let session_key = SessionKey::with_team("dingtalk", "user-1", "corp-1");
@@ -4771,6 +5150,7 @@ mod tests {
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = Arc::new(WebState::new_with_runtime(
             Arc::new(hub),
+            None,
             None,
             None,
             runtime.clone(),
@@ -4989,6 +5369,7 @@ mod tests {
             Arc::new(hub),
             None,
             None,
+            None,
             runtime.clone(),
         ));
         let session_key = SessionKey::new("dingtalk", "user-scope");
@@ -5026,6 +5407,7 @@ mod tests {
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = Arc::new(WebState::new_with_runtime(
             Arc::new(hub),
+            None,
             None,
             None,
             runtime,
@@ -5078,6 +5460,7 @@ mod tests {
             Arc::new(hub),
             None,
             None,
+            None,
             runtime,
         ));
 
@@ -5107,6 +5490,7 @@ mod tests {
             Some(Arc::new(StubLlmClient {
                 response: "直接回复用户".to_string(),
             })),
+            None,
             runtime,
         ));
         let session_key = SessionKey::new("dingtalk", "user-direct");
@@ -5127,6 +5511,7 @@ mod tests {
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = Arc::new(WebState::new_with_runtime(
             Arc::new(hub),
+            None,
             None,
             None,
             runtime.clone(),
@@ -5224,7 +5609,7 @@ mod tests {
 
         let runtime = tokio_test::block_on(init_default_agent_runtime(runtime_root)).unwrap();
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = WebState::new_with_runtime(Arc::new(hub), None, None, Arc::new(runtime));
+        let state = WebState::new_with_runtime(Arc::new(hub), None, None, None, Arc::new(runtime));
         let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
         let context = TaskContext::new(
             UserId::from_string("user-shared"),
@@ -5263,7 +5648,7 @@ mod tests {
 
         let runtime = tokio_test::block_on(init_default_agent_runtime(runtime_root)).unwrap();
         let (hub, _rx) = Hub::new(HubConfig::default());
-        let state = WebState::new_with_runtime(Arc::new(hub), None, None, Arc::new(runtime));
+        let state = WebState::new_with_runtime(Arc::new(hub), None, None, None, Arc::new(runtime));
         let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
         let context = TaskContext::new(
             UserId::from_string("user-shared"),
@@ -5313,6 +5698,7 @@ mod tests {
             Some(Arc::new(StubLlmClient {
                 response: "直接回复用户".to_string(),
             })),
+            None,
             runtime,
         ));
         let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
@@ -5372,6 +5758,7 @@ mod tests {
             Some(Arc::new(StubLlmClient {
                 response: "直接回复用户".to_string(),
             })),
+            None,
             runtime,
         ));
         let session_key = SessionKey::with_team("dingtalk", "user-shared", "corp-shared");
@@ -5430,6 +5817,7 @@ mod tests {
                     workspace_root, workspace_root
                 ),
             })),
+            None,
             runtime.clone(),
         ));
 
@@ -5633,6 +6021,7 @@ mod tests {
                     workspace_root, workspace_root
                 ),
             })),
+            None,
             runtime.clone(),
         ));
 
@@ -5744,6 +6133,7 @@ mod tests {
                     workspace_a_root
                 ),
             })),
+            None,
             runtime,
         ));
 
@@ -5836,6 +6226,7 @@ mod tests {
                     workspace_root
                 ),
             })),
+            None,
             runtime,
         ));
 
@@ -6063,6 +6454,7 @@ mod tests {
             Some(Arc::new(StubLlmClient {
                 response: r#"{"type":"direct_reply","text":"直接答复"}"#.to_string(),
             })),
+            None,
             runtime.clone(),
         ));
 
@@ -6355,6 +6747,7 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             Arc::new(hub),
             None,
             None,
+            None,
             runtime,
         ));
 
@@ -6427,6 +6820,7 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         let (hub, _rx) = Hub::new(HubConfig::default());
         let app = create_router(WebState::new_with_runtime(
             Arc::new(hub),
+            None,
             None,
             None,
             runtime,
@@ -6504,6 +6898,7 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = Arc::new(WebState::new_with_runtime(
             Arc::new(hub),
+            None,
             None,
             None,
             runtime.clone(),
@@ -6634,6 +7029,7 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = Arc::new(WebState::new_with_runtime(
             Arc::new(hub),
+            None,
             None,
             None,
             runtime.clone(),
@@ -7058,6 +7454,264 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             }
             other => panic!("unexpected message: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_resolve_pairing_command_accepts_plain_and_prefixed_code() {
+        assert_eq!(resolve_pairing_command("123456"), Some("123456"));
+        assert_eq!(resolve_pairing_command("绑定码 123456"), Some("123456"));
+        assert_eq!(resolve_pairing_command("pair 123456"), Some("123456"));
+        assert_eq!(resolve_pairing_command("bind 123456"), Some("123456"));
+        assert_eq!(resolve_pairing_command("hello"), None);
+    }
+
+    #[tokio::test]
+    async fn test_process_dingtalk_pairing_command_sets_runtime_binding() {
+        let (_app, state, _hub, node_id, _rx, _workspace) =
+            create_router_test_state_with_registered_node().await;
+        let pairing_manager = state.pairing_manager.as_ref().unwrap().clone();
+        let request = pairing_manager
+            .initiate_pairing(
+                uhorse_core::DeviceId::from_string(node_id.as_str()),
+                "Desktop Node".to_string(),
+                "desktop".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text(format!("绑定码 {}", request.pairing_code)),
+                1,
+            ),
+            session,
+            conversation_id: "conv-pairing".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("ding-user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        let reply_text = process_dingtalk_pairing_command(&state, &inbound)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(reply_text.contains("绑定成功"));
+        assert_eq!(
+            state
+                .hub
+                .notification_bindings()
+                .get_user_id(node_id.as_str())
+                .await,
+            Some("ding-user-1".to_string())
+        );
+
+        let status = pairing_manager
+            .get_pairing_status(&uhorse_core::DeviceId::from_string(node_id.as_str()))
+            .await
+            .unwrap();
+        assert_eq!(status, uhorse_security::PairingStatus::Paired);
+    }
+
+    #[tokio::test]
+    async fn test_account_pairing_start_and_status_api_returns_pending_request() {
+        let (app, state, _hub, node_id, _rx, _workspace) =
+            create_router_test_state_with_registered_node().await;
+
+        let (status, body) = post_json(
+            app,
+            "/api/account/pairing/start",
+            &json!({
+                "node_id": node_id.as_str(),
+                "node_name": "Desktop Node",
+                "device_type": "desktop"
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"]["node_id"], json!(node_id.as_str()));
+        assert_eq!(body["data"]["node_name"], json!("Desktop Node"));
+        assert_eq!(body["data"]["device_type"], json!("desktop"));
+        assert_eq!(body["data"]["status"], json!("pending"));
+        assert_eq!(body["data"]["bound_user_id"], serde_json::Value::Null);
+        let request_id = body["data"]["request_id"].as_str().unwrap().to_string();
+        let pairing_code = body["data"]["pairing_code"].as_str().unwrap().to_string();
+        assert_eq!(pairing_code.len(), 6);
+
+        let (status, status_body) = get_json(
+            create_router((*state.as_ref()).clone()),
+            &format!("/api/account/status/{}", node_id.as_str()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status_body["success"], json!(true));
+        assert_eq!(status_body["data"]["node_id"], json!(node_id.as_str()));
+        assert_eq!(status_body["data"]["pairing_enabled"], json!(true));
+        assert_eq!(
+            status_body["data"]["bound_user_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            status_body["data"]["pairing"]["request_id"],
+            json!(request_id)
+        );
+        assert_eq!(
+            status_body["data"]["pairing"]["pairing_code"],
+            json!(pairing_code)
+        );
+        assert_eq!(status_body["data"]["pairing"]["status"], json!("pending"));
+    }
+
+    #[tokio::test]
+    async fn test_account_pairing_cancel_api_marks_request_cancelled() {
+        let (app, state, _hub, node_id, _rx, _workspace) =
+            create_router_test_state_with_registered_node().await;
+
+        let (_status, body) = post_json(
+            app,
+            "/api/account/pairing/start",
+            &json!({
+                "node_id": node_id.as_str()
+            }),
+        )
+        .await;
+        let request_id = body["data"]["request_id"].as_str().unwrap().to_string();
+
+        let (status, cancel_body) = post_json(
+            create_router((*state.as_ref()).clone()),
+            "/api/account/pairing/cancel",
+            &json!({
+                "request_id": request_id
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cancel_body["success"], json!(true));
+        assert_eq!(cancel_body["data"], json!("Pairing cancelled"));
+
+        let (status, status_body) = get_json(
+            create_router((*state.as_ref()).clone()),
+            &format!("/api/account/status/{}", node_id.as_str()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status_body["data"]["pairing"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn test_account_binding_delete_api_unbinds_runtime_binding() {
+        let (app, state, _hub, node_id, _rx, _workspace) =
+            create_router_test_state_with_registered_node().await;
+        let pairing_manager = state.pairing_manager.as_ref().unwrap().clone();
+        let request = pairing_manager
+            .initiate_pairing(
+                uhorse_core::DeviceId::from_string(node_id.as_str()),
+                "Desktop Node".to_string(),
+                "desktop".to_string(),
+            )
+            .await
+            .unwrap();
+        pairing_manager
+            .confirm_pairing(&request.pairing_code, "ding-user-1".to_string())
+            .await
+            .unwrap();
+        state
+            .hub
+            .notification_bindings()
+            .set_binding(node_id.as_str(), "ding-user-1")
+            .await;
+
+        let (status, body) =
+            delete_json(app, &format!("/api/account/binding/{}", node_id.as_str())).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"], json!("Binding removed"));
+        assert_eq!(
+            state
+                .hub
+                .notification_bindings()
+                .get_user_id(node_id.as_str())
+                .await,
+            None
+        );
+
+        let (status, status_body) = get_json(
+            create_router((*state.as_ref()).clone()),
+            &format!("/api/account/status/{}", node_id.as_str()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            status_body["data"]["bound_user_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(status_body["data"]["pairing"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn test_get_account_status_api_shows_bound_user_after_pairing_confirmation() {
+        let (_app, state, _hub, node_id, _rx, _workspace) =
+            create_router_test_state_with_registered_node().await;
+        let pairing_manager = state.pairing_manager.as_ref().unwrap().clone();
+        let request = pairing_manager
+            .initiate_pairing(
+                uhorse_core::DeviceId::from_string(node_id.as_str()),
+                "Desktop Node".to_string(),
+                "desktop".to_string(),
+            )
+            .await
+            .unwrap();
+        pairing_manager
+            .confirm_pairing(&request.pairing_code, "ding-user-1".to_string())
+            .await
+            .unwrap();
+        state
+            .hub
+            .notification_bindings()
+            .set_binding(node_id.as_str(), "ding-user-1")
+            .await;
+
+        let (status, body) = get_json(
+            create_router((*state.as_ref()).clone()),
+            &format!("/api/account/status/{}", node_id.as_str()),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"]["pairing_enabled"], json!(true));
+        assert_eq!(body["data"]["bound_user_id"], json!("ding-user-1"));
+        assert_eq!(body["data"]["pairing"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_pairing_request_response_serializes_paired_user() {
+        let mut request = PairingRequest::new(
+            uhorse_core::DeviceId::from_string("node-desktop-1"),
+            "Desktop Node".to_string(),
+            "desktop".to_string(),
+        );
+        request.confirm("ding-user-1".to_string());
+
+        let response = pairing_request_response(request);
+
+        assert_eq!(response.node_id, "node-desktop-1");
+        assert_eq!(response.status, "paired");
+        assert_eq!(response.bound_user_id.as_deref(), Some("ding-user-1"));
     }
 
     #[test]

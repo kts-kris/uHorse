@@ -306,7 +306,7 @@ user_id = "your-dingtalk-user-id"
 
 - The main runtime path is **Stream mode** and does not depend on a public webhook to receive inbound messages.
 - Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
-- To mirror Node Desktop local notifications to DingTalk, also configure a stable `node_id` to DingTalk `user_id` mapping in `channels.dingtalk.notification_bindings`.
+- To mirror Node Desktop local notifications to DingTalk, the main path is to enable pairing, start binding from Node Desktop, and confirm it in DingTalk; `channels.dingtalk.notification_bindings` is kept only as a compatibility seed/fallback.
 - DingTalk text is first planned by the LLM into a single safe command; file operations, shell commands, and controlled `BrowserCommand` flows are all part of the current mainline.
 - For requests such as “open a webpage”, the current mainline prefers `BrowserCommand::OpenSystem` instead of automated browser `Navigate`.
 - Hub validates path scope locally before dispatch and rejects dangerous git commands.
@@ -392,7 +392,7 @@ curl http://127.0.0.1:8765/api/health
 curl http://127.0.0.1:8765/api/nodes
 ```
 
-Note: even though unified config contains `server.health.path`, the actual health route exposed by `uhorse-hub` today is:
+Note: `uhorse-hub` only exposes the unified-config health route when `server.health.enabled = true`; if you do not override it, the default remains:
 
 ```text
 /api/health

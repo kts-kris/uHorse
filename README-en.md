@@ -74,7 +74,7 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive plus a macOS `.pkg` and a Windows installer, and CI / release / nightly all publish matching artifacts; `.app/.dmg`, `.msi`, and Linux native installers are outside the current boundary |
 | Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` and `test_local_hub_node_roundtrip_file_write` cover real Hub + Node + WebSocket roundtrips |
 | Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
-| DingTalk Stream integration | ✅ | Stream mode is the recommended path; mirroring Node Desktop notifications also requires `channels.dingtalk.notification_bindings` |
+| DingTalk Stream integration | ✅ | Stream mode is the recommended path; Node Desktop can establish runtime bindings through pairing, and `channels.dingtalk.notification_bindings` is now only a compatibility seed/fallback |
 | DingTalk browser planning path | ✅ | Hub now allows controlled `BrowserCommand` planning and dispatches browser work to nodes that declare `CommandType::Browser` |
 
 ## Quick Start
@@ -191,7 +191,8 @@ If you want to mirror Node Desktop local notifications to DingTalk, both sides m
 - enable `notifications_enabled` locally
 - enable `show_notification_details` if you also want richer notification content
 - enable `mirror_notifications_to_dingtalk` if the local notification should also be forwarded to DingTalk
-- add a stable `node_id` → DingTalk `user_id` mapping in `channels.dingtalk.notification_bindings` on Hub
+- start pairing from Node Desktop and confirm the runtime binding in DingTalk with the pairing code
+- only configure `channels.dingtalk.notification_bindings` when you need compatibility seed/fallback behavior
 - if the running Node and the newly saved config differ, Settings / Dashboard will show that a restart is required before the new workspace and runtime config take effect
 
 ### 5. Submit a minimal task

@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hub now applies local safety validation to browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets
 - `uhorse-node-runtime` now uses the formal browser execution path, `uhorse-node-desktop` enables the `browser` feature by default, and browser-capable nodes participate in capability-based routing via `CommandType::Browser`
 - GitHub release / nightly workflows now produce mainstream-platform archive artifacts for `uhorse-hub` and `uhorse-node-desktop`
-- `channels.dingtalk.notification_bindings` is now part of the documented mainline path for mapping stable `node_id` values to DingTalk `user_id` values so Node Desktop notification mirroring can return to the correct user
+- Node Desktop DingTalk notification mirroring now documents the pairing-driven runtime binding flow as the main path, while `channels.dingtalk.notification_bindings` is repositioned as a compatibility seed/fallback
 
 ### Changed
 

@@ -28,6 +28,29 @@ export interface DesktopSettings {
   launch_at_login: boolean;
 }
 
+export interface CancelAccountPairingRequest {
+  request_id: string;
+}
+
+export interface DesktopPairingRequest {
+  request_id: string;
+  node_id: string;
+  node_name: string;
+  device_type: string;
+  pairing_code: string;
+  status: string;
+  created_at: number;
+  expires_at: number;
+  bound_user_id: string | null;
+}
+
+export interface DesktopAccountStatus {
+  node_id: string;
+  pairing_enabled: boolean;
+  bound_user_id: string | null;
+  pairing: DesktopPairingRequest | null;
+}
+
 export interface DefaultSettings {
   suggested_name: string;
   notifications_enabled: boolean;

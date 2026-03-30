@@ -86,7 +86,7 @@ For a minimal local roundtrip you usually only need:
 - `hub.toml` for Hub host / port / scheduler fields
 - `node.toml` for node name / workspace / Hub WebSocket URL
 
-See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, Hub also needs `channels.dingtalk.notification_bindings` in addition to the DingTalk credentials.
+See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, configure DingTalk credentials, enable pairing, and complete binding from Node Desktop; `channels.dingtalk.notification_bindings` is only a compatibility seed/fallback.
 
 ### 5. Start Hub and Node
 

@@ -1,6 +1,6 @@
 # uHorse Hub 统一配置示例
 # 当前主线路径：uhorse-hub + uhorse-node
-# 实际健康检查路由：GET /api/health
+# 健康检查路由默认值：GET /api/health，可通过 [server.health].path 调整
 # 实际 Prometheus 指标路由：GET /metrics
 
 [server]
@@ -20,7 +20,7 @@ write_timeout = 10
 [server.health]
 # 是否启用健康检查端点
 enabled = true
-# 当前主线统一使用 /api/health
+# 健康检查路径，可按部署需要调整
 path = "/api/health"
 # 是否暴露详细状态
 verbose = false
