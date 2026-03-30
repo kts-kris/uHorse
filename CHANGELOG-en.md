@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Node Desktop now has macOS `.pkg` and Windows installer packaging scripts while continuing to reuse the existing `bin + web` payload
+- `desktop-installer-smoke.sh` now validates the installed host API, static assets, and SPA route fallback from an installed layout
+
+### Changed
+
+- GitHub release / nightly workflows now keep uploading the Node Desktop archives and additionally publish the macOS `.pkg` and Windows installer artifacts
+- README / INSTALL / scripts / release docs are now aligned to the current Node Desktop delivery boundary: archive + macOS `.pkg` + Windows installer, while still excluding `.app/.dmg`, code signing, notarization, `.msi`, and Linux native installers
+
 ## [4.1.3] - 2026-03-29
 
 ### Changed

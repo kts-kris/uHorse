@@ -41,7 +41,7 @@ Core components and primary deliverables:
 
 - `uhorse-hub`: cloud-side control plane for Node access, task scheduling, Web API, approval endpoints, and DingTalk Stream intake.
 - `uhorse-node-runtime`: the real Node runtime implementation, including reconnect, workspace protection, permissions, browser execution, approval requests, and task execution.
-- `uhorse-node-desktop`: the recommended local desktop form factor for Node, delivered as a `bin/ + web/` archive.
+- `uhorse-node-desktop`: the recommended local desktop form factor for Node, delivered as a `bin/ + web/` archive plus a macOS `.pkg` and a Windows installer.
 - `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
 - `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
@@ -53,7 +53,7 @@ The `v4.1.3` capabilities already visible and validated in the repository includ
 - `memory / agent / skill` now support the layered chain `global / tenant / enterprise / department / role / user / session`; `memory_context_chain` reads from shared to private, while `visibility_chain` resolves from private back to shared.
 - task context and runtime sessions now explicitly distinguish the stable `execution_workspace_id` from the Hub-side logical `collaboration_workspace_id` / `CollaborationWorkspace`; the former defines the real execution boundary, while the latter only carries collaboration context and default binding.
 - the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
-- Node Desktop is delivered as a `bin/ + web/` archive together with `desktop-smoke.sh` and GitHub release / nightly artifacts, not as native `.app/.dmg`, code signing, notarization, or installers.
+- Node Desktop is delivered as a `bin/ + web/` archive, a macOS `.pkg`, a Windows installer, matching smoke coverage, and GitHub release / nightly artifacts, not as a native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installer.
 
 These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.1.3` as a return to the old monolithic Agent platform.
 
@@ -71,7 +71,7 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Layered `memory / agent / skill` scopes | ✅ | the runtime now organizes sharing and isolation across `global / tenant / enterprise / department / role / user / session` scopes |
 | Runtime session / collaboration workspace APIs | ✅ | `/api/v1/sessions*` now return `namespace`, `memory_context_chain`, `visibility_chain`, and `collaboration_workspace` |
 | Source-aware runtime / UI | ✅ | runtime pages such as Skills and Settings expose `source_layer` and `source_scope` so same-name multi-source resources can be distinguished |
-| Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive, and CI / release / nightly all publish matching artifacts; `.app/.dmg` is outside the current boundary |
+| Node Desktop packaging and smoke | ✅ | the current delivery path is a `bin + web` archive plus a macOS `.pkg` and a Windows installer, and CI / release / nightly all publish matching artifacts; `.app/.dmg`, `.msi`, and Linux native installers are outside the current boundary |
 | Real local integration test | ✅ | `test_local_hub_node_roundtrip_file_exists` and `test_local_hub_node_roundtrip_file_write` cover real Hub + Node + WebSocket roundtrips |
 | Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
 | DingTalk Stream integration | ✅ | Stream mode is the recommended path; mirroring Node Desktop notifications also requires `channels.dingtalk.notification_bindings` |
@@ -93,7 +93,7 @@ Primary outputs:
 - `target/release/uhorse-node`
 - `target/release/uhorse-node-desktop`
 
-If you want prebuilt mainstream-platform packages, use the GitHub Release / nightly archives for `uhorse-hub` and `uhorse-node-desktop`.
+If you want prebuilt mainstream-platform packages, use the GitHub Release / nightly `uhorse-hub` archives and the `uhorse-node-desktop` archive / macOS `.pkg` / Windows installer artifacts.
 
 ### 2. Generate default configs
 

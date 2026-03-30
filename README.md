@@ -41,7 +41,7 @@ uHorse 当前对外发布口径是 **v4.1.3 Hub-Node 主线**。
 
 - `uhorse-hub`：云端中枢，负责 Node 接入、任务调度、Web API、审批接口，以及 DingTalk Stream 消息入口。
 - `uhorse-node-runtime`：Node 的实际运行时实现，包括连接循环、工作区保护、权限管理、重连、浏览器执行与任务执行。
-- `uhorse-node-desktop`：当前推荐的本地 Node 桌面形态，交付边界为 `bin/ + web/` archive。
+- `uhorse-node-desktop`：当前推荐的本地 Node 桌面形态，交付边界为 `bin/ + web/` archive，并提供 macOS `.pkg` 与 Windows installer。
 - `uhorse-protocol`：Hub 和 Node 之间的协议定义，包括 `TaskAssignment`、`TaskResult`、`ApprovalRequest`、`ApprovalResponse` 等消息。
 - `uhorse-config`：Hub 统一配置模型，承载 `server`、`channels`、`security`、`llm` 等配置段。
 
@@ -53,7 +53,7 @@ uHorse 当前对外发布口径是 **v4.1.3 Hub-Node 主线**。
 - `memory / agent / skill` 已支持 `global / tenant / enterprise / department / role / user / session` 分层共享链；`memory_context_chain` 从共享读到私有，`visibility_chain` 从私有回退到共享。
 - 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`；前者决定真实执行边界，后者仅承载协作上下文与默认绑定。
 - runtime API 与 Web UI 已支持 `source_layer`、`source_scope` 的来源感知展示与按来源详情查询。
-- Node Desktop 当前交付边界是 `bin/ + web/` archive、`desktop-smoke.sh` 与 GitHub release / nightly artifacts，而不是原生 `.app/.dmg`、签名、公证、安装器。
+- Node Desktop 当前交付边界是 `bin/ + web/` archive、macOS `.pkg`、Windows installer、对应 smoke 与 GitHub release / nightly artifacts，而不是原生 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器。
 
 当前文档以 **仓库里已实现并验证的行为** 为准，不再把旧版 `/health/live`、`/health/ready`、`/api/v1/auth/*`、`/api/v1/messages` 当作当前主线，也不把 `v4.1.3` 写成旧单体 Agent 平台回归。
 
@@ -71,7 +71,7 @@ uHorse 当前对外发布口径是 **v4.1.3 Hub-Node 主线**。
 | 多用户 `memory / agent / skill` 分层作用域 | ✅ | 当前 runtime 已按 `global / tenant / enterprise / department / role / user / session` 组织共享与隔离边界 |
 | 运行时 session / 协作工作空间 API | ✅ | `/api/v1/sessions*` 已返回 `namespace`、`memory_context_chain`、`visibility_chain` 与 `collaboration_workspace` |
 | source-aware runtime / UI | ✅ | Skills、Settings 等页面已展示 `source_layer`、`source_scope`，同名多来源资源可区分 |
-| Node Desktop 打包与 smoke | ✅ | 当前交付为 `bin + web` archive，CI / release / nightly 均产出对应 artifact，不包含 `.app/.dmg` |
+| Node Desktop 打包与 smoke | ✅ | 当前交付为 `bin + web` archive + macOS `.pkg` + Windows installer，CI / release / nightly 均产出对应 artifact，不包含 `.app/.dmg`、`.msi` 或 Linux 原生安装器 |
 | 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 与 `test_local_hub_node_roundtrip_file_write` 已覆盖真实 Hub + Node + WebSocket 闭环 |
 | 鉴权拒绝路径 | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` 已覆盖 token 与注册 `node_id` 不一致场景 |
 | DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream；若要镜像 Node Desktop 本地通知，还需配置 `channels.dingtalk.notification_bindings` |
@@ -93,7 +93,7 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 - `target/release/uhorse-node`
 - `target/release/uhorse-node-desktop`
 
-如需直接获取主流平台包，也可以使用 GitHub Release / nightly 中的 `uhorse-hub` 与 `uhorse-node-desktop` archive。
+如需直接获取主流平台包，也可以使用 GitHub Release / nightly 中的 `uhorse-hub` archive，以及 `uhorse-node-desktop` archive / macOS `.pkg` / Windows installer。
 
 ### 2. 生成默认配置
 

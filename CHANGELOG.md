@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Node Desktop 新增 macOS `.pkg` 与 Windows installer 打包脚本，继续复用现有 `bin + web` payload
+- 新增 `desktop-installer-smoke.sh`，用于校验安装后目录下的宿主 API、静态资源与 SPA 路由回退
+
+### Changed
+
+- GitHub release / nightly workflow 现在会继续上传 Node Desktop archive，并同步上传 macOS `.pkg` 与 Windows installer 产物
+- README / INSTALL / scripts / release 说明已更新为当前 Node Desktop 交付边界：archive + macOS `.pkg` + Windows installer，仍不包含 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器
+
 ## [4.1.3] - 2026-03-29
 
 ### Changed

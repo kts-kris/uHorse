@@ -70,7 +70,7 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 - `target/release/uhorse-node`
 - `target/release/uhorse-node-desktop`
 
-如果你不想本地编译，也可以直接从 GitHub Release / nightly 获取主流平台的 `uhorse-hub` 与 `uhorse-node-desktop` archive。
+如果你不想本地编译，也可以直接从 GitHub Release / nightly 获取主流平台的 `uhorse-hub` 与 `uhorse-node-desktop` archive；其中 Node Desktop 额外提供 macOS `.pkg` 与 Windows installer `.exe`。
 
 ### 3. 生成默认配置
 
@@ -108,7 +108,7 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 
 如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本。
 
-`v4.1.3` 当前已经固定的交付边界是：**`bin + web` archive、`desktop-smoke.sh`、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive 与 smoke 验证，但**不包含**原生 `.app/.dmg`、签名、公证、安装器。
+`v4.1.3` 当前已经固定的交付边界是：**`bin + web` archive、安装器 smoke、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive、macOS `.pkg`、Windows installer 与对应 smoke 验证，但**仍不包含**原生 `.app/.dmg`、签名、公证、`.msi`、Linux 原生安装器。
 
 可以直接使用仓库内置脚本：
 
@@ -116,25 +116,48 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 ./scripts/package-node-desktop.sh
 ```
 
-默认产物：
+默认 archive 产物：
 
 - `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/bin/uhorse-node-desktop`
 - `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/web/`
 - 对应 `.tar.gz` 或 `.zip` 压缩包
 
-若要验证打包后的宿主 API 与静态资源联通，可继续执行：
+如需原生安装包：
+
+```bash
+./scripts/package-node-desktop-macos-pkg.sh
+./scripts/package-node-desktop-windows-installer.ps1
+```
+
+对应安装器产物：
+
+- macOS：`target/node-desktop-package/uhorse-node-desktop-<version>-<target>.pkg`
+- Windows：`target/node-desktop-package/uhorse-node-desktop-<version>-<target>-installer.exe`
+
+若要验证 archive，可执行：
 
 ```bash
 ./scripts/desktop-smoke.sh
 ```
 
-这条 smoke 当前覆盖的是：
+若要验证安装后目录，可执行：
+
+```bash
+./scripts/desktop-installer-smoke.sh <install-root>
+```
+
+Windows CI 中则使用：
+
+```powershell
+./scripts/desktop-installer-smoke.ps1 -InstallRoot <install-root>
+```
+
+当前 smoke 覆盖的是：
 
 - Node Desktop 宿主 API
 - 前端静态资源可访问性
 - SPA 路由回退
-
-它不代表原生安装器、系统级桌面分发或平台签名链路已经完成。
+- 安装后 `bin + web` 目录布局仍可运行
 
 ---
 
@@ -192,7 +215,7 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
 - 一个文件存在性命令 roundtrip
 - 一个真实写文件 roundtrip（包含落盘与 structured file_operation 返回）
 
-### 5. 验证 Node Desktop `v4.1.3` archive 边界
+### 5. 验证 Node Desktop `v4.1.3` 交付边界
 
 如果你正在验收 `v4.1.3` 的 Node Desktop 交付件，请额外执行：
 
@@ -201,7 +224,20 @@ cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
 ./scripts/desktop-smoke.sh
 ```
 
-验收标准是 archive 可生成、宿主 API 与静态资源 smoke 通过，而不是 `.app/.dmg` 或原生安装器存在。
+如需继续验证原生安装包链路：
+
+```bash
+./scripts/package-node-desktop-macos-pkg.sh
+./scripts/desktop-installer-smoke.sh target/node-desktop-package/uhorse-node-desktop-<version>-<target>
+```
+
+Windows 则使用：
+
+```powershell
+./scripts/package-node-desktop-windows-installer.ps1
+```
+
+验收标准是 archive、`.pkg` / installer 可生成，且宿主 API、静态资源与安装后 `bin + web` 布局 smoke 通过；当前仍不要求 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器存在。
 
 ---
 
