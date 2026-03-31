@@ -878,10 +878,13 @@ async fn get_hub_api<T: DeserializeOwned>(
     auth_token: Option<&str>,
 ) -> NodeResult<T> {
     let base_url = hub_http_base_url(hub_url)?;
-    let response = apply_hub_api_auth(reqwest::Client::new().get(format!("{}{}", base_url, path)), auth_token)
-        .send()
-        .await
-        .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
+    let response = apply_hub_api_auth(
+        reqwest::Client::new().get(format!("{}{}", base_url, path)),
+        auth_token,
+    )
+    .send()
+    .await
+    .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
     parse_hub_response(response).await
 }
 

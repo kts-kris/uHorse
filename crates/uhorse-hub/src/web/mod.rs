@@ -3820,7 +3820,8 @@ async fn start_account_pairing(
     headers: HeaderMap,
     Json(payload): Json<StartPairingPayload>,
 ) -> (StatusCode, Json<ApiResponse<PairingRequestResponse>>) {
-    if let Err((status, message)) = authorize_account_api_node(&state, &headers, &payload.node_id).await
+    if let Err((status, message)) =
+        authorize_account_api_node(&state, &headers, &payload.node_id).await
     {
         return (status, Json(ApiResponse::error(message)));
     }
@@ -3863,7 +3864,10 @@ async fn cancel_account_pairing(
         );
     };
 
-    let request = match pairing_manager.get_pairing_request(&payload.request_id).await {
+    let request = match pairing_manager
+        .get_pairing_request(&payload.request_id)
+        .await
+    {
         Ok(request) => request,
         Err(error) => {
             return (
@@ -4571,7 +4575,10 @@ mod tests {
         app
     }
 
-    async fn issue_test_node_token(state: &Arc<WebState>, node_id: &uhorse_protocol::NodeId) -> String {
+    async fn issue_test_node_token(
+        state: &Arc<WebState>,
+        node_id: &uhorse_protocol::NodeId,
+    ) -> String {
         state
             .hub
             .security_manager()
@@ -4602,7 +4609,10 @@ mod tests {
             .uri(path)
             .header("content-type", "application/json");
         if let Some(token) = auth_token {
-            request = request.header(header::AUTHORIZATION, format!("{}{}", BEARER_AUTH_PREFIX, token));
+            request = request.header(
+                header::AUTHORIZATION,
+                format!("{}{}", BEARER_AUTH_PREFIX, token),
+            );
         }
         let request = request
             .body(Body::from(serde_json::to_vec(payload).unwrap()))
@@ -4625,7 +4635,10 @@ mod tests {
     ) -> (StatusCode, serde_json::Value) {
         let mut request = Request::builder().method("GET").uri(path);
         if let Some(token) = auth_token {
-            request = request.header(header::AUTHORIZATION, format!("{}{}", BEARER_AUTH_PREFIX, token));
+            request = request.header(
+                header::AUTHORIZATION,
+                format!("{}{}", BEARER_AUTH_PREFIX, token),
+            );
         }
         let request = request.body(Body::empty()).unwrap();
         let response = app.oneshot(request).await.unwrap();
@@ -4642,7 +4655,10 @@ mod tests {
     ) -> (StatusCode, serde_json::Value) {
         let mut request = Request::builder().method("DELETE").uri(path);
         if let Some(token) = auth_token {
-            request = request.header(header::AUTHORIZATION, format!("{}{}", BEARER_AUTH_PREFIX, token));
+            request = request.header(
+                header::AUTHORIZATION,
+                format!("{}{}", BEARER_AUTH_PREFIX, token),
+            );
         }
         let request = request.body(Body::empty()).unwrap();
         let response = app.oneshot(request).await.unwrap();
