@@ -65,6 +65,7 @@ pub struct DingTalkReplyRoute {
 }
 
 const DINGTALK_PROCESSING_ACK_TEXT: &str = "收到啦，正在处理，请稍等～";
+const BEARER_AUTH_PREFIX: &str = "Bearer ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DingTalkReplyTarget {
@@ -3755,10 +3756,75 @@ async fn issue_node_token(
     }
 }
 
+async fn authorize_account_api_node(
+    state: &Arc<WebState>,
+    headers: &HeaderMap,
+    requested_node_id: &str,
+) -> Result<(), (StatusCode, &'static str)> {
+    let Some(security_manager) = state.hub.security_manager() else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Security manager not configured",
+        ));
+    };
+
+    let Some(auth_header) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return Err((StatusCode::UNAUTHORIZED, "Missing Authorization header"));
+    };
+
+    let Some(token) = auth_header.strip_prefix(BEARER_AUTH_PREFIX) else {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Authorization header"));
+    };
+
+    let token = token.trim();
+    if token.is_empty() {
+        return Err((StatusCode::UNAUTHORIZED, "Missing bearer token"));
+    }
+
+    let authenticated_node_id = match security_manager
+        .node_authenticator()
+        .verify_token(token)
+        .await
+    {
+        Ok(node_id) => node_id,
+        Err(error) => {
+            warn!(
+                requested_node_id,
+                error = %error,
+                "account api token verification failed"
+            );
+            return Err((StatusCode::UNAUTHORIZED, "Token verification failed"));
+        }
+    };
+
+    if authenticated_node_id.as_str() != requested_node_id {
+        warn!(
+            requested_node_id,
+            authenticated_node_id = authenticated_node_id.as_str(),
+            "account api node_id mismatch"
+        );
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Token node_id does not match requested node_id",
+        ));
+    }
+
+    Ok(())
+}
+
 async fn start_account_pairing(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Json(payload): Json<StartPairingPayload>,
 ) -> (StatusCode, Json<ApiResponse<PairingRequestResponse>>) {
+    if let Err((status, message)) = authorize_account_api_node(&state, &headers, &payload.node_id).await
+    {
+        return (status, Json(ApiResponse::error(message)));
+    }
+
     let Some(pairing_manager) = state.pairing_manager.as_ref() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -3787,6 +3853,7 @@ async fn start_account_pairing(
 
 async fn cancel_account_pairing(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Json(payload): Json<CancelPairingPayload>,
 ) -> (StatusCode, Json<ApiResponse<&'static str>>) {
     let Some(pairing_manager) = state.pairing_manager.as_ref() else {
@@ -3795,6 +3862,22 @@ async fn cancel_account_pairing(
             Json(ApiResponse::error("Pairing manager not configured")),
         );
     };
+
+    let request = match pairing_manager.get_pairing_request(&payload.request_id).await {
+        Ok(request) => request,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::error(&error.to_string())),
+            )
+        }
+    };
+
+    if let Err((status, message)) =
+        authorize_account_api_node(&state, &headers, request.device_id.as_str()).await
+    {
+        return (status, Json(ApiResponse::error(message)));
+    }
 
     match pairing_manager.cancel_pairing(&payload.request_id).await {
         Ok(()) => (
@@ -3810,8 +3893,13 @@ async fn cancel_account_pairing(
 
 async fn get_account_status(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(node_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<AccountStatusResponse>>) {
+    if let Err((status, message)) = authorize_account_api_node(&state, &headers, &node_id).await {
+        return (status, Json(ApiResponse::error(message)));
+    }
+
     let bound_user_id = state
         .hub
         .notification_bindings()
@@ -3853,8 +3941,13 @@ async fn get_account_status(
 
 async fn delete_account_binding(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(node_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<&'static str>>) {
+    if let Err((status, message)) = authorize_account_api_node(&state, &headers, &node_id).await {
+        return (status, Json(ApiResponse::error(message)));
+    }
+
     state
         .hub
         .notification_bindings()
@@ -4478,15 +4571,40 @@ mod tests {
         app
     }
 
+    async fn issue_test_node_token(state: &Arc<WebState>, node_id: &uhorse_protocol::NodeId) -> String {
+        state
+            .hub
+            .security_manager()
+            .unwrap()
+            .node_authenticator()
+            .authenticate_node(node_id, "test-credentials")
+            .await
+            .unwrap()
+            .access_token
+    }
+
     async fn post_json<T: Serialize>(
         app: Router,
         path: &str,
         payload: &T,
     ) -> (StatusCode, serde_json::Value) {
-        let request = Request::builder()
+        post_json_with_auth(app, path, payload, None).await
+    }
+
+    async fn post_json_with_auth<T: Serialize>(
+        app: Router,
+        path: &str,
+        payload: &T,
+        auth_token: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder()
             .method("POST")
             .uri(path)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+        if let Some(token) = auth_token {
+            request = request.header(header::AUTHORIZATION, format!("{}{}", BEARER_AUTH_PREFIX, token));
+        }
+        let request = request
             .body(Body::from(serde_json::to_vec(payload).unwrap()))
             .unwrap();
         let response = app.oneshot(request).await.unwrap();
@@ -4497,11 +4615,19 @@ mod tests {
     }
 
     async fn get_json(app: Router, path: &str) -> (StatusCode, serde_json::Value) {
-        let request = Request::builder()
-            .method("GET")
-            .uri(path)
-            .body(Body::empty())
-            .unwrap();
+        get_json_with_auth(app, path, None).await
+    }
+
+    async fn get_json_with_auth(
+        app: Router,
+        path: &str,
+        auth_token: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method("GET").uri(path);
+        if let Some(token) = auth_token {
+            request = request.header(header::AUTHORIZATION, format!("{}{}", BEARER_AUTH_PREFIX, token));
+        }
+        let request = request.body(Body::empty()).unwrap();
         let response = app.oneshot(request).await.unwrap();
         let status = response.status();
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -4509,12 +4635,16 @@ mod tests {
         (status, json)
     }
 
-    async fn delete_json(app: Router, path: &str) -> (StatusCode, serde_json::Value) {
-        let request = Request::builder()
-            .method("DELETE")
-            .uri(path)
-            .body(Body::empty())
-            .unwrap();
+    async fn delete_json_with_auth(
+        app: Router,
+        path: &str,
+        auth_token: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = Request::builder().method("DELETE").uri(path);
+        if let Some(token) = auth_token {
+            request = request.header(header::AUTHORIZATION, format!("{}{}", BEARER_AUTH_PREFIX, token));
+        }
+        let request = request.body(Body::empty()).unwrap();
         let response = app.oneshot(request).await.unwrap();
         let status = response.status();
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -7524,8 +7654,8 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     }
 
     #[tokio::test]
-    async fn test_account_pairing_start_and_status_api_returns_pending_request() {
-        let (app, state, _hub, node_id, _rx, _workspace) =
+    async fn test_account_pairing_start_requires_authorization() {
+        let (app, _state, _hub, node_id, _rx, _workspace) =
             create_router_test_state_with_registered_node().await;
 
         let (status, body) = post_json(
@@ -7536,6 +7666,28 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
                 "node_name": "Desktop Node",
                 "device_type": "desktop"
             }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["success"], json!(false));
+        assert_eq!(body["error"], json!("Security manager not configured"));
+    }
+
+    #[tokio::test]
+    async fn test_account_pairing_start_and_status_api_returns_pending_request() {
+        let (app, state, node_id, _rx) = create_router_test_state_with_security().await;
+        let auth_token = issue_test_node_token(&state, &node_id).await;
+
+        let (status, body) = post_json_with_auth(
+            app,
+            "/api/account/pairing/start",
+            &json!({
+                "node_id": node_id.as_str(),
+                "node_name": "Desktop Node",
+                "device_type": "desktop"
+            }),
+            Some(&auth_token),
         )
         .await;
 
@@ -7550,9 +7702,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         let pairing_code = body["data"]["pairing_code"].as_str().unwrap().to_string();
         assert_eq!(pairing_code.len(), 6);
 
-        let (status, status_body) = get_json(
+        let (status, status_body) = get_json_with_auth(
             create_router((*state.as_ref()).clone()),
             &format!("/api/account/status/{}", node_id.as_str()),
+            Some(&auth_token),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -7575,26 +7728,49 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
     }
 
     #[tokio::test]
-    async fn test_account_pairing_cancel_api_marks_request_cancelled() {
-        let (app, state, _hub, node_id, _rx, _workspace) =
-            create_router_test_state_with_registered_node().await;
+    async fn test_account_status_rejects_token_node_id_mismatch() {
+        let (app, state, node_id, _rx) = create_router_test_state_with_security().await;
+        let other_node_id = uhorse_protocol::NodeId::from_string("node-other-web");
+        let auth_token = issue_test_node_token(&state, &other_node_id).await;
 
-        let (_status, body) = post_json(
+        let (status, body) = get_json_with_auth(
+            app,
+            &format!("/api/account/status/{}", node_id.as_str()),
+            Some(&auth_token),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["success"], json!(false));
+        assert_eq!(
+            body["error"],
+            json!("Token node_id does not match requested node_id")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_account_pairing_cancel_api_marks_request_cancelled() {
+        let (app, state, node_id, _rx) = create_router_test_state_with_security().await;
+        let auth_token = issue_test_node_token(&state, &node_id).await;
+
+        let (_status, body) = post_json_with_auth(
             app,
             "/api/account/pairing/start",
             &json!({
                 "node_id": node_id.as_str()
             }),
+            Some(&auth_token),
         )
         .await;
         let request_id = body["data"]["request_id"].as_str().unwrap().to_string();
 
-        let (status, cancel_body) = post_json(
+        let (status, cancel_body) = post_json_with_auth(
             create_router((*state.as_ref()).clone()),
             "/api/account/pairing/cancel",
             &json!({
                 "request_id": request_id
             }),
+            Some(&auth_token),
         )
         .await;
 
@@ -7602,9 +7778,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(cancel_body["success"], json!(true));
         assert_eq!(cancel_body["data"], json!("Pairing cancelled"));
 
-        let (status, status_body) = get_json(
+        let (status, status_body) = get_json_with_auth(
             create_router((*state.as_ref()).clone()),
             &format!("/api/account/status/{}", node_id.as_str()),
+            Some(&auth_token),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -7613,8 +7790,8 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
 
     #[tokio::test]
     async fn test_account_binding_delete_api_unbinds_runtime_binding() {
-        let (app, state, _hub, node_id, _rx, _workspace) =
-            create_router_test_state_with_registered_node().await;
+        let (app, state, node_id, _rx) = create_router_test_state_with_security().await;
+        let auth_token = issue_test_node_token(&state, &node_id).await;
         let pairing_manager = state.pairing_manager.as_ref().unwrap().clone();
         let request = pairing_manager
             .initiate_pairing(
@@ -7634,8 +7811,12 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             .set_binding(node_id.as_str(), "ding-user-1")
             .await;
 
-        let (status, body) =
-            delete_json(app, &format!("/api/account/binding/{}", node_id.as_str())).await;
+        let (status, body) = delete_json_with_auth(
+            app,
+            &format!("/api/account/binding/{}", node_id.as_str()),
+            Some(&auth_token),
+        )
+        .await;
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["success"], json!(true));
@@ -7649,9 +7830,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             None
         );
 
-        let (status, status_body) = get_json(
+        let (status, status_body) = get_json_with_auth(
             create_router((*state.as_ref()).clone()),
             &format!("/api/account/status/{}", node_id.as_str()),
+            Some(&auth_token),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -7664,8 +7846,8 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
 
     #[tokio::test]
     async fn test_get_account_status_api_shows_bound_user_after_pairing_confirmation() {
-        let (_app, state, _hub, node_id, _rx, _workspace) =
-            create_router_test_state_with_registered_node().await;
+        let (_app, state, node_id, _rx) = create_router_test_state_with_security().await;
+        let auth_token = issue_test_node_token(&state, &node_id).await;
         let pairing_manager = state.pairing_manager.as_ref().unwrap().clone();
         let request = pairing_manager
             .initiate_pairing(
@@ -7685,9 +7867,10 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
             .set_binding(node_id.as_str(), "ding-user-1")
             .await;
 
-        let (status, body) = get_json(
+        let (status, body) = get_json_with_auth(
             create_router((*state.as_ref()).clone()),
             &format!("/api/account/status/{}", node_id.as_str()),
+            Some(&auth_token),
         )
         .await;
 

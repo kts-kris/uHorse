@@ -447,8 +447,12 @@ mod tests {
         let app = build_app(create_state(&temp), None);
         let (status, body) = get_json(app, "/api/account/status").await;
 
-        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(body["success"], Value::Bool(false));
+        assert_eq!(
+            body["error"],
+            Value::String("Permission denied: Node auth token is missing".to_string())
+        );
     }
 
     #[tokio::test]

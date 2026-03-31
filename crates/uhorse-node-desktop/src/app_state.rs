@@ -7,7 +7,7 @@ use std::{
 };
 
 use chrono::Utc;
-use reqwest::StatusCode;
+use reqwest::{header, StatusCode};
 use serde::de::DeserializeOwned;
 use tokio::sync::RwLock;
 use uhorse_node_runtime::{
@@ -29,6 +29,7 @@ use crate::dto::{
 const DESKTOP_LAUNCH_AGENT_ID: &str = "com.uhorse.node-desktop";
 const DEFAULT_DESKTOP_LISTEN: &str = "127.0.0.1:8757";
 const DEFAULT_DEVICE_TYPE: &str = "desktop";
+const HUB_API_AUTH_HEADER_PREFIX: &str = "Bearer ";
 
 #[derive(Clone)]
 pub struct DesktopAppState {
@@ -602,7 +603,7 @@ impl DesktopAppState {
     }
 
     pub async fn start_account_pairing(&self) -> NodeResult<DesktopPairingRequestDto> {
-        let (hub_url, node_id, node_name) = {
+        let (hub_url, node_id, node_name, auth_token) = {
             let app = self.inner.read().await;
             let node_id = app
                 .config
@@ -611,10 +612,18 @@ impl DesktopAppState {
                 .map(ToString::to_string)
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
+            let auth_token = app
+                .config
+                .connection
+                .auth_token
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| NodeError::Permission("Node auth token is missing".to_string()))?;
             (
                 app.config.connection.hub_url.clone(),
                 node_id,
                 app.config.name.clone(),
+                auth_token,
             )
         };
 
@@ -627,6 +636,7 @@ impl DesktopAppState {
             &hub_url,
             "/api/account/pairing/start",
             &request,
+            Some(&auth_token),
         )
         .await?;
 
@@ -644,16 +654,28 @@ impl DesktopAppState {
     }
 
     pub async fn cancel_account_pairing(&self, request_id: String) -> NodeResult<String> {
-        let hub_url = {
+        let (hub_url, auth_token) = {
             let app = self.inner.read().await;
-            app.config.connection.hub_url.clone()
+            let auth_token = app
+                .config
+                .connection
+                .auth_token
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| NodeError::Permission("Node auth token is missing".to_string()))?;
+            (app.config.connection.hub_url.clone(), auth_token)
         };
 
         let request = CancelAccountPairingRequest {
             request_id: request_id.clone(),
         };
-        let response =
-            post_hub_api::<_, String>(&hub_url, "/api/account/pairing/cancel", &request).await?;
+        let response = post_hub_api::<_, String>(
+            &hub_url,
+            "/api/account/pairing/cancel",
+            &request,
+            Some(&auth_token),
+        )
+        .await?;
 
         let mut app = self.inner.write().await;
         push_log(
@@ -666,37 +688,25 @@ impl DesktopAppState {
     }
 
     pub async fn account_status(&self) -> NodeResult<DesktopAccountStatusDto> {
-        let (hub_url, node_id) = {
-            let app = self.inner.read().await;
-            let node_id = app
-                .config
-                .node_id
-                .as_ref()
-                .map(ToString::to_string)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
-            (app.config.connection.hub_url.clone(), node_id)
-        };
+        let (hub_url, node_id, auth_token) = account_api_credentials(&self.inner).await?;
 
-        get_hub_api(&hub_url, &format!("/api/account/status/{}", node_id)).await
+        get_hub_api(
+            &hub_url,
+            &format!("/api/account/status/{}", node_id),
+            Some(&auth_token),
+        )
+        .await
     }
 
     pub async fn delete_account_binding(&self) -> NodeResult<String> {
-        let (hub_url, node_id) = {
-            let app = self.inner.read().await;
-            let node_id = app
-                .config
-                .node_id
-                .as_ref()
-                .map(ToString::to_string)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
-            (app.config.connection.hub_url.clone(), node_id)
-        };
+        let (hub_url, node_id, auth_token) = account_api_credentials(&self.inner).await?;
 
-        let response =
-            delete_hub_api::<String>(&hub_url, &format!("/api/account/binding/{}", node_id))
-                .await?;
+        let response = delete_hub_api::<String>(
+            &hub_url,
+            &format!("/api/account/binding/{}", node_id),
+            Some(&auth_token),
+        )
+        .await?;
 
         let mut app = self.inner.write().await;
         push_log(
@@ -781,6 +791,42 @@ impl DesktopAppState {
     }
 }
 
+async fn account_api_credentials(
+    inner: &Arc<RwLock<DesktopApp>>,
+) -> NodeResult<(String, String, String)> {
+    let app = inner.read().await;
+    let node_id = app
+        .config
+        .node_id
+        .as_ref()
+        .map(ToString::to_string)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| NodeError::Config("Node ID is missing".to_string()))?;
+    let auth_token = app
+        .config
+        .connection
+        .auth_token
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| NodeError::Permission("Node auth token is missing".to_string()))?;
+
+    Ok((app.config.connection.hub_url.clone(), node_id, auth_token))
+}
+
+fn apply_hub_api_auth(
+    request: reqwest::RequestBuilder,
+    auth_token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    if let Some(token) = auth_token.filter(|value| !value.trim().is_empty()) {
+        request.header(
+            header::AUTHORIZATION,
+            format!("{}{}", HUB_API_AUTH_HEADER_PREFIX, token),
+        )
+    } else {
+        request
+    }
+}
+
 fn hub_http_base_url(hub_url: &str) -> NodeResult<String> {
     if let Some(rest) = hub_url.strip_prefix("ws://") {
         let host = rest.strip_suffix("/ws").unwrap_or(rest);
@@ -816,7 +862,7 @@ async fn parse_hub_response<T: DeserializeOwned>(response: reqwest::Response) ->
             .unwrap_or_else(|| format!("Hub request failed with status {}", status));
         Err(match status {
             StatusCode::BAD_REQUEST => NodeError::Config(message),
-            StatusCode::FORBIDDEN => NodeError::Permission(message),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => NodeError::Permission(message),
             StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE => {
                 NodeError::Connection(message)
             }
@@ -826,10 +872,13 @@ async fn parse_hub_response<T: DeserializeOwned>(response: reqwest::Response) ->
     }
 }
 
-async fn get_hub_api<T: DeserializeOwned>(hub_url: &str, path: &str) -> NodeResult<T> {
+async fn get_hub_api<T: DeserializeOwned>(
+    hub_url: &str,
+    path: &str,
+    auth_token: Option<&str>,
+) -> NodeResult<T> {
     let base_url = hub_http_base_url(hub_url)?;
-    let response = reqwest::Client::new()
-        .get(format!("{}{}", base_url, path))
+    let response = apply_hub_api_auth(reqwest::Client::new().get(format!("{}{}", base_url, path)), auth_token)
         .send()
         .await
         .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
@@ -840,24 +889,34 @@ async fn post_hub_api<P: serde::Serialize, T: DeserializeOwned>(
     hub_url: &str,
     path: &str,
     payload: &P,
+    auth_token: Option<&str>,
 ) -> NodeResult<T> {
     let base_url = hub_http_base_url(hub_url)?;
-    let response = reqwest::Client::new()
-        .post(format!("{}{}", base_url, path))
-        .json(payload)
-        .send()
-        .await
-        .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
+    let response = apply_hub_api_auth(
+        reqwest::Client::new()
+            .post(format!("{}{}", base_url, path))
+            .json(payload),
+        auth_token,
+    )
+    .send()
+    .await
+    .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
     parse_hub_response(response).await
 }
 
-async fn delete_hub_api<T: DeserializeOwned>(hub_url: &str, path: &str) -> NodeResult<T> {
+async fn delete_hub_api<T: DeserializeOwned>(
+    hub_url: &str,
+    path: &str,
+    auth_token: Option<&str>,
+) -> NodeResult<T> {
     let base_url = hub_http_base_url(hub_url)?;
-    let response = reqwest::Client::new()
-        .delete(format!("{}{}", base_url, path))
-        .send()
-        .await
-        .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
+    let response = apply_hub_api_auth(
+        reqwest::Client::new().delete(format!("{}{}", base_url, path)),
+        auth_token,
+    )
+    .send()
+    .await
+    .map_err(|error| NodeError::Connection(format!("Failed to call Hub API: {}", error)))?;
     parse_hub_response(response).await
 }
 
@@ -1616,6 +1675,7 @@ mod tests {
         config.node.workspace_path = temp.path().to_string_lossy().to_string();
         config.node.require_git_repo = false;
         config.node.connection.hub_url = "http://127.0.0.1:18080".to_string();
+        config.node.connection.auth_token = Some("desktop-token".to_string());
         config.desktop.notifications_enabled = false;
         store.save(&config).unwrap();
         DesktopAppState::new(store).unwrap()
@@ -1625,8 +1685,16 @@ mod tests {
         Router::new()
             .route(
                 "/api/account/pairing/start",
-                post(|| async {
-                    Json(ApiResponse::success(DesktopPairingRequestDto {
+                post(|headers: axum::http::HeaderMap| async move {
+                    if headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        != Some("Bearer desktop-token")
+                    {
+                        return Err(axum::http::StatusCode::UNAUTHORIZED);
+                    }
+
+                    Ok(Json(ApiResponse::success(DesktopPairingRequestDto {
                         request_id: "req-1".to_string(),
                         node_id: "node-desktop-test".to_string(),
                         node_name: "Desktop Node".to_string(),
@@ -1636,27 +1704,55 @@ mod tests {
                         created_at: 1,
                         expires_at: 2,
                         bound_user_id: None,
-                    }))
+                    })))
                 }),
             )
             .route(
                 "/api/account/pairing/cancel",
-                post(|| async { Json(ApiResponse::success("Pairing cancelled".to_string())) }),
+                post(|headers: axum::http::HeaderMap| async move {
+                    if headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        != Some("Bearer desktop-token")
+                    {
+                        return Err(axum::http::StatusCode::UNAUTHORIZED);
+                    }
+
+                    Ok(Json(ApiResponse::success("Pairing cancelled".to_string())))
+                }),
             )
             .route(
                 "/api/account/status/node-desktop-test",
-                get(|| async {
-                    Json(ApiResponse::success(DesktopAccountStatusDto {
+                get(|headers: axum::http::HeaderMap| async move {
+                    if headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        != Some("Bearer desktop-token")
+                    {
+                        return Err(axum::http::StatusCode::UNAUTHORIZED);
+                    }
+
+                    Ok(Json(ApiResponse::success(DesktopAccountStatusDto {
                         node_id: "node-desktop-test".to_string(),
                         pairing_enabled: true,
                         bound_user_id: Some("ding-user-1".to_string()),
                         pairing: None,
-                    }))
+                    })))
                 }),
             )
             .route(
                 "/api/account/binding/node-desktop-test",
-                delete(|| async { Json(ApiResponse::success("Binding removed".to_string())) }),
+                delete(|headers: axum::http::HeaderMap| async move {
+                    if headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        != Some("Bearer desktop-token")
+                    {
+                        return Err(axum::http::StatusCode::UNAUTHORIZED);
+                    }
+
+                    Ok(Json(ApiResponse::success("Binding removed".to_string())))
+                }),
             )
     }
 
