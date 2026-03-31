@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { ReloadOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -17,7 +18,12 @@ import {
 } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { desktopApi } from '../services/desktopApi';
-import type { DesktopSettings, DesktopWorkspaceStatus } from '../types/desktop';
+import type {
+  DesktopAccountStatus,
+  DesktopPairingRequest,
+  DesktopSettings,
+  DesktopWorkspaceStatus,
+} from '../types/desktop';
 
 const Settings: React.FC = () => {
   const [form] = Form.useForm<DesktopSettings>();
@@ -43,6 +49,12 @@ const Settings: React.FC = () => {
     queryFn: desktopApi.getWorkspaceStatus,
   });
 
+  const accountStatusQuery = useQuery({
+    queryKey: ['desktop-account-status'],
+    queryFn: desktopApi.getAccountStatus,
+    refetchInterval: 5000,
+  });
+
   const validateMutation = useMutation({
     mutationFn: desktopApi.validateWorkspace,
   });
@@ -63,6 +75,30 @@ const Settings: React.FC = () => {
     },
   });
 
+  const startPairingMutation = useMutation({
+    mutationFn: desktopApi.startAccountPairing,
+    onSuccess: async (pairing) => {
+      message.success(`绑定码已生成：${pairing.pairing_code}`);
+      await queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] });
+    },
+  });
+
+  const cancelPairingMutation = useMutation({
+    mutationFn: desktopApi.cancelAccountPairing,
+    onSuccess: async (text) => {
+      message.success(text);
+      await queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] });
+    },
+  });
+
+  const deleteBindingMutation = useMutation({
+    mutationFn: desktopApi.deleteAccountBinding,
+    onSuccess: async (text) => {
+      message.success(text);
+      await queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] });
+    },
+  });
+
   const saveMutation = useMutation({
     mutationFn: desktopApi.saveSettings,
     onSuccess: async (saved) => {
@@ -72,6 +108,7 @@ const Settings: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['desktop-runtime-status'] }),
         queryClient.invalidateQueries({ queryKey: ['desktop-version-summary'] }),
         queryClient.invalidateQueries({ queryKey: ['desktop-capability-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] }),
       ]);
 
       const latestWorkspaceStatus = queryClient.getQueryData<DesktopWorkspaceStatus>(['desktop-workspace-status']);
@@ -105,7 +142,11 @@ const Settings: React.FC = () => {
   const validating = validateMutation.isPending;
   const pickingWorkspace = pickWorkspaceMutation.isPending;
   const sendingNotification = notificationMutation.isPending;
+  const pairingBusy =
+    startPairingMutation.isPending || cancelPairingMutation.isPending || deleteBindingMutation.isPending;
   const workspaceStatus = workspaceStatusQuery.data;
+  const accountStatus = accountStatusQuery.data;
+  const activePairing = accountStatus?.pairing || null;
   const validation = validateMutation.data;
   const defaults = defaultSettingsQuery.data;
   const capabilityStatus = capabilityStatusQuery.data;
@@ -129,6 +170,14 @@ const Settings: React.FC = () => {
           description={workspaceStatusQuery.error.message}
         />
       ) : null}
+      {accountStatusQuery.error instanceof Error ? (
+        <Alert
+          type="error"
+          showIcon
+          message="加载账号绑定状态失败"
+          description={accountStatusQuery.error.message}
+        />
+      ) : null}
       {saveMutation.error instanceof Error ? (
         <Alert type="error" showIcon message="保存设置失败" description={saveMutation.error.message} />
       ) : null}
@@ -140,6 +189,15 @@ const Settings: React.FC = () => {
       ) : null}
       {notificationMutation.error instanceof Error ? (
         <Alert type="error" showIcon message="发送测试通知失败" description={notificationMutation.error.message} />
+      ) : null}
+      {startPairingMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="发起账号绑定失败" description={startPairingMutation.error.message} />
+      ) : null}
+      {cancelPairingMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="取消账号绑定失败" description={cancelPairingMutation.error.message} />
+      ) : null}
+      {deleteBindingMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="解绑账号失败" description={deleteBindingMutation.error.message} />
       ) : null}
       {workspaceStatus?.restart_required ? (
         <Alert type="warning" showIcon message={workspaceStatus.restart_notice || '设置已保存，重启 Node 后生效'} />
@@ -317,6 +375,82 @@ const Settings: React.FC = () => {
               </Descriptions>
             </Card>
 
+            <Card
+              title="DingTalk 账号绑定"
+              extra={
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={accountStatusQuery.isFetching}
+                  onClick={() => void accountStatusQuery.refetch()}
+                >
+                  刷新
+                </Button>
+              }
+            >
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Descriptions bordered size="small" column={1}>
+                  <Descriptions.Item label="节点 ID">{accountStatus?.node_id || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="绑定能力">
+                    <Tag color={accountStatus?.pairing_enabled ? 'success' : 'default'}>
+                      {accountStatus?.pairing_enabled ? '已启用' : '未启用'}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="当前绑定用户">
+                    {accountStatus?.bound_user_id || '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="绑定状态">
+                    <Tag color={bindingStatusColor(accountStatus, activePairing)}>
+                      {bindingStatusLabel(accountStatus, activePairing)}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="绑定码">
+                    {activePairing?.pairing_code || '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="过期时间">
+                    {formatUnixTimestamp(activePairing?.expires_at)}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="说明">
+                    {activePairing
+                      ? '在钉钉中向 Hub 机器人发送绑定码完成确认。'
+                      : accountStatus?.bound_user_id
+                        ? '当前节点已绑定钉钉账号，可接收镜像通知。'
+                        : '尚未发起绑定。'}
+                  </Descriptions.Item>
+                </Descriptions>
+
+                <Space wrap>
+                  <Button
+                    type="primary"
+                    onClick={() => startPairingMutation.mutate()}
+                    loading={startPairingMutation.isPending}
+                    disabled={pairingBusy || !accountStatus?.pairing_enabled}
+                  >
+                    {activePairing ? '重新生成绑定码' : '发起绑定'}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (activePairing) {
+                        cancelPairingMutation.mutate({ request_id: activePairing.request_id });
+                      }
+                    }}
+                    loading={cancelPairingMutation.isPending}
+                    disabled={pairingBusy || !activePairing}
+                  >
+                    取消绑定流程
+                  </Button>
+                  <Button
+                    danger
+                    onClick={() => deleteBindingMutation.mutate()}
+                    loading={deleteBindingMutation.isPending}
+                    disabled={pairingBusy || !accountStatus?.bound_user_id}
+                  >
+                    解绑账号
+                  </Button>
+                </Space>
+              </Space>
+            </Card>
+
             <Card title="桌面能力状态" extra={capabilityStatusQuery.isFetching ? '刷新中' : undefined}>
               <Descriptions bordered size="small" column={1}>
                 <Descriptions.Item label="建议节点名称">{defaults?.suggested_name || '-'}</Descriptions.Item>
@@ -376,5 +510,64 @@ const Settings: React.FC = () => {
     </Space>
   );
 };
+
+function bindingStatusLabel(
+  accountStatus?: DesktopAccountStatus,
+  pairing?: DesktopPairingRequest | null,
+): string {
+  if (!accountStatus?.pairing_enabled) {
+    return '未启用';
+  }
+  if (accountStatus.bound_user_id) {
+    return '已绑定';
+  }
+  switch (pairing?.status) {
+    case 'pending':
+      return '待确认';
+    case 'awaiting_confirmation':
+      return '等待钉钉确认';
+    case 'paired':
+      return '已绑定';
+    case 'rejected':
+      return '已拒绝';
+    case 'expired':
+      return '已过期';
+    case 'cancelled':
+      return '已取消';
+    default:
+      return '未绑定';
+  }
+}
+
+function bindingStatusColor(
+  accountStatus?: DesktopAccountStatus,
+  pairing?: DesktopPairingRequest | null,
+): string {
+  if (!accountStatus?.pairing_enabled) {
+    return 'default';
+  }
+  if (accountStatus.bound_user_id) {
+    return 'success';
+  }
+  switch (pairing?.status) {
+    case 'pending':
+    case 'awaiting_confirmation':
+      return 'processing';
+    case 'rejected':
+    case 'expired':
+    case 'cancelled':
+      return 'error';
+    default:
+      return 'default';
+  }
+}
+
+function formatUnixTimestamp(value?: number | null): string {
+  if (!value) {
+    return '-';
+  }
+
+  return new Date(value * 1000).toLocaleString();
+}
 
 export default Settings;

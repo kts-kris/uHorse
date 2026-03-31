@@ -382,39 +382,48 @@ impl ConfigWizard {
             ("企业微信", "wework"),
         ];
 
-        for (i, (name, _)) in channels.iter().enumerate() {
-            println!("  {}. {}", i + 1, name);
-        }
-
-        println!();
-        println!("提示: Telegram 和钉钉为默认预装通道，推荐优先配置");
-        println!();
-
-        let choice = self.prompt_choice(
-            "选择要配置的通道 (输入序号，多个用空格分隔): ",
-            &["1", "2", "3", "4", "5", "6", "7", "继续 (跳过通道配置)"],
-        )?;
-
-        match choice.as_str() {
-            "继续 (跳过通道配置)" => {
-                println!("跳过通道配置");
-                return Ok(());
+        loop {
+            for (i, (name, _)) in channels.iter().enumerate() {
+                println!("  {}. {}", i + 1, name);
             }
-            _ => {
-                let indices: Vec<usize> = choice
-                    .split_whitespace()
-                    .map(|s| s.parse::<usize>().unwrap_or(0))
-                    .collect();
+            println!("  {}. 完成通道配置，继续下一步", channels.len() + 1);
 
-                for index in indices {
-                    if let Some((name, key)) = channels.get(index.wrapping_sub(1)) {
+            println!();
+            println!("提示: Telegram 和钉钉为默认预装通道，推荐优先配置");
+            println!();
+
+            let choice = self.prompt_choice(
+                "选择要配置的通道 (输入单个序号): ",
+                &[
+                    "Telegram ⭐",
+                    "Slack",
+                    "Discord",
+                    "WhatsApp",
+                    "钉钉 ⭐",
+                    "飞书",
+                    "企业微信",
+                    "完成通道配置，继续下一步",
+                ],
+            )?;
+
+            match choice.as_str() {
+                "完成通道配置，继续下一步" => {
+                    println!("通道配置完成，继续下一步");
+                    return Ok(());
+                }
+                selected_name => {
+                    if let Some((name, key)) =
+                        channels.iter().find(|(name, _)| *name == selected_name)
+                    {
                         self.configure_channel(key, name)?;
                     }
                 }
             }
-        }
 
-        Ok(())
+            println!();
+            println!("您可以继续配置其他通道，或选择“完成通道配置，继续下一步”。");
+            println!();
+        }
     }
 
     /// 配置单个通道

@@ -106,6 +106,11 @@ jobs:
         shell: powershell
         run: choco install protoc --yes
 
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install nsis --yes
+
       - name: Cache cargo registry
         uses: actions/cache@v5
         with:
@@ -135,6 +140,38 @@ jobs:
           TARGET: ${{ matrix.target }}
           UHORSE_VERSION: ${{ needs.resolve-version.outputs.version }}
         run: ./scripts/package-node-desktop.sh
+
+      - name: Package Node Desktop macOS installer
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          UHORSE_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/package-node-desktop-macos-pkg.sh
+
+      - name: Smoke test Node Desktop installed layout (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          UHORSE_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/desktop-installer-smoke.sh "target/node-desktop-package/uhorse-node-desktop-${UHORSE_VERSION}-${TARGET}"
+
+      - name: Package Node Desktop Windows installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          TARGET: ${{ matrix.target }}
+          UHORSE_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/package-node-desktop-windows-installer.ps1
+
+      - name: Smoke test Node Desktop installed layout (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          TARGET: ${{ matrix.target }}
+          UHORSE_VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: ./scripts/desktop-installer-smoke.ps1 -InstallRoot "target/node-desktop-package/uhorse-node-desktop-${env:UHORSE_VERSION}-${env:TARGET}"
 
       - name: Prepare Hub binary (Unix)
         if: runner.os != 'Windows'
@@ -185,6 +222,7 @@ jobs:
           name: uhorse-node-desktop-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}
           path: |
             ${{ github.workspace }}/target/node-desktop-package/uhorse-node-desktop-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}.*
+            ${{ github.workspace }}/target/node-desktop-package/uhorse-node-desktop-${{ needs.resolve-version.outputs.version }}-${{ matrix.target }}-installer.exe
 
   # ==================== 发布到 GitHub Releases ====================
   release:
@@ -210,7 +248,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.pkg" -o -name "*-installer.exe" \) -exec cp {} release-assets/ \;
           ls -la release-assets/
 
       - name: Generate changelog

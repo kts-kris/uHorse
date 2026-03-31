@@ -65,7 +65,7 @@
 
 打包 Node Desktop 宿主与前端静态资源。
 
-这是当前 `v4.1.3` Node Desktop 交付链路里的正式打包入口，交付形态是 `bin + web` archive，而不是原生 `.app/.dmg`、签名、公证或安装器：
+这是当前 `v4.1.3` Node Desktop 交付链路里的 archive 打包入口：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -76,15 +76,53 @@
 - 构建 `apps/node-desktop-web`
 - 编译 `uhorse-node-desktop`
 - 生成 `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/`
-- 输出对应压缩包
+- 输出对应 `.tar.gz` 或 `.zip` 压缩包
 
-对应 release / nightly workflow 中的 Node Desktop artifact 也是这一路 archive 布局。
+### `package-node-desktop-macos-pkg.sh`
+
+基于现有 Node Desktop payload 生成 macOS `.pkg`。
+
+```bash
+./scripts/package-node-desktop-macos-pkg.sh
+```
+
+前提：
+
+- 先执行 `./scripts/package-node-desktop.sh`
+- 当前 target 为 `*apple-darwin*`
+- 本机存在 `pkgbuild`
+
+默认输出：
+
+- `target/node-desktop-package/uhorse-node-desktop-<version>-<target>.pkg`
+
+安装内容保持现有 `bin + web` 布局，并额外附带 `uHorse Node Desktop.command` launcher。
+
+### `package-node-desktop-windows-installer.ps1`
+
+基于现有 Node Desktop payload 生成 Windows installer `.exe`。
+
+```powershell
+./scripts/package-node-desktop-windows-installer.ps1
+```
+
+前提：
+
+- 先执行 `./scripts/package-node-desktop.sh`
+- 当前 target 为 Windows
+- 本机存在 `makensis.exe`
+
+默认输出：
+
+- `target/node-desktop-package/uhorse-node-desktop-<version>-<target>-installer.exe`
+
+安装内容保持现有 `bin + web` 布局，并额外附带 `start-node-desktop.cmd` launcher。
 
 ### `desktop-smoke.sh`
 
 运行 Node Desktop 宿主 API + 静态资源 smoke。
 
-这是当前 `v4.1.3` Node Desktop 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
+这是当前 `v4.1.3` archive 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
 
 ```bash
 ./scripts/desktop-smoke.sh
@@ -101,7 +139,39 @@
 - `GET /api/versioning/summary`
 - `/` 与前端路由回退静态资源可访问
 
-它不覆盖原生安装器、桌面发行、签名、公证或系统级集成验收。
+### `desktop-installer-smoke.sh`
+
+运行安装后目录的 Node Desktop 宿主 API + 静态资源 smoke。
+
+```bash
+./scripts/desktop-installer-smoke.sh <install-root>
+```
+
+### `desktop-installer-smoke.ps1`
+
+运行 Windows 安装后目录的 Node Desktop 宿主 API + 静态资源 smoke。
+
+```powershell
+./scripts/desktop-installer-smoke.ps1 -InstallRoot <install-root>
+```
+
+覆盖内容：
+
+- 安装根下 `bin/uhorse-node-desktop` / `bin/uhorse-node-desktop.exe`
+- 安装根下 `web/index.html` 与 `web/assets`
+- `GET /api/settings/defaults`
+- `GET /api/settings/capabilities`
+- `GET /api/workspace/status`
+- `GET /api/runtime/status`
+- `GET /api/versioning/summary`
+- `/` 与前端路由回退静态资源可访问
+
+当前 release / nightly 会继续保留 archive，并额外产出：
+
+- macOS `.pkg`
+- Windows installer `.exe`
+
+当前仍不包含 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器。
 
 ## 推荐搭配
 
@@ -112,7 +182,10 @@ make node-run
 make test-quick
 make test-full
 make desktop-package
+make desktop-package-macos
+make desktop-package-windows
 make desktop-smoke
+make desktop-installer-smoke INSTALL_ROOT=target/node-desktop-package/uhorse-node-desktop-<version>-<target>
 ```
 
 ## 参考文档

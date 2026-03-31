@@ -26,13 +26,13 @@
 - `uhorse-hub`
 - `uhorse-node-desktop`
 
-其中 `uhorse-node-desktop` 继续以 `bin + web` archive 形式发布；GitHub Release / nightly 继续提供多平台 archive 产物。
+其中 `uhorse-node-desktop` 继续提供 `bin + web` archive，同时新增 macOS `.pkg` 与 Windows installer；GitHub Release / nightly 会同步提供这些多平台产物。
 
 ### 不包含内容
 
 `v4.1.3` 明确 **不包含**：
 
-- 原生 `.app/.dmg`、签名、公证、安装器或拖拽安装体验
+- 原生 `.app/.dmg`、签名、公证、`.msi`、Linux 原生安装器或拖拽安装体验
 - 旧时代 `agent / skill / memory` 独立平台的全面回归
 - 将 legacy `uhorse` 单体路径恢复为主交付物
 
@@ -50,5 +50,5 @@ cargo build --release -p uhorse-hub -p uhorse-node-desktop
 ### 升级与获取方式
 
 - 从源码构建：见 `README.md` 与 `INSTALL.md`
-- 获取预编译产物：使用 GitHub Release / nightly 中的 `uhorse-hub` 与 `uhorse-node-desktop` archive
+- 获取预编译产物：使用 GitHub Release / nightly 中的 `uhorse-hub` archive，以及 `uhorse-node-desktop` archive / macOS `.pkg` / Windows installer
 - 查看完整变更：见 `CHANGELOG.md` 与 `CHANGELOG-en.md`

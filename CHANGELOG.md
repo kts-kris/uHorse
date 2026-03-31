@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Node Desktop 新增 macOS `.pkg` 与 Windows installer 打包脚本，继续复用现有 `bin + web` payload
+- 新增 `desktop-installer-smoke.sh`，用于校验安装后目录下的宿主 API、静态资源与 SPA 路由回退
+
+### Changed
+
+- GitHub release / nightly workflow 现在会继续上传 Node Desktop archive，并同步上传 macOS `.pkg` 与 Windows installer 产物
+- README / INSTALL / scripts / release 说明已更新为当前 Node Desktop 交付边界：archive + macOS `.pkg` + Windows installer，仍不包含 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器
+
 ## [4.1.3] - 2026-03-29
 
 ### Changed
@@ -31,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hub 已为浏览器目标增加本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标
 - `uhorse-node-runtime` 已接入正式浏览器执行路径，`uhorse-node-desktop` 默认启用 `browser` feature，并可通过 `CommandType::Browser` 参与能力路由
 - GitHub release / nightly workflow 现在会为 `uhorse-hub` 与 `uhorse-node-desktop` 生成主流平台 archive 产物
-- `channels.dingtalk.notification_bindings` 已纳入当前主线说明，用于将稳定 `node_id` 绑定到 DingTalk `user_id`，补齐 Node Desktop 本地通知镜像回传路径
+- Node Desktop DingTalk 通知镜像当前已支持 pairing 驱动的运行时绑定闭环，`channels.dingtalk.notification_bindings` 调整为兼容 seed/fallback 说明
 
 ### Changed
 

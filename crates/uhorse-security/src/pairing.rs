@@ -146,7 +146,8 @@ impl DevicePairingManager {
         device_name: String,
         device_type: String,
     ) -> Result<PairingRequest> {
-        let request = PairingRequest::new(device_id.clone(), device_name, device_type);
+        let mut request = PairingRequest::new(device_id.clone(), device_name, device_type);
+        request.expires_at = request.created_at + self.pairing_ttl;
 
         // 先注册设备
         let device_info = DeviceInfo {

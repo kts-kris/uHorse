@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Node Desktop now has macOS `.pkg` and Windows installer packaging scripts while continuing to reuse the existing `bin + web` payload
+- `desktop-installer-smoke.sh` now validates the installed host API, static assets, and SPA route fallback from an installed layout
+
+### Changed
+
+- GitHub release / nightly workflows now keep uploading the Node Desktop archives and additionally publish the macOS `.pkg` and Windows installer artifacts
+- README / INSTALL / scripts / release docs are now aligned to the current Node Desktop delivery boundary: archive + macOS `.pkg` + Windows installer, while still excluding `.app/.dmg`, code signing, notarization, `.msi`, and Linux native installers
+
 ## [4.1.3] - 2026-03-29
 
 ### Changed
@@ -31,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hub now applies local safety validation to browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets
 - `uhorse-node-runtime` now uses the formal browser execution path, `uhorse-node-desktop` enables the `browser` feature by default, and browser-capable nodes participate in capability-based routing via `CommandType::Browser`
 - GitHub release / nightly workflows now produce mainstream-platform archive artifacts for `uhorse-hub` and `uhorse-node-desktop`
-- `channels.dingtalk.notification_bindings` is now part of the documented mainline path for mapping stable `node_id` values to DingTalk `user_id` values so Node Desktop notification mirroring can return to the correct user
+- Node Desktop DingTalk notification mirroring now documents the pairing-driven runtime binding flow as the main path, while `channels.dingtalk.notification_bindings` is repositioned as a compatibility seed/fallback
 
 ### Changed
 

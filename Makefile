@@ -1,6 +1,6 @@
 # uHorse Makefile - Hub / Node 主线快捷命令
 
-.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
+.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-package-macos desktop-package-windows desktop-smoke desktop-installer-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
 
 .DEFAULT_GOAL := help
 
@@ -85,11 +85,20 @@ desktop-web-build: ## 构建 Node Desktop Web 前端
 desktop-build: ## 编译 Node Desktop 宿主
 	@cargo build --release -p uhorse-node-desktop
 
-desktop-package: ## 打包 Node Desktop 宿主 + Web 静态资源
+desktop-package: ## 打包 Node Desktop 宿主 + Web 静态资源 archive
 	@./scripts/package-node-desktop.sh
 
-desktop-smoke: ## 运行 Node Desktop API + 静态资源 smoke
+desktop-package-macos: ## 基于现有 payload 生成 macOS pkg
+	@./scripts/package-node-desktop-macos-pkg.sh
+
+desktop-package-windows: ## 基于现有 payload 生成 Windows installer
+	@./scripts/package-node-desktop-windows-installer.ps1
+
+desktop-smoke: ## 运行 Node Desktop archive API + 静态资源 smoke
 	@./scripts/desktop-smoke.sh
+
+desktop-installer-smoke: ## 运行安装后目录的 Node Desktop smoke（需 INSTALL_ROOT=...）
+	@./scripts/desktop-installer-smoke.sh "$(INSTALL_ROOT)"
 
 deps: ## 启动 PostgreSQL + Redis 依赖
 	@docker compose up -d postgres redis

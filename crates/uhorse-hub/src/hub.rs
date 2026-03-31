@@ -5,6 +5,7 @@
 use crate::error::HubResult;
 use crate::message_router::MessageRouter;
 use crate::node_manager::{NodeManager, NodeManagerStats};
+use crate::notification_binding::NotificationBindingManager;
 use crate::security_integration::SecurityManager;
 use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskStatusInfo};
 use chrono::{DateTime, Utc};
@@ -14,7 +15,6 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 use uhorse_channel::DingTalkChannel;
-use uhorse_config::DingTalkNotificationBinding;
 use uhorse_protocol::{
     Command, NodeCapabilities, NodeId, NodeToHub, Priority, TaskContext, TaskId, WorkspaceInfo,
 };
@@ -86,6 +86,8 @@ pub struct Hub {
     task_scheduler: Arc<TaskScheduler>,
     /// 消息路由器
     message_router: Arc<MessageRouter>,
+    /// DingTalk 通知绑定管理器
+    notification_bindings: Arc<NotificationBindingManager>,
     /// 安全管理器
     security_manager: Option<Arc<SecurityManager>>,
     /// 关闭信号
@@ -95,7 +97,12 @@ pub struct Hub {
 impl Hub {
     /// 创建新的 Hub
     pub fn new(config: HubConfig) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
-        Self::new_with_components(config, None, None, vec![])
+        Self::new_with_components(
+            config,
+            None,
+            None,
+            Arc::new(NotificationBindingManager::default()),
+        )
     }
 
     /// 创建带安全配置的 Hub
@@ -103,7 +110,12 @@ impl Hub {
         config: HubConfig,
         security_manager: Option<Arc<SecurityManager>>,
     ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
-        Self::new_with_components(config, security_manager, None, vec![])
+        Self::new_with_components(
+            config,
+            security_manager,
+            None,
+            Arc::new(NotificationBindingManager::default()),
+        )
     }
 
     /// 创建带完整组件的 Hub
@@ -111,7 +123,7 @@ impl Hub {
         config: HubConfig,
         security_manager: Option<Arc<SecurityManager>>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
-        notification_bindings: Vec<DingTalkNotificationBinding>,
+        notification_bindings: Arc<NotificationBindingManager>,
     ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
         let node_manager = Arc::new(NodeManager::new(
             config.max_nodes,
@@ -129,7 +141,7 @@ impl Hub {
             node_manager.clone(),
             task_scheduler.clone(),
             dingtalk_channel,
-            notification_bindings,
+            notification_bindings.clone(),
         ));
 
         let (shutdown_tx, _) = broadcast::channel(1);
@@ -141,6 +153,7 @@ impl Hub {
                 node_manager,
                 task_scheduler,
                 message_router,
+                notification_bindings,
                 security_manager,
                 shutdown_tx,
             },
@@ -351,6 +364,11 @@ impl Hub {
     /// 获取消息路由器（供内部使用）
     pub fn message_router(&self) -> Arc<MessageRouter> {
         self.message_router.clone()
+    }
+
+    /// 获取 DingTalk 通知绑定管理器。
+    pub fn notification_bindings(&self) -> Arc<NotificationBindingManager> {
+        self.notification_bindings.clone()
     }
 
     /// 获取安全管理器

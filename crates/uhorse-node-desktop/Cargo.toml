@@ -20,6 +20,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
+reqwest = { workspace = true }
 tower-http = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true }

@@ -260,10 +260,13 @@ app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
 
+# 可选：仅在需要兼容 seed/fallback 时保留静态绑定
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
 ```
+
+> Node Desktop 通知镜像当前主路径是 pairing 运行时绑定；这里的静态 `notification_bindings` 仅用于兼容 seed/fallback。
 
 ### LLM 最小配置
 

@@ -139,7 +139,7 @@ DingTalk inbound message
 
 ## 消息回传
 
-如果同时启用了 Node Desktop 本地通知镜像，当前主线还支持通过 `channels.dingtalk.notification_bindings` 把稳定 `node_id` 绑定到 DingTalk `user_id`，用于补充“节点通知 -> 钉钉用户”的回传路径。
+如果同时启用了 Node Desktop 本地通知镜像，当前主路径是由 Node Desktop 发起 pairing、用户在 DingTalk 中确认后写入运行时绑定；`channels.dingtalk.notification_bindings` 仅保留为兼容 seed/fallback，用于补充“节点通知 -> 钉钉用户”的回传路径。
 
 当前结果回传逻辑会保留任务的完整执行结果，并按以下顺序尝试回到原 DingTalk 会话：
 

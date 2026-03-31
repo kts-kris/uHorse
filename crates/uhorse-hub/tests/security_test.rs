@@ -8,7 +8,7 @@ use uhorse_hub::{
         HubFieldEncryptor, HubTlsConfig, NodeAuthenticator, SecurityManager,
         SensitiveOperationApprover,
     },
-    Hub, HubConfig, MessageRouter, NodeManager, TaskScheduler,
+    Hub, HubConfig, MessageRouter, NodeManager, NotificationBindingManager, TaskScheduler,
 };
 use uhorse_protocol::{
     Command, MessageId, NodeCapabilities, NodeId, NodeToHub, Priority, SessionId, ShellCommand,
@@ -40,7 +40,12 @@ fn create_test_context(user: &str, session: &str) -> TaskContext {
 fn create_test_message_router() -> MessageRouter {
     let node_manager = Arc::new(NodeManager::new(10, 30));
     let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 60);
-    MessageRouter::new(node_manager, Arc::new(task_scheduler), None, vec![])
+    MessageRouter::new(
+        node_manager,
+        Arc::new(task_scheduler),
+        None,
+        Arc::new(NotificationBindingManager::default()),
+    )
 }
 
 // ============================================================================

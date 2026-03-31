@@ -88,7 +88,7 @@ After input, the wizard prints the chosen database settings and lets you confirm
 
 The current implementation supports `Telegram`, `Slack`, `Discord`, `WhatsApp`, `DingTalk`, `Feishu`, and `WeWork`.
 
-> Current limitation: the prompt presents a numbered menu and configures one selected channel per wizard run. If you need multiple channels, use the generated `config.toml` as a starting point and add the additional channel sections manually before starting the service.
+The current implementation keeps showing the channel menu in a loop, so you can configure multiple channels in one run until you explicitly choose “Finish channel configuration and continue”.
 
 ```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -103,10 +103,25 @@ Available channels:
   5. DingTalk ⭐
   6. Feishu
   7. WeWork
-  8. Continue (skip channel setup)
+  8. Finish channel configuration and continue
 ```
 
-Examples of the current prompts:
+The current channel selection prompt is:
+
+```text
+Select the channel to configure (enter a single number):
+  1. Telegram ⭐
+  2. Slack
+  3. Discord
+  4. WhatsApp
+  5. DingTalk ⭐
+  6. Feishu
+  7. WeWork
+  8. Finish channel configuration and continue
+Select [1-8]:
+```
+
+Examples of the current follow-up prompts:
 
 #### Telegram
 
@@ -157,7 +172,7 @@ Enter App Secret:
 Enter Agent ID:
 ```
 
-> Current limitation: this step only collects DingTalk app credentials. It does not generate `channels.dingtalk.notification_bindings`. To complete the “node notification -> DingTalk user” path, you still need to add the `node_id` to `user_id` mapping manually in the Hub config.
+> Current limitation: this step only collects DingTalk app credentials. It does not replace the Node Desktop pairing flow. To complete the “node notification -> DingTalk user” path, start binding from Node Desktop and confirm it in DingTalk; `channels.dingtalk.notification_bindings` remains only a compatibility seed/fallback.
 
 #### Feishu
 
@@ -405,4 +420,4 @@ The current validation rejects privileged ports below `1024`. Use a higher port 
 
 ### Multi-channel Setup
 
-The current prompt configures one channel choice per run. For multi-channel setups, use the generated file as a base and add the extra channel sections manually in `config.toml`.
+The current wizard re-displays the menu after each channel is configured. You can configure multiple channels in sequence, then choose “Finish channel configuration and continue”.

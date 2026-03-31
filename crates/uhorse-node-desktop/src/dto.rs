@@ -3,7 +3,7 @@ use uhorse_node_runtime::NodeConfig;
 
 use crate::config_store::DesktopPreferencesConfig;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
     pub data: Option<T>,
@@ -73,6 +73,39 @@ impl DesktopSettingsDto {
         desktop.mirror_notifications_to_dingtalk = self.mirror_notifications_to_dingtalk;
         desktop.launch_at_login = self.launch_at_login;
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartAccountPairingRequest {
+    pub node_id: String,
+    pub node_name: String,
+    pub device_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelAccountPairingRequest {
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopPairingRequestDto {
+    pub request_id: String,
+    pub node_id: String,
+    pub node_name: String,
+    pub device_type: String,
+    pub pairing_code: String,
+    pub status: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub bound_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopAccountStatusDto {
+    pub node_id: String,
+    pub pairing_enabled: bool,
+    pub bound_user_id: Option<String>,
+    pub pairing: Option<DesktopPairingRequestDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +263,37 @@ pub struct DesktopCapabilityStatusDto {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_account_status_dto_deserializes_pairing_payload() {
+        let json = serde_json::json!({
+            "node_id": "node-desktop-test",
+            "pairing_enabled": true,
+            "bound_user_id": "ding-user-1",
+            "pairing": {
+                "request_id": "req-1",
+                "node_id": "node-desktop-test",
+                "node_name": "Desktop Node",
+                "device_type": "desktop",
+                "pairing_code": "123456",
+                "status": "pending",
+                "created_at": 1,
+                "expires_at": 2,
+                "bound_user_id": null
+            }
+        });
+
+        let dto: DesktopAccountStatusDto = serde_json::from_value(json).unwrap();
+        assert_eq!(dto.node_id, "node-desktop-test");
+        assert!(dto.pairing_enabled);
+        assert_eq!(dto.bound_user_id.as_deref(), Some("ding-user-1"));
+        assert_eq!(
+            dto.pairing
+                .as_ref()
+                .map(|value| value.pairing_code.as_str()),
+            Some("123456")
+        );
+    }
 
     #[test]
     fn test_desktop_settings_round_trip_preserves_desktop_preferences() {

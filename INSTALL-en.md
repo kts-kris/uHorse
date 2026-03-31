@@ -70,7 +70,7 @@ Primary outputs:
 - `target/release/uhorse-node`
 - `target/release/uhorse-node-desktop`
 
-If you do not want to build locally, you can also use the mainstream-platform `uhorse-hub` and `uhorse-node-desktop` archives from GitHub Release / nightly.
+If you do not want to build locally, you can also use the mainstream-platform `uhorse-hub` and `uhorse-node-desktop` archives from GitHub Release / nightly; Node Desktop also ships a macOS `.pkg` and a Windows installer `.exe`.
 
 ### 3. Generate default configs
 
@@ -86,7 +86,7 @@ For a minimal local roundtrip you usually only need:
 - `hub.toml` for Hub host / port / scheduler fields
 - `node.toml` for node name / workspace / Hub WebSocket URL
 
-See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, Hub also needs `channels.dingtalk.notification_bindings` in addition to the DingTalk credentials.
+See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, configure DingTalk credentials, enable pairing, and complete binding from Node Desktop; `channels.dingtalk.notification_bindings` is only a compatibility seed/fallback.
 
 ### 5. Start Hub and Node
 
@@ -108,19 +108,31 @@ Terminal 2:
 
 If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script.
 
-The fixed `v4.1.3` delivery boundary is: **`bin + web` archive delivery, `desktop-smoke.sh`, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging and smoke validation, but it does **not** include native `.app/.dmg`, code signing, notarization, or installers.
+The fixed `v4.1.3` delivery boundary is: **`bin + web` archives, installer smoke, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging, macOS `.pkg`, Windows installer packaging, and matching smoke validation, but it still does **not** include native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installers.
 
-Use the built-in packaging script:
+Use the built-in archive packaging script:
 
 ```bash
 ./scripts/package-node-desktop.sh
 ```
 
-Default outputs:
+Default archive outputs:
 
 - `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/bin/uhorse-node-desktop`
 - `target/node-desktop-package/uhorse-node-desktop-<version>-<target>/web/`
 - matching `.tar.gz` or `.zip` archive
+
+If you also want native installers:
+
+```bash
+./scripts/package-node-desktop-macos-pkg.sh
+./scripts/package-node-desktop-windows-installer.ps1
+```
+
+Installer outputs:
+
+- macOS: `target/node-desktop-package/uhorse-node-desktop-<version>-<target>.pkg`
+- Windows: `target/node-desktop-package/uhorse-node-desktop-<version>-<target>-installer.exe`
 
 To verify the packaged host API and static assets together, run:
 
@@ -128,13 +140,24 @@ To verify the packaged host API and static assets together, run:
 ./scripts/desktop-smoke.sh
 ```
 
-This smoke currently validates:
+To verify an installed layout, run:
+
+```bash
+./scripts/desktop-installer-smoke.sh <install-root>
+```
+
+In Windows CI, use:
+
+```powershell
+./scripts/desktop-installer-smoke.ps1 -InstallRoot <install-root>
+```
+
+These smokes validate:
 
 - the Node Desktop host API
 - static asset serving
 - SPA route fallback
-
-It does not imply that native installers, platform distribution, or signing pipelines are complete.
+- that the installed `bin + web` layout still runs correctly
 
 ---
 
@@ -192,7 +215,7 @@ These tests start real:
 - a file existence roundtrip task
 - a real file write roundtrip, including on-disk persistence and structured `file_operation` output
 
-### 5. Verify the Node Desktop `v4.1.3` archive boundary
+### 5. Verify the Node Desktop `v4.1.3` delivery boundary
 
 If you are validating the `v4.1.3` Node Desktop deliverable, also run:
 
@@ -201,7 +224,20 @@ If you are validating the `v4.1.3` Node Desktop deliverable, also run:
 ./scripts/desktop-smoke.sh
 ```
 
-The acceptance bar is that the archive can be produced and the host API / static asset smoke passes, not that a native `.app/.dmg` or installer exists.
+To continue with native installer validation on macOS:
+
+```bash
+./scripts/package-node-desktop-macos-pkg.sh
+./scripts/desktop-installer-smoke.sh target/node-desktop-package/uhorse-node-desktop-<version>-<target>
+```
+
+On Windows, use:
+
+```powershell
+./scripts/package-node-desktop-windows-installer.ps1
+```
+
+The acceptance bar is that the archive and `.pkg` / installer can be produced, and that the host API, static assets, and installed `bin + web` layout all pass smoke validation; it still does not require a native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installer.
 
 ---
 

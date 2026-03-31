@@ -5941,6 +5941,7 @@ dependencies = [
  "axum 0.7.9",
  "chrono",
  "clap",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sysinfo",
