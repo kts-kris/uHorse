@@ -5,6 +5,8 @@ import type {
   DefaultSettings,
   DesktopAccountStatus,
   DesktopCapabilityStatus,
+  DesktopConnectionDiagnostics,
+  DesktopConnectionRecoveryResult,
   DesktopLogEntry,
   DesktopNodeStatus,
   DesktopPairingRequest,
@@ -105,6 +107,12 @@ export const desktopApi = {
   },
   getRuntimeStatus(): Promise<DesktopNodeStatus> {
     return request('/api/runtime/status', undefined, '加载运行时状态失败');
+  },
+  getConnectionDiagnostics(): Promise<DesktopConnectionDiagnostics> {
+    return request('/api/connection/diagnostics', undefined, '加载连接诊断失败');
+  },
+  recoverConnection(): Promise<DesktopConnectionRecoveryResult> {
+    return request('/api/connection/recover', { method: 'POST' }, '执行连接恢复失败');
   },
   startNode(): Promise<DesktopNodeStatus> {
     return request('/api/runtime/start', { method: 'POST' }, '启动 Node 失败');

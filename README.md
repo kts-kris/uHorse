@@ -191,7 +191,8 @@ auth_token = "<access_token>"
 - Node Desktop 本地开启 `notifications_enabled`
 - 如需在通知中展示更详细内容，再开启 `show_notification_details`
 - 若要把本地通知额外同步到钉钉，再开启 `mirror_notifications_to_dingtalk`
-- 在 Node Desktop 中发起 pairing，并在 DingTalk 中使用绑定码确认运行时绑定
+- 在 Node Desktop 中发起 pairing，并在 DingTalk 中使用**当前页面最新显示**的绑定码确认运行时绑定；如果重新生成过绑定码，请只发送最新那一条
+- DingTalk Stream 入站与 Web 路径现在都会优先尝试处理 pairing 命令，绑定码消息不会再误走普通任务规划链路
 - `channels.dingtalk.notification_bindings` 仅在需要兼容 seed/fallback 时配置
 - 若当前运行中的 Node 与新保存配置不一致，Settings / Dashboard 会显示“需重启生效”，重启后才会切换到新的工作区与运行时配置
 

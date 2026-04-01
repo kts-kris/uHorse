@@ -1,13 +1,68 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use uhorse_node_runtime::NodeConfig;
 
 use crate::config_store::DesktopPreferencesConfig;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ApiErrorDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ApiErrorDtoRepr {
+    Message(String),
+    Structured {
+        code: Option<String>,
+        message: Option<String>,
+        details: Option<Value>,
+    },
+}
+
+impl<'de> Deserialize<'de> for ApiErrorDto {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match ApiErrorDtoRepr::deserialize(deserializer)? {
+            ApiErrorDtoRepr::Message(message) => Ok(Self {
+                code: None,
+                message,
+                details: None,
+            }),
+            ApiErrorDtoRepr::Structured {
+                code,
+                message,
+                details,
+            } => Ok(Self {
+                code,
+                message: message.unwrap_or_default(),
+                details,
+            }),
+        }
+    }
+}
+
+impl ApiErrorDto {
+    pub fn with_code(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: Some(code.into()),
+            message: message.into(),
+            details: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
     pub data: Option<T>,
-    pub error: Option<String>,
+    pub error: Option<ApiErrorDto>,
 }
 
 impl<T> ApiResponse<T> {
@@ -19,11 +74,11 @@ impl<T> ApiResponse<T> {
         }
     }
 
-    pub fn error(message: impl Into<String>) -> Self {
+    pub fn error_with_code(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             success: false,
             data: None,
-            error: Some(message.into()),
+            error: Some(ApiErrorDto::with_code(code, message)),
         }
     }
 }
@@ -125,7 +180,7 @@ pub struct WorkspaceValidationDto {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DesktopLifecycleState {
     Stopped,
@@ -166,6 +221,12 @@ pub struct DesktopNodeStatusDto {
     pub node_id: Option<String>,
     pub lifecycle_state: DesktopLifecycleState,
     pub connection_state: String,
+    pub overview_state: String,
+    pub overview_message: String,
+    pub pairing_enabled: bool,
+    pub bound_user_id: Option<String>,
+    pub active_pairing_code: Option<String>,
+    pub active_pairing_status: Option<String>,
     pub hub_url: String,
     pub workspace_path: String,
     pub saved_workspace_path: String,
@@ -260,9 +321,64 @@ pub struct DesktopCapabilityStatusDto {
     pub launch_agent_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopConnectionDiagnosticsDto {
+    pub lifecycle_state: DesktopLifecycleState,
+    pub connection_state: String,
+    pub overview_state: String,
+    pub overview_message: String,
+    pub hub_url: String,
+    pub node_id: Option<String>,
+    pub bound_user_id: Option<String>,
+    pub auth_token_present: bool,
+    pub workspace_valid: bool,
+    pub workspace_error: Option<String>,
+    pub restart_required: bool,
+    pub restart_notice: Option<String>,
+    pub reconnect_interval_secs: u64,
+    pub max_reconnect_attempts: u32,
+    pub recent_error: Option<String>,
+    pub recent_logs: Vec<DesktopLogEntryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopConnectionRecoveryResultDto {
+    pub success: bool,
+    pub action: String,
+    pub message: String,
+    pub status: DesktopConnectionDiagnosticsDto,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_api_error_dto_deserializes_string_payload() {
+        let error: ApiErrorDto =
+            serde_json::from_value(serde_json::json!("Permission denied")).unwrap();
+
+        assert_eq!(error.code, None);
+        assert_eq!(error.message, "Permission denied");
+        assert_eq!(error.details, None);
+    }
+
+    #[test]
+    fn test_api_error_dto_deserializes_structured_payload() {
+        let error: ApiErrorDto = serde_json::from_value(serde_json::json!({
+            "code": "permission_denied",
+            "message": "Missing token",
+            "details": { "field": "auth_token" }
+        }))
+        .unwrap();
+
+        assert_eq!(error.code.as_deref(), Some("permission_denied"));
+        assert_eq!(error.message, "Missing token");
+        assert_eq!(
+            error.details,
+            Some(serde_json::json!({ "field": "auth_token" }))
+        );
+    }
 
     #[test]
     fn test_account_status_dto_deserializes_pairing_payload() {
@@ -331,5 +447,39 @@ mod tests {
         assert!(!next_desktop.show_notification_details);
         assert!(next_desktop.mirror_notifications_to_dingtalk);
         assert!(next_desktop.launch_at_login);
+    }
+
+    #[test]
+    fn test_connection_recovery_result_dto_deserializes_structured_payload() {
+        let payload = serde_json::json!({
+            "success": true,
+            "action": "restart_node",
+            "message": "Connection recovery executed",
+            "status": {
+                "lifecycle_state": "running",
+                "connection_state": "authenticated",
+                "overview_state": "bound",
+                "overview_message": "Node 已连接到 Hub，且已绑定账号。",
+                "hub_url": "ws://localhost:8765/ws",
+                "node_id": "node-desktop-test",
+                "bound_user_id": "ding-user-1",
+                "auth_token_present": true,
+                "workspace_valid": true,
+                "workspace_error": null,
+                "restart_required": false,
+                "restart_notice": null,
+                "reconnect_interval_secs": 5,
+                "max_reconnect_attempts": 10,
+                "recent_error": null,
+                "recent_logs": []
+            }
+        });
+
+        let result: DesktopConnectionRecoveryResultDto = serde_json::from_value(payload).unwrap();
+        assert!(result.success);
+        assert_eq!(result.action, "restart_node");
+        assert_eq!(result.status.connection_state, "authenticated");
+        assert_eq!(result.status.node_id.as_deref(), Some("node-desktop-test"));
+        assert!(result.status.auth_token_present);
     }
 }

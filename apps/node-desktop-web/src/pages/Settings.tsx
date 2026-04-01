@@ -9,6 +9,7 @@ import {
   Descriptions,
   Form,
   Input,
+  List,
   Row,
   Space,
   Spin,
@@ -20,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { desktopApi } from '../services/desktopApi';
 import type {
   DesktopAccountStatus,
+  DesktopConnectionDiagnostics,
   DesktopPairingRequest,
   DesktopSettings,
   DesktopWorkspaceStatus,
@@ -53,6 +55,11 @@ const Settings: React.FC = () => {
     queryKey: ['desktop-account-status'],
     queryFn: desktopApi.getAccountStatus,
     refetchInterval: 5000,
+  });
+
+  const connectionDiagnosticsQuery = useQuery({
+    queryKey: ['desktop-connection-diagnostics'],
+    queryFn: desktopApi.getConnectionDiagnostics,
   });
 
   const validateMutation = useMutation({
@@ -96,6 +103,25 @@ const Settings: React.FC = () => {
     onSuccess: async (text) => {
       message.success(text);
       await queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] });
+    },
+  });
+
+  const recoverConnectionMutation = useMutation({
+    mutationFn: desktopApi.recoverConnection,
+    onSuccess: async (result) => {
+      if (result.success) {
+        message.success(result.message);
+      } else {
+        message.warning(result.message);
+      }
+      queryClient.setQueryData(['desktop-connection-diagnostics'], result.status);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['desktop-connection-diagnostics'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-runtime-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-workspace-status'] }),
+        queryClient.invalidateQueries({ queryKey: ['desktop-logs'] }),
+      ]);
     },
   });
 
@@ -146,10 +172,13 @@ const Settings: React.FC = () => {
     startPairingMutation.isPending || cancelPairingMutation.isPending || deleteBindingMutation.isPending;
   const workspaceStatus = workspaceStatusQuery.data;
   const accountStatus = accountStatusQuery.data;
+  const connectionDiagnostics = connectionDiagnosticsQuery.data;
   const activePairing = accountStatus?.pairing || null;
   const validation = validateMutation.data;
   const defaults = defaultSettingsQuery.data;
   const capabilityStatus = capabilityStatusQuery.data;
+  const accountStatusMissingToken =
+    accountStatusQuery.error instanceof Error && accountStatusQuery.error.message.includes('Node auth token is missing');
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -170,12 +199,20 @@ const Settings: React.FC = () => {
           description={workspaceStatusQuery.error.message}
         />
       ) : null}
-      {accountStatusQuery.error instanceof Error ? (
+      {accountStatusQuery.error instanceof Error && !accountStatusMissingToken ? (
         <Alert
           type="error"
           showIcon
           message="加载账号绑定状态失败"
           description={accountStatusQuery.error.message}
+        />
+      ) : null}
+      {connectionDiagnosticsQuery.error instanceof Error ? (
+        <Alert
+          type="error"
+          showIcon
+          message="加载连接诊断失败"
+          description={connectionDiagnosticsQuery.error.message}
         />
       ) : null}
       {saveMutation.error instanceof Error ? (
@@ -198,6 +235,9 @@ const Settings: React.FC = () => {
       ) : null}
       {deleteBindingMutation.error instanceof Error ? (
         <Alert type="error" showIcon message="解绑账号失败" description={deleteBindingMutation.error.message} />
+      ) : null}
+      {recoverConnectionMutation.error instanceof Error ? (
+        <Alert type="error" showIcon message="执行连接恢复失败" description={recoverConnectionMutation.error.message} />
       ) : null}
       {workspaceStatus?.restart_required ? (
         <Alert type="warning" showIcon message={workspaceStatus.restart_notice || '设置已保存，重启 Node 后生效'} />
@@ -389,6 +429,14 @@ const Settings: React.FC = () => {
               }
             >
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                {accountStatusMissingToken ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="未配置认证令牌，暂时无法使用账号绑定能力"
+                    description="请先在 Node 配置中补齐 auth token，再刷新绑定状态。"
+                  />
+                ) : null}
                 <Descriptions bordered size="small" column={1}>
                   <Descriptions.Item label="节点 ID">{accountStatus?.node_id || '-'}</Descriptions.Item>
                   <Descriptions.Item label="绑定能力">
@@ -451,6 +499,34 @@ const Settings: React.FC = () => {
               </Space>
             </Card>
 
+            <Card
+              title="连接诊断 / 恢复能力"
+              extra={
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={connectionDiagnosticsQuery.isFetching}
+                  onClick={() => void connectionDiagnosticsQuery.refetch()}
+                >
+                  刷新
+                </Button>
+              }
+            >
+              {connectionDiagnostics ? (
+                <ConnectionDiagnosticsCardContent
+                  diagnostics={connectionDiagnostics}
+                  recovering={recoverConnectionMutation.isPending}
+                  onRecover={() => recoverConnectionMutation.mutate()}
+                />
+              ) : connectionDiagnosticsQuery.isLoading || connectionDiagnosticsQuery.isFetching ? (
+                <div style={{ textAlign: 'center', padding: 24 }}>
+                  <Spin />
+                </div>
+              ) : (
+                <Alert type="info" showIcon message="暂无连接诊断数据" />
+              )}
+            </Card>
+
             <Card title="桌面能力状态" extra={capabilityStatusQuery.isFetching ? '刷新中' : undefined}>
               <Descriptions bordered size="small" column={1}>
                 <Descriptions.Item label="建议节点名称">{defaults?.suggested_name || '-'}</Descriptions.Item>
@@ -511,6 +587,84 @@ const Settings: React.FC = () => {
   );
 };
 
+function ConnectionDiagnosticsCardContent({
+  diagnostics,
+  recovering,
+  onRecover,
+}: {
+  diagnostics: DesktopConnectionDiagnostics;
+  recovering: boolean;
+  onRecover: () => void;
+}) {
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Alert type={connectionOverviewAlertType(diagnostics.overview_state)} showIcon message={diagnostics.overview_message} />
+      {diagnostics.recent_error ? (
+        <Alert type="error" showIcon message="最近错误" description={diagnostics.recent_error} />
+      ) : null}
+      <Descriptions bordered size="small" column={1}>
+        <Descriptions.Item label="生命周期">
+          <Tag color={lifecycleColor(diagnostics.lifecycle_state)}>{diagnostics.lifecycle_state}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="连接状态">
+          <Tag color={connectionStateColor(diagnostics.connection_state)}>{diagnostics.connection_state}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="Hub 地址">{diagnostics.hub_url}</Descriptions.Item>
+        <Descriptions.Item label="节点 ID">{diagnostics.node_id || '-'}</Descriptions.Item>
+        <Descriptions.Item label="当前绑定用户">{diagnostics.bound_user_id || '-'}</Descriptions.Item>
+        <Descriptions.Item label="认证令牌">
+          <Tag color={diagnostics.auth_token_present ? 'success' : 'error'}>
+            {diagnostics.auth_token_present ? '已配置' : '缺失'}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="工作区校验">
+          <Tag color={diagnostics.workspace_valid ? 'success' : 'error'}>
+            {diagnostics.workspace_valid ? '通过' : '失败'}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="工作区错误">{diagnostics.workspace_error || '-'}</Descriptions.Item>
+        <Descriptions.Item label="生效状态">
+          <Tag color={diagnostics.restart_required ? 'warning' : 'success'}>
+            {diagnostics.restart_required ? '需重启生效' : '已生效'}
+          </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="状态说明">
+          {diagnostics.restart_notice || '当前运行配置与保存配置一致'}
+        </Descriptions.Item>
+        <Descriptions.Item label="重连间隔">{diagnostics.reconnect_interval_secs} 秒</Descriptions.Item>
+        <Descriptions.Item label="最大重连次数">{diagnostics.max_reconnect_attempts}</Descriptions.Item>
+      </Descriptions>
+
+      <div>
+        <Typography.Text strong>最近日志</Typography.Text>
+        <List
+          size="small"
+          locale={{ emptyText: '暂无日志' }}
+          dataSource={diagnostics.recent_logs}
+          renderItem={(entry) => (
+            <List.Item>
+              <Space direction="vertical" size={0} style={{ width: '100%' }}>
+                <Space size={8} wrap>
+                  <Tag color={logLevelColor(entry.level)}>{entry.level}</Tag>
+                  <Typography.Text type="secondary">{formatDateTime(entry.timestamp)}</Typography.Text>
+                  <Typography.Text type="secondary">{entry.source}</Typography.Text>
+                </Space>
+                <Typography.Text>{entry.message}</Typography.Text>
+              </Space>
+            </List.Item>
+          )}
+        />
+      </div>
+
+      <Space wrap>
+        <Button type="primary" onClick={onRecover} loading={recovering}>
+          执行恢复
+        </Button>
+      </Space>
+    </Space>
+  );
+}
+
 function bindingStatusLabel(
   accountStatus?: DesktopAccountStatus,
   pairing?: DesktopPairingRequest | null,
@@ -560,6 +714,73 @@ function bindingStatusColor(
     default:
       return 'default';
   }
+}
+
+function connectionOverviewAlertType(state: string): 'success' | 'info' | 'warning' | 'error' {
+  switch (state) {
+    case 'bound':
+    case 'running':
+      return 'success';
+    case 'attention':
+      return 'warning';
+    case 'error':
+      return 'error';
+    default:
+      return 'info';
+  }
+}
+
+function lifecycleColor(state: string): string {
+  switch (state) {
+    case 'running':
+      return 'success';
+    case 'starting':
+    case 'stopping':
+      return 'processing';
+    case 'failed':
+      return 'error';
+    default:
+      return 'default';
+  }
+}
+
+function connectionStateColor(state: string): string {
+  if (state.startsWith('authenticated') || state.startsWith('connected')) {
+    return 'success';
+  }
+  if (state.startsWith('connecting') || state.startsWith('reconnecting') || state.startsWith('authenticating')) {
+    return 'processing';
+  }
+  if (state.startsWith('failed')) {
+    return 'error';
+  }
+  return 'default';
+}
+
+function logLevelColor(level: string): string {
+  switch (level) {
+    case 'INFO':
+      return 'blue';
+    case 'WARN':
+      return 'warning';
+    case 'ERROR':
+      return 'error';
+    default:
+      return 'default';
+  }
+}
+
+function formatDateTime(value?: string | number | null): string {
+  if (!value) {
+    return '-';
+  }
+
+  const timestamp = typeof value === 'number' ? value * 1000 : Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return String(value);
+  }
+
+  return new Date(timestamp).toLocaleString();
 }
 
 function formatUnixTimestamp(value?: number | null): string {

@@ -267,6 +267,8 @@ user_id = "your-dingtalk-user-id"
 ```
 
 > Node Desktop 通知镜像当前主路径是 pairing 运行时绑定；这里的静态 `notification_bindings` 仅用于兼容 seed/fallback。
+>
+> 验收时请以 Settings 页面**当前最新显示**的 6 位绑定码为准；如果点击过“重新生成绑定码”，旧码会立即失效。当前主线已修复 DingTalk Stream 入站绕过 pairing 处理的问题，绑定码消息会优先走 pairing 确认分支，而不是普通任务文本链路。
 
 ### LLM 最小配置
 

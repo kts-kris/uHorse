@@ -114,6 +114,12 @@ export interface DesktopNodeStatus {
   node_id: string | null;
   lifecycle_state: DesktopLifecycleState;
   connection_state: string;
+  overview_state: string;
+  overview_message: string;
+  pairing_enabled: boolean;
+  bound_user_id: string | null;
+  active_pairing_code: string | null;
+  active_pairing_status: string | null;
   hub_url: string;
   workspace_path: string;
   saved_workspace_path: string;
@@ -172,4 +178,30 @@ export interface DesktopLogEntry {
   message: string;
   timestamp: string;
   source: string;
+}
+
+export interface DesktopConnectionDiagnostics {
+  lifecycle_state: DesktopLifecycleState;
+  connection_state: string;
+  overview_state: string;
+  overview_message: string;
+  hub_url: string;
+  node_id: string | null;
+  bound_user_id: string | null;
+  auth_token_present: boolean;
+  workspace_valid: boolean;
+  workspace_error: string | null;
+  restart_required: boolean;
+  restart_notice: string | null;
+  reconnect_interval_secs: number;
+  max_reconnect_attempts: number;
+  recent_error: string | null;
+  recent_logs: DesktopLogEntry[];
+}
+
+export interface DesktopConnectionRecoveryResult {
+  success: boolean;
+  action: string;
+  message: string;
+  status: DesktopConnectionDiagnostics;
 }

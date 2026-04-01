@@ -20,7 +20,8 @@ use uhorse_core::Channel;
 use uhorse_hub::{
     create_router_with_health_config,
     web::{
-        init_default_agent_runtime, reply_dingtalk_error, reply_task_result, submit_dingtalk_task,
+        handle_dingtalk_inbound, init_default_agent_runtime, reply_dingtalk_error,
+        reply_task_result,
     },
     Hub, HubConfig, NotificationBindingManager, SecurityManager, WebState,
 };
@@ -183,9 +184,9 @@ async fn main() -> anyhow::Result<()> {
                 match incoming_rx.recv().await {
                     Ok(inbound) => {
                         if let Err(error) =
-                            submit_dingtalk_task(&stream_submit_state, inbound.clone()).await
+                            handle_dingtalk_inbound(&stream_submit_state, inbound.clone()).await
                         {
-                            error!("Failed to submit DingTalk stream task: {}", error);
+                            error!("Failed to handle DingTalk stream message: {}", error);
                             if let Err(reply_error) = reply_dingtalk_error(
                                 &stream_submit_state,
                                 &inbound,

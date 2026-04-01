@@ -63,16 +63,24 @@ const Dashboard: React.FC = () => {
       {stopMutation.error instanceof Error ? (
         <Alert type="error" showIcon message="停止失败" description={stopMutation.error.message} />
       ) : null}
+      {status.recent_error ? (
+        <Alert type="error" showIcon message="最近错误" description={status.recent_error} />
+      ) : null}
       {status.restart_required ? (
         <Alert type="warning" showIcon message={status.restart_notice || '运行中的 Node 需要重启后才会应用最新配置'} />
       ) : null}
+      <Alert
+        type={overviewAlertType(status.overview_state)}
+        showIcon
+        message={status.overview_message}
+      />
 
       <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
         <Typography.Title level={4} style={{ margin: 0 }}>
           本地 Node 仪表盘
         </Typography.Title>
         <Space>
-          <Tag color={lifecycleColor(status.lifecycle_state)}>{status.lifecycle_state}</Tag>
+          <Tag color={overviewColor(status.overview_state)}>{status.overview_state}</Tag>
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}
@@ -133,9 +141,20 @@ const Dashboard: React.FC = () => {
               <Descriptions.Item label="生命周期">
                 <Tag color={lifecycleColor(status.lifecycle_state)}>{status.lifecycle_state}</Tag>
               </Descriptions.Item>
+              <Descriptions.Item label="总览状态">
+                <Tag color={overviewColor(status.overview_state)}>{status.overview_state}</Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="Hub 连接">
                 <Tag color={connectionColor(status.connection_state)}>{status.connection_state}</Tag>
               </Descriptions.Item>
+              <Descriptions.Item label="绑定能力">
+                <Tag color={status.pairing_enabled ? 'success' : 'default'}>
+                  {status.pairing_enabled ? '已启用' : '未启用'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="当前绑定用户">{status.bound_user_id || '-'}</Descriptions.Item>
+              <Descriptions.Item label="绑定流程状态">{status.active_pairing_status || '-'}</Descriptions.Item>
+              <Descriptions.Item label="绑定码">{status.active_pairing_code || '-'}</Descriptions.Item>
               <Descriptions.Item label="最大并发">{status.max_concurrent_tasks}</Descriptions.Item>
               <Descriptions.Item label="最近错误">{status.recent_error || '-'}</Descriptions.Item>
             </Descriptions>
@@ -204,6 +223,39 @@ function connectionColor(state: string): string {
     return 'error';
   }
   return 'default';
+}
+
+function overviewColor(state: string): string {
+  switch (state) {
+    case 'bound':
+    case 'running':
+      return 'success';
+    case 'starting':
+    case 'stopping':
+    case 'connecting':
+    case 'pairing':
+      return 'processing';
+    case 'attention':
+      return 'warning';
+    case 'error':
+      return 'error';
+    default:
+      return 'default';
+  }
+}
+
+function overviewAlertType(state: string): 'success' | 'info' | 'warning' | 'error' {
+  switch (state) {
+    case 'bound':
+    case 'running':
+      return 'success';
+    case 'attention':
+      return 'warning';
+    case 'error':
+      return 'error';
+    default:
+      return 'info';
+  }
 }
 
 function formatDateTime(value?: string | null): string {

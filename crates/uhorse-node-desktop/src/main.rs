@@ -31,7 +31,8 @@ use app_state::DesktopAppState;
 use config_store::ConfigStore;
 use dto::{
     ApiResponse, CancelAccountPairingRequest, DefaultSettingsDto, DesktopCapabilityStatusDto,
-    DesktopLogEntryDto, DesktopSettingsDto, DirectoryPickerResponseDto, WorkspaceValidationRequest,
+    DesktopConnectionDiagnosticsDto, DesktopConnectionRecoveryResultDto, DesktopLogEntryDto,
+    DesktopSettingsDto, DirectoryPickerResponseDto, WorkspaceValidationRequest,
 };
 
 const DESKTOP_WEB_DIR_ENV: &str = "UHORSE_NODE_DESKTOP_WEB_DIR";
@@ -125,6 +126,11 @@ fn build_app(state: DesktopAppState, web_assets_dir: Option<PathBuf>) -> Router 
         .route("/api/runtime/status", get(get_runtime_status))
         .route("/api/runtime/start", post(start_node))
         .route("/api/runtime/stop", post(stop_node))
+        .route(
+            "/api/connection/diagnostics",
+            get(get_connection_diagnostics),
+        )
+        .route("/api/connection/recover", post(recover_connection))
         .route("/api/account/pairing/start", post(start_account_pairing))
         .route("/api/account/pairing/cancel", post(cancel_account_pairing))
         .route("/api/account/status", get(get_account_status))
@@ -267,7 +273,13 @@ async fn pick_workspace(State(state): State<DesktopAppState>) -> impl IntoRespon
         ),
         Err(error) => {
             let status = status_code_for_error(&error);
-            (status, Json(ApiResponse::error(error.to_string())))
+            (
+                status,
+                Json(ApiResponse::error_with_code(
+                    node_error_code(&error),
+                    error.to_string(),
+                )),
+            )
         }
     }
 }
@@ -282,6 +294,24 @@ async fn start_node(State(state): State<DesktopAppState>) -> impl IntoResponse {
 
 async fn stop_node(State(state): State<DesktopAppState>) -> impl IntoResponse {
     into_api_response(state.stop_node().await)
+}
+
+async fn get_connection_diagnostics(
+    State(state): State<DesktopAppState>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<DesktopConnectionDiagnosticsDto>>,
+) {
+    into_api_response(state.connection_diagnostics().await)
+}
+
+async fn recover_connection(
+    State(state): State<DesktopAppState>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<DesktopConnectionRecoveryResultDto>>,
+) {
+    into_api_response(state.recover_connection().await)
 }
 
 async fn start_account_pairing(State(state): State<DesktopAppState>) -> impl IntoResponse {
@@ -322,7 +352,13 @@ fn into_api_response<T: serde::Serialize>(
         Ok(data) => (StatusCode::OK, Json(ApiResponse::success(data))),
         Err(error) => {
             let status = status_code_for_error(&error);
-            (status, Json(ApiResponse::error(error.to_string())))
+            (
+                status,
+                Json(ApiResponse::error_with_code(
+                    node_error_code(&error),
+                    error.to_string(),
+                )),
+            )
         }
     }
 }
@@ -338,6 +374,21 @@ fn status_code_for_error(error: &NodeError) -> StatusCode {
         | NodeError::Io(_)
         | NodeError::Serialization(_)
         | NodeError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn node_error_code(error: &NodeError) -> &'static str {
+    match error {
+        NodeError::Workspace(_) => "workspace_invalid",
+        NodeError::Config(_) => "config_invalid",
+        NodeError::Permission(_) => "permission_denied",
+        NodeError::Connection(_) => "connection_failed",
+        NodeError::Execution(_) => "execution_conflict",
+        NodeError::Timeout(_) => "timeout",
+        NodeError::Protocol(_) => "protocol_error",
+        NodeError::Io(_) => "io_error",
+        NodeError::Serialization(_) => "serialization_error",
+        NodeError::Internal(_) => "internal_error",
     }
 }
 
@@ -450,7 +501,11 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(body["success"], Value::Bool(false));
         assert_eq!(
-            body["error"],
+            body["error"]["code"],
+            Value::String("permission_denied".to_string())
+        );
+        assert_eq!(
+            body["error"]["message"],
             Value::String("Permission denied: Node auth token is missing".to_string())
         );
     }
@@ -477,5 +532,34 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["success"], Value::Bool(true));
         assert!(body["data"]["suggested_name"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_build_app_exposes_connection_diagnostics_routes() {
+        let temp = TempDir::new().unwrap();
+        let app = build_app(create_state(&temp), None);
+
+        let (status, body) = get_json(app.clone(), "/api/connection/diagnostics").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], Value::Bool(true));
+        assert_eq!(body["data"]["connection_state"], Value::String("disconnected".to_string()));
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/connection/recover")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["success"], Value::Bool(true));
+        assert_eq!(json["data"]["success"], Value::Bool(false));
+        assert_eq!(
+            json["data"]["action"],
+            Value::String("check_prerequisites".to_string())
+        );
     }
 }

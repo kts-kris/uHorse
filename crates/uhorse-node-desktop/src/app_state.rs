@@ -20,7 +20,8 @@ use crate::config_store::{
 };
 use crate::dto::{
     ApiResponse, CancelAccountPairingRequest, DefaultSettingsDto, DesktopAccountStatusDto,
-    DesktopCapabilityStatusDto, DesktopCheckpointDto, DesktopHeartbeatDto, DesktopLifecycleState,
+    DesktopCapabilityStatusDto, DesktopCheckpointDto, DesktopConnectionDiagnosticsDto,
+    DesktopConnectionRecoveryResultDto, DesktopHeartbeatDto, DesktopLifecycleState,
     DesktopLogEntryDto, DesktopLogLevel, DesktopMetricsDto, DesktopNodeStatusDto,
     DesktopPairingRequestDto, DesktopSettingsDto, DesktopVersionEntryDto, DesktopVersionSummaryDto,
     DesktopWorkspaceStatusDto, StartAccountPairingRequest, WorkspaceValidationDto,
@@ -364,7 +365,7 @@ impl DesktopAppState {
                 "Start requested while node already running",
                 "runtime.start",
             );
-            return Self::build_status(&app).await;
+            return Self::build_status(&app, None).await;
         }
 
         app.lifecycle_state = DesktopLifecycleState::Starting;
@@ -429,7 +430,7 @@ impl DesktopAppState {
             DesktopNotification::node_started(),
             "runtime.start",
         );
-        Self::build_status(&app).await
+        Self::build_status(&app, None).await
     }
 
     pub async fn stop_node(&self) -> NodeResult<DesktopNodeStatusDto> {
@@ -479,12 +480,104 @@ impl DesktopAppState {
             DesktopNotification::node_stopped(),
             "runtime.stop",
         );
-        Self::build_status(&app).await
+        Self::build_status(&app, None).await
     }
 
     pub async fn runtime_status(&self) -> NodeResult<DesktopNodeStatusDto> {
+        let account_status = self.account_status().await.ok();
         let app = self.inner.read().await;
-        Self::build_status(&app).await
+        Self::build_status(&app, account_status.as_ref()).await
+    }
+
+    pub async fn connection_diagnostics(&self) -> NodeResult<DesktopConnectionDiagnosticsDto> {
+        let account_status = self.account_status().await.ok();
+        let runtime_status = self.runtime_status().await?;
+        let workspace_status = self.workspace_status().await;
+        let app = self.inner.read().await;
+
+        Ok(Self::build_connection_diagnostics(
+            &app,
+            runtime_status,
+            workspace_status,
+            account_status.as_ref(),
+        ))
+    }
+
+    pub async fn recover_connection(&self) -> NodeResult<DesktopConnectionRecoveryResultDto> {
+        let workspace_status = self.workspace_status().await;
+        if !workspace_status.valid {
+            let status = self.connection_diagnostics().await?;
+            return Ok(DesktopConnectionRecoveryResultDto {
+                success: false,
+                action: "validate_workspace".to_string(),
+                message: workspace_status
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Workspace validation failed".to_string()),
+                status,
+            });
+        }
+
+        let (needs_stop, missing_node_id, missing_auth_token, invalid_hub_url) = {
+            let app = self.inner.read().await;
+            (
+                matches!(
+                    app.lifecycle_state,
+                    DesktopLifecycleState::Running | DesktopLifecycleState::Starting
+                ),
+                app.config
+                    .node_id
+                    .as_ref()
+                    .map(|value| value.to_string())
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none(),
+                app.config
+                    .connection
+                    .auth_token
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .is_none(),
+                hub_http_base_url(&app.config.connection.hub_url).is_err(),
+            )
+        };
+
+        let failure_message = if missing_node_id {
+            Some("Node ID is missing".to_string())
+        } else if missing_auth_token {
+            Some("Node auth token is missing".to_string())
+        } else if invalid_hub_url {
+            Some("Hub URL is invalid".to_string())
+        } else {
+            None
+        };
+
+        if let Some(message) = failure_message {
+            let status = self.connection_diagnostics().await?;
+            return Ok(DesktopConnectionRecoveryResultDto {
+                success: false,
+                action: "check_prerequisites".to_string(),
+                message,
+                status,
+            });
+        }
+
+        if needs_stop {
+            self.stop_node().await?;
+        }
+        self.start_node().await?;
+        let status = self.connection_diagnostics().await?;
+
+        Ok(DesktopConnectionRecoveryResultDto {
+            success: true,
+            action: if needs_stop {
+                "restart_node".to_string()
+            } else {
+                "start_node".to_string()
+            },
+            message: "Connection recovery executed".to_string(),
+            status,
+        })
     }
 
     pub async fn workspace_status(&self) -> DesktopWorkspaceStatusDto {
@@ -718,8 +811,49 @@ impl DesktopAppState {
         Ok(response)
     }
 
-    async fn build_status(app: &DesktopApp) -> NodeResult<DesktopNodeStatusDto> {
+    fn build_connection_diagnostics(
+        app: &DesktopApp,
+        runtime_status: DesktopNodeStatusDto,
+        workspace_status: DesktopWorkspaceStatusDto,
+        account_status: Option<&DesktopAccountStatusDto>,
+    ) -> DesktopConnectionDiagnosticsDto {
+        let bound_user_id = account_status
+            .and_then(|status| status.bound_user_id.clone())
+            .or(runtime_status.bound_user_id.clone());
+
+        DesktopConnectionDiagnosticsDto {
+            lifecycle_state: runtime_status.lifecycle_state,
+            connection_state: runtime_status.connection_state,
+            overview_state: runtime_status.overview_state,
+            overview_message: runtime_status.overview_message,
+            hub_url: runtime_status.hub_url,
+            node_id: runtime_status.node_id,
+            bound_user_id,
+            auth_token_present: app
+                .config
+                .connection
+                .auth_token
+                .as_ref()
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false),
+            workspace_valid: workspace_status.valid,
+            workspace_error: workspace_status.error,
+            restart_required: runtime_status.restart_required,
+            restart_notice: runtime_status.restart_notice,
+            reconnect_interval_secs: app.config.connection.reconnect_interval_secs,
+            max_reconnect_attempts: app.config.connection.max_reconnect_attempts,
+            recent_error: runtime_status.recent_error,
+            recent_logs: app.logs.iter().take(5).cloned().collect(),
+        }
+    }
+
+    async fn build_status(
+        app: &DesktopApp,
+        account_status: Option<&DesktopAccountStatusDto>,
+    ) -> NodeResult<DesktopNodeStatusDto> {
         let (runtime_workspace_path, restart_required, restart_notice) = runtime_config_status(app);
+        let (pairing_enabled, bound_user_id, active_pairing_code, active_pairing_status) =
+            account_overview(account_status);
 
         if let Some(node) = app.node.as_ref() {
             let metrics = node.get_metrics().await;
@@ -737,12 +871,28 @@ impl DesktopAppState {
             } else {
                 None
             };
+            let (overview_state, overview_message) = describe_runtime_overview(
+                &app.lifecycle_state,
+                &connection_state,
+                restart_required,
+                restart_notice.as_deref(),
+                pairing_enabled,
+                bound_user_id.as_deref(),
+                active_pairing_status.as_deref(),
+                app.recent_error.as_deref(),
+            );
 
             return Ok(DesktopNodeStatusDto {
                 name: node.config().name.clone(),
                 node_id: Some(node.node_id().to_string()),
                 lifecycle_state: app.lifecycle_state.clone(),
                 connection_state,
+                overview_state,
+                overview_message,
+                pairing_enabled,
+                bound_user_id,
+                active_pairing_code,
+                active_pairing_status,
                 hub_url: node.config().connection.hub_url.clone(),
                 workspace_path: runtime_workspace_path
                     .clone()
@@ -768,12 +918,29 @@ impl DesktopAppState {
             .filter(|workspace| workspace.is_git_repo())
             .and_then(|workspace| VersionManager::new(workspace).current_checkpoint().ok())
             .map(DesktopCheckpointDto::from_record);
+        let connection_state = "disconnected".to_string();
+        let (overview_state, overview_message) = describe_runtime_overview(
+            &app.lifecycle_state,
+            &connection_state,
+            restart_required,
+            restart_notice.as_deref(),
+            pairing_enabled,
+            bound_user_id.as_deref(),
+            active_pairing_status.as_deref(),
+            app.recent_error.as_deref(),
+        );
 
         Ok(DesktopNodeStatusDto {
             name: app.config.name.clone(),
             node_id: app.config.node_id.as_ref().map(ToString::to_string),
             lifecycle_state: app.lifecycle_state.clone(),
-            connection_state: "disconnected".to_string(),
+            connection_state,
+            overview_state,
+            overview_message,
+            pairing_enabled,
+            bound_user_id,
+            active_pairing_code,
+            active_pairing_status,
             hub_url: app.config.connection.hub_url.clone(),
             workspace_path: app.config.workspace_path.clone(),
             saved_workspace_path: app.config.workspace_path.clone(),
@@ -859,6 +1026,7 @@ async fn parse_hub_response<T: DeserializeOwned>(response: reqwest::Response) ->
     } else {
         let message = payload
             .error
+            .map(|error| error.message)
             .unwrap_or_else(|| format!("Hub request failed with status {}", status));
         Err(match status {
             StatusCode::BAD_REQUEST => NodeError::Config(message),
@@ -944,6 +1112,124 @@ fn runtime_config_status(app: &DesktopApp) -> (Option<String>, bool, Option<Stri
     };
 
     (runtime_workspace_path, restart_required, restart_notice)
+}
+
+fn account_overview(
+    account_status: Option<&DesktopAccountStatusDto>,
+) -> (bool, Option<String>, Option<String>, Option<String>) {
+    let Some(status) = account_status else {
+        return (false, None, None, None);
+    };
+
+    (
+        status.pairing_enabled,
+        status.bound_user_id.clone(),
+        status
+            .pairing
+            .as_ref()
+            .map(|pairing| pairing.pairing_code.clone()),
+        status
+            .pairing
+            .as_ref()
+            .map(|pairing| pairing.status.clone()),
+    )
+}
+
+fn describe_runtime_overview(
+    lifecycle_state: &DesktopLifecycleState,
+    connection_state: &str,
+    restart_required: bool,
+    restart_notice: Option<&str>,
+    pairing_enabled: bool,
+    bound_user_id: Option<&str>,
+    active_pairing_status: Option<&str>,
+    recent_error: Option<&str>,
+) -> (String, String) {
+    if let Some(error) = recent_error.filter(|value| !value.trim().is_empty()) {
+        if matches!(lifecycle_state, DesktopLifecycleState::Failed)
+            || connection_state.starts_with("failed")
+        {
+            return ("error".to_string(), error.to_string());
+        }
+    }
+
+    match lifecycle_state {
+        DesktopLifecycleState::Starting => {
+            return ("starting".to_string(), "Node 正在启动。".to_string())
+        }
+        DesktopLifecycleState::Stopping => {
+            return ("stopping".to_string(), "Node 正在停止。".to_string())
+        }
+        DesktopLifecycleState::Failed => {
+            return (
+                "error".to_string(),
+                recent_error
+                    .unwrap_or("Node 启动失败，请检查最近错误。")
+                    .to_string(),
+            )
+        }
+        DesktopLifecycleState::Stopped => {
+            if restart_required {
+                return (
+                    "attention".to_string(),
+                    restart_notice
+                        .unwrap_or("设置已保存，需重启 Node 后生效。")
+                        .to_string(),
+                );
+            }
+
+            return ("idle".to_string(), "Node 尚未启动。".to_string());
+        }
+        DesktopLifecycleState::Running => {}
+    }
+
+    if restart_required {
+        return (
+            "attention".to_string(),
+            restart_notice
+                .unwrap_or("设置已保存，需重启 Node 后生效。")
+                .to_string(),
+        );
+    }
+
+    if bound_user_id.is_some() {
+        return (
+            "bound".to_string(),
+            "Node 运行中，DingTalk 账号已绑定。".to_string(),
+        );
+    }
+
+    if let Some(status) = active_pairing_status {
+        if matches!(status, "pending" | "awaiting_confirmation") {
+            return (
+                "pairing".to_string(),
+                "绑定码已生成，等待在 DingTalk 中确认。".to_string(),
+            );
+        }
+    }
+
+    if pairing_enabled {
+        return (
+            "unbound".to_string(),
+            "Node 运行中，尚未绑定 DingTalk 账号。".to_string(),
+        );
+    }
+
+    if connection_state.starts_with("authenticated") || connection_state.starts_with("connected") {
+        return (
+            "running".to_string(),
+            "Node 运行中，Hub 连接正常。".to_string(),
+        );
+    }
+
+    if connection_state.starts_with("connecting") || connection_state.starts_with("reconnecting") {
+        return (
+            "connecting".to_string(),
+            "Node 运行中，正在连接 Hub。".to_string(),
+        );
+    }
+
+    ("running".to_string(), "Node 运行中。".to_string())
 }
 
 fn node_config_requires_restart(runtime_config: &NodeConfig, saved_config: &NodeConfig) -> bool {
@@ -1768,6 +2054,133 @@ mod tests {
                 .unwrap();
         });
         format!("http://{}", address)
+    }
+
+    #[tokio::test]
+    async fn test_runtime_status_includes_account_overview_when_bound() {
+        let temp = TempDir::new().unwrap();
+        let state = create_account_test_state(&temp);
+        let hub_url = spawn_mock_hub_server().await;
+
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: temp.path().to_string_lossy().to_string(),
+                hub_url,
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: false,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        let status = state.runtime_status().await.unwrap();
+        assert!(status.pairing_enabled);
+        assert_eq!(status.bound_user_id.as_deref(), Some("ding-user-1"));
+        assert_eq!(status.active_pairing_code, None);
+        assert_eq!(status.overview_state, "idle");
+        assert_eq!(status.overview_message, "Node 尚未启动。");
+    }
+
+    #[tokio::test]
+    async fn test_connection_diagnostics_reports_recent_logs_and_prerequisites() {
+        let temp = TempDir::new().unwrap();
+        let state = create_account_test_state(&temp);
+        let hub_url = spawn_mock_hub_server().await;
+
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: temp.path().to_string_lossy().to_string(),
+                hub_url,
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: false,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        let _ = state
+            .validate_workspace(temp.path().to_string_lossy().to_string(), false)
+            .await;
+        let diagnostics = state.connection_diagnostics().await.unwrap();
+
+        assert_eq!(diagnostics.lifecycle_state, DesktopLifecycleState::Stopped);
+        assert_eq!(diagnostics.connection_state, "disconnected");
+        assert!(diagnostics.auth_token_present);
+        assert!(diagnostics.workspace_valid);
+        assert_eq!(diagnostics.bound_user_id.as_deref(), Some("ding-user-1"));
+        assert!(!diagnostics.recent_logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_recover_connection_returns_failure_for_invalid_workspace() {
+        let temp = TempDir::new().unwrap();
+        let state = create_account_test_state(&temp);
+
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: temp.path().join("missing").to_string_lossy().to_string(),
+                hub_url: "http://127.0.0.1:18080".to_string(),
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: false,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        let result = state.recover_connection().await.unwrap();
+        assert!(!result.success);
+        assert_eq!(result.action, "validate_workspace");
+        assert!(!result.status.workspace_valid);
+    }
+
+    #[tokio::test]
+    async fn test_recover_connection_starts_node_when_prerequisites_are_ready() {
+        let temp = TempDir::new().unwrap();
+        let state = create_account_test_state(&temp);
+        let hub_url = spawn_mock_hub_server().await;
+
+        state
+            .save_settings(DesktopSettingsDto {
+                name: "Desktop Node".to_string(),
+                workspace_path: temp.path().to_string_lossy().to_string(),
+                hub_url,
+                require_git_repo: false,
+                watch_workspace: true,
+                git_protection_enabled: true,
+                auto_git_add_new_files: false,
+                notifications_enabled: false,
+                show_notification_details: true,
+                mirror_notifications_to_dingtalk: false,
+                launch_at_login: false,
+            })
+            .await
+            .unwrap();
+
+        let result = state.recover_connection().await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.action, "start_node");
+        assert_eq!(
+            result.status.lifecycle_state,
+            DesktopLifecycleState::Running
+        );
     }
 
     #[tokio::test]

@@ -2184,7 +2184,7 @@ async fn dingtalk_webhook_verify() -> &'static str {
     "DingTalk webhook endpoint is ready"
 }
 
-async fn handle_dingtalk_inbound(
+pub async fn handle_dingtalk_inbound(
     state: &Arc<WebState>,
     inbound: DingTalkInboundMessage,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
