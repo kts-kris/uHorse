@@ -7,15 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-04-01
+
 ### Added
 
+- Node Desktop now exposes connection diagnostics / recovery in Settings so users can inspect lifecycle / connection / overview, auth prerequisites, workspace validation, recent error state, and recent log summaries, then trigger a minimal recovery loop
+- Node Desktop now exposes local `GET /api/connection/diagnostics` and `POST /api/connection/recover` APIs for the desktop Settings page
 - Node Desktop now has macOS `.pkg` and Windows installer packaging scripts while continuing to reuse the existing `bin + web` payload
 - `desktop-installer-smoke.sh` now validates the installed host API, static assets, and SPA route fallback from an installed layout
 
 ### Changed
 
+- DingTalk Stream inbound handling now goes through the same pairing-first path as the Web route, so pairing-code messages hit runtime binding confirmation before they can fall into the normal task text pipeline
+- The Node Desktop DingTalk account-binding loop has now been acceptance-validated end to end: JWT bootstrap, pairing confirmation, runtime binding, connection diagnostics, and bound-state presentation are all verified together
 - GitHub release / nightly workflows now keep uploading the Node Desktop archives and additionally publish the macOS `.pkg` and Windows installer artifacts
-- README / INSTALL / scripts / release docs are now aligned to the current Node Desktop delivery boundary: archive + macOS `.pkg` + Windows installer, while still excluding `.app/.dmg`, code signing, notarization, `.msi`, and Linux native installers
+- README / INSTALL / scripts / testing / release docs are now aligned to the current Node Desktop delivery boundary and binding acceptance path: archive + macOS `.pkg` + Windows installer, with pairing as the primary path and `notification_bindings` retained only as a compatibility seed/fallback
 
 ## [4.1.3] - 2026-03-29
 
@@ -273,7 +279,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.3...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.3.0...HEAD
+[4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0
 [4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3
 [4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1

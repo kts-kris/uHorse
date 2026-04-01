@@ -7,15 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-04-01
+
 ### Added
 
+- Node Desktop 新增 Settings 内的连接诊断 / 恢复能力，可直接查看 lifecycle / connection / overview、认证前提、工作区校验、最近错误与最近日志摘要，并执行最小恢复闭环
+- Node Desktop 新增 `GET /api/connection/diagnostics` 与 `POST /api/connection/recover` 本地 API，供桌面 Settings 页面读取诊断状态与触发恢复动作
 - Node Desktop 新增 macOS `.pkg` 与 Windows installer 打包脚本，继续复用现有 `bin + web` payload
 - 新增 `desktop-installer-smoke.sh`，用于校验安装后目录下的宿主 API、静态资源与 SPA 路由回退
 
 ### Changed
 
+- DingTalk Stream 入站现在与 Web 路径统一先走 pairing 处理，绑定码消息会优先命中运行时绑定确认，而不再误入普通任务文本链路
+- Node Desktop 的 DingTalk 账号绑定闭环已完成真实 acceptance 验证：JWT 引导、pairing 确认、运行时绑定、连接诊断与已绑定状态展示已全部打通
 - GitHub release / nightly workflow 现在会继续上传 Node Desktop archive，并同步上传 macOS `.pkg` 与 Windows installer 产物
-- README / INSTALL / scripts / release 说明已更新为当前 Node Desktop 交付边界：archive + macOS `.pkg` + Windows installer，仍不包含 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器
+- README / INSTALL / scripts / testing / release 说明已更新为当前 Node Desktop 交付边界与绑定验收路径：archive + macOS `.pkg` + Windows installer，pairing 为主路径，`notification_bindings` 仅作为兼容 seed/fallback
 
 ## [4.1.3] - 2026-03-29
 
@@ -273,7 +279,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.1.3...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.3.0...HEAD
+[4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0
 [4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3
 [4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/kts-kris/uHorse/compare/v4.0.0...v4.1.1

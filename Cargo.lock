@@ -5563,7 +5563,7 @@ checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 
 [[package]]
 name = "uhorse"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5601,7 +5601,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-agent"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5629,7 +5629,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-backup"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5648,7 +5648,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-cache"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5667,7 +5667,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-channel"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5687,7 +5687,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-config"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5705,7 +5705,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-core"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "async-trait",
  "semver 1.0.27",
@@ -5719,7 +5719,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-discovery"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5738,7 +5738,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-gateway"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5765,7 +5765,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-gdpr"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5782,7 +5782,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-governance"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5799,7 +5799,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-hub"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5838,7 +5838,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-integration"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5862,7 +5862,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-llm"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5882,7 +5882,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-multimodal"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5901,7 +5901,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-node"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5935,7 +5935,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-node-desktop"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -5958,7 +5958,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-node-runtime"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5988,7 +5988,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-observability"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6006,7 +6006,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-protocol"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "chrono",
  "serde",
@@ -6020,7 +6020,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-queue"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -6039,7 +6039,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-scheduler"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6057,7 +6057,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-security"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -6080,7 +6080,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-session"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -6095,7 +6095,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-siem"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6116,7 +6116,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-sso"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6140,7 +6140,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-storage"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6158,7 +6158,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-tool"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6175,7 +6175,7 @@ dependencies = [
 
 [[package]]
 name = "uhorse-webhook"
-version = "4.1.3"
+version = "4.3.0"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -1,23 +1,21 @@
-## uHorse 4.1.3 发布
+## uHorse 4.3.0 发布
 
-**发布日期**：2026-03-29
+**发布日期**：2026-04-01
 
 ### 本次发布重点
 
-`v4.1.3` 是基于 `v4.1.2` 的正式发布收口补丁版本，不扩展新的产品线，目标是把当前 HEAD 上已经完成的仓库入口修正、包元数据对齐、验证基线结果与正式 Release 事实重新统一起来。
+`v4.3.0` 是当前 Hub-Node 主线与 Node Desktop 产品化能力的一次正式收口发布，重点不再只是仓库入口与发布事实对齐，而是把已经落地的桌面诊断、恢复、安装包与 DingTalk 绑定闭环一起纳入正式 release 口径。
 
-功能面延续 `v4.1.2` 的当前 Hub-Node 主线、DingTalk 浏览器链路与 Node Desktop 交付边界；`v4.1.3` 新增的重点是**发布事实对齐**，而不是新的主线能力扩展。
+本次版本延续当前 Hub-Node、DingTalk 浏览器链路与 Node Desktop 交付边界，并新增 **Settings 连接诊断 / 恢复能力** 与 **DingTalk pairing 绑定闭环修复** 两条已完成真实 acceptance 验证的主线能力。 
 
 ### 主要变更
 
-- README / INSTALL / CONTRIBUTING / 部署与附属文档中的官方仓库入口已统一指向当前真实仓库 `https://github.com/kts-kris/uHorse`
-- `Cargo.toml` 的 `repository` 包元数据已与当前 GitHub 仓库一致
-- 已补跑并确认以下正式发布验证基线通过：
-  - `cargo test --workspace`
-  - `./scripts/package-node-desktop.sh`
-  - `./scripts/desktop-smoke.sh`
-  - `cargo build --release -p uhorse-hub -p uhorse-node-desktop`
-- 当前 HEAD 的正式发布事实已收口为 `v4.1.3`，避免已发布 `v4.1.2` tag 与后续仓库入口 / 元数据修正脱节
+- Node Desktop 新增 Settings 内的连接诊断 / 恢复能力，可直接查看连接健康度、认证前提、工作区状态、最近错误与最近日志，并执行最小恢复闭环
+- 本地宿主新增 `GET /api/connection/diagnostics` 与 `POST /api/connection/recover` API，供桌面 Settings 页面复用
+- DingTalk Stream 入站现在与 Web 路径统一先走 pairing 处理，绑定码消息会优先命中运行时绑定确认，不再误入普通任务文本链路
+- Node Desktop DingTalk 绑定链路已完成真实 acceptance 验证：JWT 引导、pairing 确认、运行时绑定、连接诊断和已绑定状态展示全部打通
+- Node Desktop 继续提供 `bin + web` archive，并新增 macOS `.pkg` 与 Windows installer；GitHub Release / nightly 会同步提供这些多平台产物
+- README / TESTING / release 说明已同步更新到 `v4.3.0` 口径，明确 pairing 是当前主路径，`channels.dingtalk.notification_bindings` 仅作为兼容 seed/fallback
 
 ### 当前主交付物
 
@@ -26,11 +24,11 @@
 - `uhorse-hub`
 - `uhorse-node-desktop`
 
-其中 `uhorse-node-desktop` 继续提供 `bin + web` archive，同时新增 macOS `.pkg` 与 Windows installer；GitHub Release / nightly 会同步提供这些多平台产物。
+其中 `uhorse-node-desktop` 当前正式交付边界为 `bin + web` archive、macOS `.pkg` 与 Windows installer；GitHub Release / nightly 会同步提供这些多平台产物。
 
 ### 不包含内容
 
-`v4.1.3` 明确 **不包含**：
+`v4.3.0` 明确 **不包含**：
 
 - 原生 `.app/.dmg`、签名、公证、`.msi`、Linux 原生安装器或拖拽安装体验
 - 旧时代 `agent / skill / memory` 独立平台的全面回归
