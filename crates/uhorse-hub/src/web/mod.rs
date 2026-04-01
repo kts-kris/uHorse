@@ -2466,36 +2466,38 @@ async fn parse_agent_decision(
     session_key: &SessionKey,
 ) -> Result<AgentDecision, Box<dyn std::error::Error + Send + Sync>> {
     let default_workspace_root = default_workspace_root.map(ToString::to_string);
+    let trimmed = response.trim();
 
-    if let Ok(decision) = serde_json::from_str::<AgentDecision>(response) {
-        return match decision {
-            AgentDecision::ExecuteCommand {
-                command,
-                workspace_path,
-            } => {
-                let workspace_path = workspace_path.or_else(|| default_workspace_root.clone());
-                if let Some(workspace_path) = workspace_path.as_deref() {
-                    validate_planned_command(&command, workspace_path)?;
-                }
-                Ok(AgentDecision::ExecuteCommand {
+    if let Some(json_payload) = extract_first_json_object(trimmed) {
+        if let Ok(decision) = serde_json::from_str::<AgentDecision>(&json_payload) {
+            return match decision {
+                AgentDecision::ExecuteCommand {
                     command,
                     workspace_path,
-                })
-            }
-            other => Ok(other),
-        };
-    }
+                } => {
+                    let workspace_path = workspace_path.or_else(|| default_workspace_root.clone());
+                    if let Some(workspace_path) = workspace_path.as_deref() {
+                        validate_planned_command(&command, workspace_path)?;
+                    }
+                    Ok(AgentDecision::ExecuteCommand {
+                        command,
+                        workspace_path,
+                    })
+                }
+                other => Ok(other),
+            };
+        }
 
-    if let Some(default_workspace_root) = default_workspace_root.as_deref() {
-        if let Ok(planned) = parse_planned_command(response, default_workspace_root) {
-            return Ok(AgentDecision::ExecuteCommand {
-                command: planned.command,
-                workspace_path: planned.workspace_path,
-            });
+        if let Some(default_workspace_root) = default_workspace_root.as_deref() {
+            if let Ok(planned) = parse_planned_command(&json_payload, default_workspace_root) {
+                return Ok(AgentDecision::ExecuteCommand {
+                    command: planned.command,
+                    workspace_path: planned.workspace_path,
+                });
+            }
         }
     }
 
-    let trimmed = response.trim();
     if !trimmed.is_empty() {
         return Ok(AgentDecision::DirectReply {
             text: trimmed.to_string(),
@@ -2517,6 +2519,46 @@ async fn parse_agent_decision(
         session_key,
     )
     .await
+}
+
+fn extract_first_json_object(input: &str) -> Option<String> {
+    let start = input.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (offset, ch) in input[start..].char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+            match ch {
+                '\\' => escape = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    let end = start + offset + ch.len_utf8();
+                    return Some(input[start..end].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 async fn plan_dingtalk_command(
@@ -5648,6 +5690,59 @@ mod tests {
         assert!(matches!(
             decision,
             AgentDecision::DirectReply { text } if text == "直接回复用户"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_extracts_execute_command_json_from_wrapped_text() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let workspace = tempdir().unwrap();
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        let response = format!(
+            "好的，执行如下：\n{{\"type\":\"execute_command\",\"command\":{{\"type\":\"file\",\"action\":\"exists\",\"path\":\"{}/Cargo.toml\"}},\"workspace_path\":\"{}\"}}",
+            workspace_path,
+            workspace_path
+        );
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient { response })),
+            None,
+            runtime,
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-json");
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router().register_node_sender(node_id.clone(), tx).await;
+        hub.handle_node_connection(
+            node_id,
+            "test-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_path.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+        let session_key = SessionKey::new("dingtalk", "user-command");
+
+        let decision = decide_dingtalk_action(&state, "列出当前目录", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::ExecuteCommand {
+                command: Command::File(FileCommand::Exists { .. }),
+                workspace_path: Some(ref resolved_workspace_path),
+            } if resolved_workspace_path == &workspace_path
         ));
     }
 
