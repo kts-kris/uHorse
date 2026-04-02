@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$Version = $env:UHORSE_VERSION,
     [string]$Target = $env:TARGET
 )
+
+$ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot

@@ -69,6 +69,14 @@ pub struct DingTalkReplyRoute {
 
 const DINGTALK_PROCESSING_ACK_TEXT: &str = "收到啦，正在处理，请稍等～";
 const BEARER_AUTH_PREFIX: &str = "Bearer ";
+const DEFAULT_SKILLHUB_SEARCH_URL: &str =
+    "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/search";
+const SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE: &str =
+    "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug={slug}";
+const SKILLHUB_OFFICIAL_HOSTS: [&str; 2] = [
+    "skillhub-1388575217.cos.ap-guangzhou.myqcloud.com",
+    "lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DingTalkReplyTarget {
@@ -537,6 +545,20 @@ struct SkillInstallActor {
     sender_user_id: Option<String>,
     sender_staff_id: Option<String>,
     sender_corp_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SkillhubSearchEntry {
+    slug: String,
+    name: String,
+    version: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+enum DingtalkSkillInstallIntent {
+    ExplicitCommand(SkillInstallRequest),
+    NaturalLanguage(SkillhubSearchEntry),
+    NaturalLanguageNoMatch(String),
 }
 
 fn default_skill_install_target_layer() -> SkillInstallTargetLayer {
@@ -4123,6 +4145,179 @@ fn resolve_dingtalk_skill_install_request(text: &str) -> Option<SkillInstallRequ
     })
 }
 
+fn looks_like_dingtalk_skill_install_intent(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let has_install_verb = trimmed.contains('装')
+        || trimmed.contains("安装")
+        || trimmed.contains("启用")
+        || lower.contains("install");
+    let has_skill_object = trimmed.contains("技能") || lower.contains("skill");
+    if !has_install_verb || !has_skill_object {
+        return false;
+    }
+
+    let guidance_like_patterns = [
+        "怎么安装",
+        "如何安装",
+        "安装说明",
+        "安装文档",
+        "安装教程",
+        "安装失败",
+        "安装不了怎么办",
+        "怎么用",
+        "如何使用",
+    ];
+    if guidance_like_patterns
+        .iter()
+        .any(|pattern| trimmed.contains(pattern))
+    {
+        return false;
+    }
+
+    true
+}
+
+fn parse_dingtalk_skill_install_search_query(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if !looks_like_dingtalk_skill_install_intent(trimmed) {
+        return None;
+    }
+
+    let without_prefix = trimmed
+        .strip_prefix("帮我")
+        .or_else(|| trimmed.strip_prefix("请帮我"))
+        .or_else(|| trimmed.strip_prefix("请"))
+        .unwrap_or(trimmed)
+        .trim();
+
+    let lower = without_prefix.to_ascii_lowercase();
+    let candidate = if let Some(rest) = without_prefix.strip_prefix("安装") {
+        rest.trim()
+    } else if let Some(index) = lower.find("install") {
+        without_prefix[index + "install".len()..].trim()
+    } else if let Some(index) = without_prefix.find('装') {
+        without_prefix[index + '装'.len_utf8()..].trim()
+    } else {
+        without_prefix
+    };
+
+    let candidate = candidate
+        .trim_end_matches('。')
+        .trim_end_matches('！')
+        .trim_end_matches('!')
+        .trim_end_matches('？')
+        .trim_end_matches('?')
+        .trim();
+    let candidate = candidate
+        .strip_suffix("技能")
+        .or_else(|| candidate.strip_suffix("skill"))
+        .or_else(|| candidate.strip_suffix("Skill"))
+        .unwrap_or(candidate)
+        .trim();
+
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn skillhub_search_url() -> String {
+    std::env::var("UHORSE_SKILLHUB_SEARCH_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SKILLHUB_SEARCH_URL.to_string())
+}
+
+async fn search_skillhub_skill(
+    query: &str,
+) -> Result<Option<SkillhubSearchEntry>, Box<dyn std::error::Error + Send + Sync>> {
+    #[derive(Debug, Deserialize)]
+    struct SkillhubSearchResponse {
+        #[serde(default)]
+        results: Vec<SkillhubSearchItem>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SkillhubSearchItem {
+        slug: String,
+        #[serde(rename = "displayName")]
+        display_name: Option<String>,
+        name: Option<String>,
+        version: Option<String>,
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(skillhub_search_url())
+        .query(&[("q", query), ("limit", "1")])
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        return Err(format!("Skill 搜索失败：HTTP {}", response.status()).into());
+    }
+
+    let payload: SkillhubSearchResponse = response.json().await?;
+    let Some(first) = payload.results.into_iter().next() else {
+        return Ok(None);
+    };
+
+    Ok(Some(SkillhubSearchEntry {
+        slug: first.slug.clone(),
+        name: first
+            .display_name
+            .filter(|value| !value.trim().is_empty())
+            .or(first.name)
+            .unwrap_or(first.slug),
+        version: first.version.filter(|value| !value.trim().is_empty()),
+    }))
+}
+
+fn build_skillhub_download_url(slug: &str) -> String {
+    SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE.replace("{slug}", slug)
+}
+
+fn is_allowed_skillhub_download_url(download_url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(download_url) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    SKILLHUB_OFFICIAL_HOSTS
+        .iter()
+        .any(|allowed| host.eq_ignore_ascii_case(allowed))
+}
+
+async fn resolve_dingtalk_skill_install_intent(
+    text: &str,
+) -> Result<Option<DingtalkSkillInstallIntent>, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(request) = resolve_dingtalk_skill_install_request(text) {
+        if !is_allowed_skillhub_download_url(&request.download_url) {
+            return Err("仅允许安装 SkillHub 官方下载地址。".into());
+        }
+        return Ok(Some(DingtalkSkillInstallIntent::ExplicitCommand(request)));
+    }
+
+    let Some(query) = parse_dingtalk_skill_install_search_query(text) else {
+        return Ok(None);
+    };
+
+    let Some(entry) = search_skillhub_skill(&query).await? else {
+        return Ok(Some(DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query)));
+    };
+
+    Ok(Some(DingtalkSkillInstallIntent::NaturalLanguage(entry)))
+}
+
 async fn process_dingtalk_pairing_command(
     state: &Arc<WebState>,
     inbound: &DingTalkInboundMessage,
@@ -4194,7 +4389,7 @@ async fn try_handle_dingtalk_skill_install_command(
     let Some(text) = inbound.message.content.as_text().map(str::trim) else {
         return Ok(false);
     };
-    let Some(request) = resolve_dingtalk_skill_install_request(text) else {
+    let Some(intent) = resolve_dingtalk_skill_install_intent(text).await? else {
         return Ok(false);
     };
 
@@ -4205,9 +4400,32 @@ async fn try_handle_dingtalk_skill_install_command(
         sender_corp_id: inbound.sender_corp_id.clone(),
     };
 
-    let reply_text = match install_skill_from_request(state, actor, request).await {
-        Ok(result) => format!("Skill {} 安装成功。", result.skill_name),
-        Err(error) => format!("Skill 安装失败：{}", error),
+    let reply_text = match intent {
+        DingtalkSkillInstallIntent::ExplicitCommand(request) => {
+            let requested_name = request.package.clone();
+            match install_skill_from_request(state, actor, request).await {
+                Ok(result) => format!("Skill {} 安装成功。", result.skill_name),
+                Err(error) => format!("Skill {} 安装失败：{}", requested_name, error),
+            }
+        }
+        DingtalkSkillInstallIntent::NaturalLanguage(entry) => {
+            let requested_name = entry.name.clone();
+            let request = SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: entry.slug.clone(),
+                version: entry.version,
+                download_url: build_skillhub_download_url(&entry.slug),
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            };
+            match install_skill_from_request(state, actor, request).await {
+                Ok(result) => format!("Skill {} 安装成功。", result.skill_name),
+                Err(error) => format!("Skill {} 安装失败：{}", requested_name, error),
+            }
+        }
+        DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query) => {
+            format!("没有在 SkillHub 中找到与“{}”匹配的 Skill。", query)
+        }
     };
 
     let route = reply_route_from_inbound(inbound);
@@ -4992,6 +5210,30 @@ mod tests {
         });
 
         (format!("http://{}/skill.tar.gz", address), handle)
+    }
+
+    async fn start_skillhub_search_server(
+        body: &'static str,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let app = Router::new().route(
+            "/api/v1/search",
+            get(move || async move {
+                (
+                    [(header::CONTENT_TYPE, "application/json")],
+                    body.to_string(),
+                )
+            }),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (format!("http://{}/api/v1/search", address), handle)
     }
 
     async fn create_skill_install_test_state(
@@ -7874,6 +8116,95 @@ args = ["-c", "print('manual')"]
         assert_eq!(request.version.as_deref(), Some("v1.2.3"));
         assert!(matches!(request.target_layer, SkillInstallTargetLayer::Global));
         assert!(request.target_scope.is_none());
+    }
+
+    #[test]
+    fn test_looks_like_dingtalk_skill_install_intent_accepts_natural_language_install() {
+        assert!(looks_like_dingtalk_skill_install_intent(
+            "帮我安装 Agent Browser 技能"
+        ));
+        assert!(looks_like_dingtalk_skill_install_intent(
+            "please install agent browser skill"
+        ));
+    }
+
+    #[test]
+    fn test_looks_like_dingtalk_skill_install_intent_rejects_guidance_questions() {
+        assert!(!looks_like_dingtalk_skill_install_intent(
+            "Agent Browser 技能怎么安装？"
+        ));
+        assert!(!looks_like_dingtalk_skill_install_intent(
+            "安装说明在哪里？"
+        ));
+        assert!(!looks_like_dingtalk_skill_install_intent(
+            "Agent Browser 技能怎么用？"
+        ));
+    }
+
+    #[test]
+    fn test_parse_dingtalk_skill_install_search_query_extracts_skill_name() {
+        assert_eq!(
+            parse_dingtalk_skill_install_search_query("帮我安装 Agent Browser 技能").as_deref(),
+            Some("Agent Browser")
+        );
+        assert_eq!(
+            parse_dingtalk_skill_install_search_query("please install agent browser skill")
+                .as_deref(),
+            Some("agent browser")
+        );
+        assert!(parse_dingtalk_skill_install_search_query("帮我看看 Agent Browser 技能").is_none());
+    }
+
+    #[test]
+    fn test_skillhub_search_url_uses_default_when_env_missing() {
+        unsafe {
+            std::env::remove_var("UHORSE_SKILLHUB_SEARCH_URL");
+        }
+        assert_eq!(skillhub_search_url(), DEFAULT_SKILLHUB_SEARCH_URL);
+    }
+
+    #[test]
+    fn test_build_skillhub_download_url_uses_official_template() {
+        assert_eq!(
+            build_skillhub_download_url("agent-browser"),
+            "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug=agent-browser"
+        );
+    }
+
+    #[test]
+    fn test_is_allowed_skillhub_download_url_only_accepts_official_hosts() {
+        assert!(is_allowed_skillhub_download_url(
+            "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug=agent-browser"
+        ));
+        assert!(is_allowed_skillhub_download_url(
+            "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/agent-browser.zip"
+        ));
+        assert!(!is_allowed_skillhub_download_url(
+            "https://example.com/skills/agent-browser.zip"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_search_skillhub_skill_uses_search_api_result() {
+        let (search_url, server_handle) = start_skillhub_search_server(
+            r#"{"results":[{"slug":"agent-browser","displayName":"Agent Browser","version":"1.2.3"}]}"#,
+        )
+        .await;
+        unsafe {
+            std::env::set_var("UHORSE_SKILLHUB_SEARCH_URL", &search_url);
+        }
+
+        let result = search_skillhub_skill("Agent Browser").await.unwrap();
+
+        unsafe {
+            std::env::remove_var("UHORSE_SKILLHUB_SEARCH_URL");
+        }
+        server_handle.abort();
+
+        let entry = result.unwrap();
+        assert_eq!(entry.slug, "agent-browser");
+        assert_eq!(entry.name, "Agent Browser");
+        assert_eq!(entry.version.as_deref(), Some("1.2.3"));
     }
 
     #[tokio::test]
