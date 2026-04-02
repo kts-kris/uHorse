@@ -38,6 +38,19 @@ if (-not (Test-Path $nsisScript)) {
 
 $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
 if (-not $makensis) {
+    $nsisCandidates = @(
+        (Join-Path $env:ChocolateyInstall 'bin\makensis.exe'),
+        (Join-Path $env:ProgramFiles 'NSIS\makensis.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe')
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    $makensisPath = $nsisCandidates | Select-Object -First 1
+    if ($makensisPath) {
+        $makensis = @{ Source = $makensisPath }
+    }
+}
+
+if (-not $makensis) {
     throw 'makensis.exe is required to create the Windows installer'
 }
 
