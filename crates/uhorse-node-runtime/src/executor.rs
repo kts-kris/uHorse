@@ -650,9 +650,17 @@ impl CommandExecutor {
         debug!("Executing shell command: {} {:?}", cmd.command, cmd.args);
 
         let cwd = self.resolve_execution_dir(cmd.cwd.as_deref())?;
-        let mut command = TokioCommand::new(&cmd.command);
+        let use_shell_wrapper = cmd.args.is_empty() && Self::looks_like_shell_script(&cmd.command);
+        let mut command = if use_shell_wrapper {
+            let mut command = TokioCommand::new("sh");
+            command.arg("-c").arg(&cmd.command);
+            command
+        } else {
+            let mut command = TokioCommand::new(&cmd.command);
+            command.args(&cmd.args);
+            command
+        };
         command
-            .args(&cmd.args)
             .current_dir(&cwd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -848,6 +856,15 @@ impl CommandExecutor {
         }
 
         Ok(resolved)
+    }
+
+    fn looks_like_shell_script(command: &str) -> bool {
+        command.contains(' ')
+            || command.contains('|')
+            || command.contains('&')
+            || command.contains(';')
+            || command.contains('>')
+            || command.contains('<')
     }
 
     fn resolve_code_workdir(&self, cmd: &CodeCommand) -> NodeResult<PathBuf> {
@@ -1071,6 +1088,25 @@ mod tests {
 
         let error = executor.execute_shell(&command).await.unwrap_err();
         assert!(matches!(error, NodeError::Timeout(_)));
+    }
+
+    #[tokio::test]
+    async fn test_execute_shell_wraps_inline_script_when_args_empty() {
+        let temp = TempDir::new().unwrap();
+        let executor = create_executor(&temp);
+        executor.permission_manager.load_default_rules().await;
+
+        let result = executor
+            .execute_shell(&ShellCommand::new("find . -maxdepth 1 -mindepth 1 | sort"))
+            .await
+            .unwrap();
+
+        match result {
+            CommandOutput::Text { content } => {
+                assert!(!content.contains("No such file or directory"));
+            }
+            other => panic!("unexpected output: {:?}", other),
+        }
     }
 
     #[tokio::test]

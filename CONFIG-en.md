@@ -300,6 +300,11 @@ agent_id = 123456789
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
+
+[[channels.dingtalk.skill_installers]]
+user_id = "your-admin-user-id"
+# staff_id = "your-staff-id"
+# corp_id = "dingcorp-xxx"
 ```
 
 ### Notes
@@ -307,7 +312,10 @@ user_id = "your-dingtalk-user-id"
 - The main runtime path is **Stream mode** and does not depend on a public webhook to receive inbound messages.
 - Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
 - To mirror Node Desktop local notifications to DingTalk, the main path is to enable pairing, start binding from Node Desktop, and confirm it in DingTalk; `channels.dingtalk.notification_bindings` is kept only as a compatibility seed/fallback.
+- `[[channels.dingtalk.skill_installers]]` only restricts the DingTalk text install entrypoint; it does not restrict the HTTP `POST /api/v1/skills/install` API.
+- Allowlist matching supports `user_id` / `staff_id` and may optionally require `corp_id`.
 - DingTalk text is first planned by the LLM into a single safe command; file operations, shell commands, and controlled `BrowserCommand` flows are all part of the current mainline.
+- But `安装技能 <package> <download_url> [version]` / `install skill ...` goes through the dedicated Skill install thin entrypoint instead of general natural-language command planning.
 - For requests such as “open a webpage”, the current mainline prefers `BrowserCommand::OpenSystem` instead of automated browser `Navigate`.
 - Hub validates path scope locally before dispatch and rejects dangerous git commands.
 

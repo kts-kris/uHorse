@@ -255,20 +255,32 @@ pub struct ShellCommand {
     pub command: String,
 
     /// 参数
+    #[serde(default)]
     pub args: Vec<String>,
 
     /// 工作目录
+    #[serde(default)]
     pub cwd: Option<String>,
 
     /// 环境变量
+    #[serde(default)]
     pub env: HashMap<String, String>,
 
     /// 超时时间
-    #[serde(with = "duration_ser")]
+    #[serde(default = "default_shell_timeout", with = "duration_ser")]
     pub timeout: Duration,
 
     /// 是否捕获标准错误
+    #[serde(default = "default_capture_stderr")]
     pub capture_stderr: bool,
+}
+
+fn default_shell_timeout() -> Duration {
+    Duration::from_secs(60)
+}
+
+fn default_capture_stderr() -> bool {
+    true
 }
 
 impl ShellCommand {
@@ -279,8 +291,8 @@ impl ShellCommand {
             args: Vec::new(),
             cwd: None,
             env: HashMap::new(),
-            timeout: Duration::from_secs(60),
-            capture_stderr: true,
+            timeout: default_shell_timeout(),
+            capture_stderr: default_capture_stderr(),
         }
     }
 
@@ -755,5 +767,63 @@ mod duration_ser {
     {
         let secs = u64::deserialize(deserializer)?;
         Ok(Duration::from_secs(secs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, ShellCommand};
+    use std::time::Duration;
+
+    #[test]
+    fn test_shell_command_deserializes_with_defaults() {
+        let command: Command = serde_json::from_str(r#"{"type":"shell","command":"pwd"}"#).unwrap();
+
+        match command {
+            Command::Shell(shell) => {
+                assert_eq!(shell.command, "pwd");
+                assert!(shell.args.is_empty());
+                assert_eq!(shell.cwd, None);
+                assert!(shell.env.is_empty());
+                assert_eq!(shell.timeout, Duration::from_secs(60));
+                assert!(shell.capture_stderr);
+            }
+            other => panic!("expected shell command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_shell_command_deserializes_with_args_and_defaults() {
+        let command: Command = serde_json::from_str(
+            r#"{"type":"shell","command":"git","args":["status"]}"#,
+        )
+        .unwrap();
+
+        match command {
+            Command::Shell(shell) => {
+                assert_eq!(shell.command, "git");
+                assert_eq!(shell.args, vec!["status"]);
+                assert_eq!(shell.cwd, None);
+                assert!(shell.env.is_empty());
+                assert_eq!(shell.timeout, Duration::from_secs(60));
+                assert!(shell.capture_stderr);
+            }
+            other => panic!("expected shell command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_shell_command_deserializes_with_explicit_values() {
+        let shell: ShellCommand = serde_json::from_str(
+            r#"{"command":"find","args":["."],"cwd":"/tmp/workspace","env":{"A":"1"},"timeout":5,"capture_stderr":false}"#,
+        )
+        .unwrap();
+
+        assert_eq!(shell.command, "find");
+        assert_eq!(shell.args, vec!["."]);
+        assert_eq!(shell.cwd.as_deref(), Some("/tmp/workspace"));
+        assert_eq!(shell.env.get("A").map(String::as_str), Some("1"));
+        assert_eq!(shell.timeout, Duration::from_secs(5));
+        assert!(!shell.capture_stderr);
     }
 }

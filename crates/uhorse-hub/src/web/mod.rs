@@ -13,11 +13,14 @@ use axum::{
     Router,
 };
 use chrono::Utc;
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::io::Cursor;
 use std::net::IpAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
+use tar::Archive;
 use tokio::sync::RwLock;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
@@ -27,7 +30,7 @@ use uhorse_agent::{
     SessionKey, SessionNamespace, SessionState, SkillRegistry,
 };
 use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
-use uhorse_config::HealthConfig;
+use uhorse_config::{DingTalkSkillInstaller, HealthConfig, UHorseConfig};
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
 use uhorse_llm::{ChatMessage, LLMClient};
 use uhorse_observability::{HealthService, HealthStatus, MetricsCollector, MetricsExporter};
@@ -487,6 +490,59 @@ struct SkillRuntimeQuery {
     source_scope: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SkillInstallSourceType {
+    Skillhub,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SkillInstallTargetLayer {
+    Global,
+    User,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillInstallRequest {
+    source_type: SkillInstallSourceType,
+    package: String,
+    #[serde(default)]
+    version: Option<String>,
+    download_url: String,
+    #[serde(default = "default_skill_install_target_layer")]
+    target_layer: SkillInstallTargetLayer,
+    #[serde(default)]
+    target_scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SkillInstallResponse {
+    skill_name: String,
+    source_type: String,
+    package: String,
+    version: Option<String>,
+    target_layer: String,
+    target_scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SkillRefreshResponse {
+    skill_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SkillInstallActor {
+    channel: &'static str,
+    sender_user_id: Option<String>,
+    sender_staff_id: Option<String>,
+    sender_corp_id: Option<String>,
+}
+
+fn default_skill_install_target_layer() -> SkillInstallTargetLayer {
+    SkillInstallTargetLayer::Global
+}
+
 /// Hub 侧逻辑协作工作空间视图。
 #[derive(Debug, Clone, Serialize)]
 pub struct CollaborationWorkspace {
@@ -542,6 +598,8 @@ struct SessionMessageRecord {
 /// Web Agent 运行时依赖集合
 #[derive(Clone)]
 pub struct WebAgentRuntime {
+    /// Agent 运行时根目录
+    pub runtime_root: PathBuf,
     /// Agent 管理器
     pub agent_manager: Arc<AgentManager>,
     /// 分层 Agent catalog
@@ -549,12 +607,14 @@ pub struct WebAgentRuntime {
     /// Memory 存储
     pub memory_store: Arc<LayeredMemoryStore>,
     /// 分层 Skill 注册表
-    pub skills: Arc<LayeredSkillRegistry>,
+    pub skills: Arc<RwLock<LayeredSkillRegistry>>,
 }
 
 /// Web 服务器状态
 #[derive(Clone)]
 pub struct WebState {
+    /// 应用配置
+    pub app_config: Arc<UHorseConfig>,
     /// Hub 引用
     pub hub: Arc<Hub>,
     /// 健康检查服务
@@ -585,6 +645,16 @@ impl WebState {
         Self::new_with_pairing(hub, dingtalk_channel, llm_client, None)
     }
 
+    /// 使用显式应用配置创建 Web 状态。
+    pub fn new_with_config(
+        app_config: Arc<UHorseConfig>,
+        hub: Arc<Hub>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+    ) -> Self {
+        Self::new_with_pairing_and_config(app_config, hub, dingtalk_channel, llm_client, None)
+    }
+
     /// 创建带设备绑定管理器的 Web 状态
     pub fn new_with_pairing(
         hub: Arc<Hub>,
@@ -592,7 +662,25 @@ impl WebState {
         llm_client: Option<Arc<dyn LLMClient>>,
         pairing_manager: Option<Arc<DevicePairingManager>>,
     ) -> Self {
-        Self::new_with_runtime(
+        Self::new_with_pairing_and_config(
+            Arc::new(UHorseConfig::default()),
+            hub,
+            dingtalk_channel,
+            llm_client,
+            pairing_manager,
+        )
+    }
+
+    /// 使用显式应用配置与设备绑定管理器创建 Web 状态。
+    pub fn new_with_pairing_and_config(
+        app_config: Arc<UHorseConfig>,
+        hub: Arc<Hub>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
+    ) -> Self {
+        Self::new_with_runtime_and_config(
+            app_config,
             hub,
             dingtalk_channel,
             llm_client,
@@ -609,9 +697,29 @@ impl WebState {
         pairing_manager: Option<Arc<DevicePairingManager>>,
         agent_runtime: Arc<WebAgentRuntime>,
     ) -> Self {
+        Self::new_with_runtime_and_config(
+            Arc::new(UHorseConfig::default()),
+            hub,
+            dingtalk_channel,
+            llm_client,
+            pairing_manager,
+            agent_runtime,
+        )
+    }
+
+    /// 使用显式应用配置与 Agent 运行时创建 Web 状态。
+    pub fn new_with_runtime_and_config(
+        app_config: Arc<UHorseConfig>,
+        hub: Arc<Hub>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
+        agent_runtime: Arc<WebAgentRuntime>,
+    ) -> Self {
         let metrics_collector = Arc::new(MetricsCollector::default());
         let metrics_exporter = Arc::new(MetricsExporter::new(Arc::clone(&metrics_collector)));
-        Self::new_with_runtime_and_health(
+        Self::new_with_runtime_and_health_and_config(
+            app_config,
             hub,
             Arc::new(HealthService::new(env!("CARGO_PKG_VERSION").to_string())),
             metrics_collector,
@@ -634,7 +742,33 @@ impl WebState {
         pairing_manager: Option<Arc<DevicePairingManager>>,
         agent_runtime: Arc<WebAgentRuntime>,
     ) -> Self {
+        Self::new_with_runtime_and_health_and_config(
+            Arc::new(UHorseConfig::default()),
+            hub,
+            health_service,
+            metrics_collector,
+            metrics_exporter,
+            dingtalk_channel,
+            llm_client,
+            pairing_manager,
+            agent_runtime,
+        )
+    }
+
+    /// 使用显式应用配置、health 与 metrics 依赖创建 Web 状态。
+    pub fn new_with_runtime_and_health_and_config(
+        app_config: Arc<UHorseConfig>,
+        hub: Arc<Hub>,
+        health_service: Arc<HealthService>,
+        metrics_collector: Arc<MetricsCollector>,
+        metrics_exporter: Arc<MetricsExporter>,
+        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
+        agent_runtime: Arc<WebAgentRuntime>,
+    ) -> Self {
         Self {
+            app_config,
             hub,
             health_service,
             metrics_collector,
@@ -657,12 +791,249 @@ fn default_agent_runtime() -> WebAgentRuntime {
         std::env::temp_dir().join("uhorse-web-memory"),
     ));
 
+    let runtime_root = agent_manager.base_dir().to_path_buf();
+
     WebAgentRuntime {
+        runtime_root,
         agent_manager: Arc::new(agent_manager),
         agents: Arc::new(LayeredAgentCatalog::default()),
         memory_store,
-        skills: Arc::new(LayeredSkillRegistry::new(SkillRegistry::new())),
+        skills: Arc::new(RwLock::new(LayeredSkillRegistry::new(SkillRegistry::new()))),
     }
+}
+
+async fn load_runtime_skills(
+    base_dir: &FsPath,
+) -> Result<LayeredSkillRegistry, Box<dyn std::error::Error + Send + Sync>> {
+    let global_skills = SkillRegistry::from_dir(base_dir.join("skills")).await?;
+    let mut layered_skills = LayeredSkillRegistry::new(global_skills);
+
+    async fn load_scoped_runtime_dir(
+        base_dir: &FsPath,
+        dir_name: &str,
+        layered_skills: &mut LayeredSkillRegistry,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let scoped_dir = base_dir.join(dir_name);
+        if !scoped_dir.exists() {
+            return Ok(());
+        }
+
+        let mut entries = tokio::fs::read_dir(&scoped_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(scope) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let registry = SkillRegistry::from_dir(path.join("skills")).await?;
+            if !registry.is_empty() {
+                layered_skills.register_scoped_registry(scope.to_string(), registry);
+            }
+        }
+
+        Ok(())
+    }
+
+    load_scoped_runtime_dir(base_dir, "tenants", &mut layered_skills).await?;
+    load_scoped_runtime_dir(base_dir, "enterprises", &mut layered_skills).await?;
+    load_scoped_runtime_dir(base_dir, "departments", &mut layered_skills).await?;
+    load_scoped_runtime_dir(base_dir, "roles", &mut layered_skills).await?;
+    load_scoped_runtime_dir(base_dir, "users", &mut layered_skills).await?;
+
+    Ok(layered_skills)
+}
+
+async fn refresh_runtime_skills(
+    runtime: &WebAgentRuntime,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    let refreshed = load_runtime_skills(&runtime.runtime_root).await?;
+    let skill_count = refreshed.list_all_entries().len();
+    *runtime.skills.write().await = refreshed;
+    Ok(skill_count)
+}
+
+fn dingtalk_skill_installers(state: &WebState) -> &[DingTalkSkillInstaller] {
+    state
+        .app_config
+        .channels
+        .dingtalk
+        .as_ref()
+        .map(|config| config.skill_installers.as_slice())
+        .unwrap_or(&[])
+}
+
+fn actor_can_install_skill(state: &WebState, actor: &SkillInstallActor) -> bool {
+    if actor.channel != "dingtalk" {
+        return true;
+    }
+
+    let installers = dingtalk_skill_installers(state);
+    if installers.is_empty() {
+        return false;
+    }
+
+    installers.iter().any(|installer| {
+        if let Some(corp_id) = installer.corp_id.as_deref() {
+            if actor.sender_corp_id.as_deref() != Some(corp_id) {
+                return false;
+            }
+        }
+
+        let user_matches = installer
+            .user_id
+            .as_deref()
+            .is_some_and(|user_id| actor.sender_user_id.as_deref() == Some(user_id));
+        let staff_matches = installer
+            .staff_id
+            .as_deref()
+            .is_some_and(|staff_id| actor.sender_staff_id.as_deref() == Some(staff_id));
+
+        user_matches || staff_matches
+    })
+}
+
+fn resolve_skill_install_target_dir(
+    runtime: &WebAgentRuntime,
+    target_layer: &SkillInstallTargetLayer,
+    target_scope: Option<&str>,
+) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    match target_layer {
+        SkillInstallTargetLayer::Global => {
+            if target_scope.is_some() {
+                return Err("global 安装不允许传 target_scope".into());
+            }
+            Ok(runtime.runtime_root.join("skills"))
+        }
+        SkillInstallTargetLayer::User => {
+            let scope = target_scope
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "user 安装必须提供 target_scope".to_string())?;
+            Ok(runtime.runtime_root.join("users").join(scope).join("skills"))
+        }
+    }
+}
+
+async fn fetch_skillhub_archive(
+    client: &reqwest::Client,
+    request: &SkillInstallRequest,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let response = client.get(&request.download_url).send().await?;
+    if !response.status().is_success() {
+        return Err(format!("Skill 下载失败：HTTP {}", response.status()).into());
+    }
+    Ok(response.bytes().await?.to_vec())
+}
+
+async fn unpack_skill_archive(
+    bytes: &[u8],
+    destination_root: &FsPath,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let destination_root = destination_root.to_path_buf();
+    let bytes = bytes.to_vec();
+    tokio::task::spawn_blocking(
+        move || -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            std::fs::create_dir_all(&destination_root)?;
+            let decoder = GzDecoder::new(Cursor::new(bytes));
+            let mut archive = Archive::new(decoder);
+            archive.unpack(&destination_root)?;
+
+            let mut skill_dirs = Vec::new();
+            for entry in std::fs::read_dir(&destination_root)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    let skill_md = entry.path().join("SKILL.md");
+                    if skill_md.exists() {
+                        skill_dirs.push(entry.path());
+                    }
+                }
+            }
+
+            if skill_dirs.len() != 1 {
+                return Err("Skill 安装包必须且只能包含一个 Skill 目录".into());
+            }
+
+            let skill_dir = skill_dirs.remove(0);
+            let skill_name = skill_dir
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| "Skill 目录名称非法".to_string())?
+                .to_string();
+            Ok(skill_name)
+        },
+    )
+    .await?
+}
+
+async fn install_skill_from_request(
+    state: &Arc<WebState>,
+    actor: SkillInstallActor,
+    request: SkillInstallRequest,
+) -> Result<SkillInstallResponse, Box<dyn std::error::Error + Send + Sync>> {
+    if !matches!(request.source_type, SkillInstallSourceType::Skillhub) {
+        return Err("当前仅支持 skillhub 来源".into());
+    }
+    if !actor_can_install_skill(state.as_ref(), &actor) {
+        info!(
+            action = "skill_install",
+            channel = actor.channel,
+            sender_user_id = actor.sender_user_id.as_deref().unwrap_or(""),
+            sender_staff_id = actor.sender_staff_id.as_deref().unwrap_or(""),
+            sender_corp_id = actor.sender_corp_id.as_deref().unwrap_or(""),
+            package = request.package.as_str(),
+            target_layer = match request.target_layer { SkillInstallTargetLayer::Global => "global", SkillInstallTargetLayer::User => "user" },
+            result = "denied",
+            "Denied skill installation request"
+        );
+        return Err("当前账号没有安装 Skill 的权限。".into());
+    }
+
+    let target_root = resolve_skill_install_target_dir(
+        state.agent_runtime.as_ref(),
+        &request.target_layer,
+        request.target_scope.as_deref(),
+    )?;
+    tokio::fs::create_dir_all(&target_root).await?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let archive_bytes = fetch_skillhub_archive(&reqwest::Client::new(), &request).await?;
+    let skill_name = unpack_skill_archive(&archive_bytes, temp_dir.path()).await?;
+    let source_dir = temp_dir.path().join(&skill_name);
+    let destination_dir = target_root.join(&skill_name);
+    if destination_dir.exists() {
+        return Err(format!("Skill {} 已存在，暂不支持覆盖安装", skill_name).into());
+    }
+    tokio::fs::rename(&source_dir, &destination_dir).await?;
+    let _ = refresh_runtime_skills(state.agent_runtime.as_ref()).await?;
+
+    let target_layer = match request.target_layer {
+        SkillInstallTargetLayer::Global => "global",
+        SkillInstallTargetLayer::User => "user",
+    }
+    .to_string();
+    info!(
+        action = "skill_install",
+        channel = actor.channel,
+        sender_user_id = actor.sender_user_id.as_deref().unwrap_or(""),
+        sender_staff_id = actor.sender_staff_id.as_deref().unwrap_or(""),
+        sender_corp_id = actor.sender_corp_id.as_deref().unwrap_or(""),
+        package = request.package.as_str(),
+        skill_name = skill_name.as_str(),
+        target_layer = target_layer.as_str(),
+        target_scope = request.target_scope.as_deref().unwrap_or(""),
+        result = "success",
+        "Installed skill successfully"
+    );
+
+    Ok(SkillInstallResponse {
+        skill_name,
+        source_type: "skillhub".to_string(),
+        package: request.package,
+        version: request.version,
+        target_layer,
+        target_scope: request.target_scope,
+    })
 }
 
 /// 初始化默认 Web Agent 运行时
@@ -693,13 +1064,9 @@ pub async fn init_default_agent_runtime(
     global_agents.extend(additional_global_agents);
     let mut layered_agents = LayeredAgentCatalog::new(global_agents);
 
-    let global_skills = SkillRegistry::from_dir(base_dir.join("skills")).await?;
-    let mut layered_skills = LayeredSkillRegistry::new(global_skills);
-
     async fn load_scoped_runtime_dir(
         base_dir: &FsPath,
         dir_name: &str,
-        layered_skills: &mut LayeredSkillRegistry,
         layered_agents: &mut LayeredAgentCatalog,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let scoped_dir = base_dir.join(dir_name);
@@ -716,10 +1083,6 @@ pub async fn init_default_agent_runtime(
             let Some(scope) = path.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
-            let registry = SkillRegistry::from_dir(path.join("skills")).await?;
-            if !registry.is_empty() {
-                layered_skills.register_scoped_registry(scope.to_string(), registry);
-            }
             let catalog = load_agent_catalog_from_root(&path, true).await?;
             if !catalog.is_empty() {
                 layered_agents.register_scoped_catalog(scope.to_string(), catalog);
@@ -729,38 +1092,22 @@ pub async fn init_default_agent_runtime(
         Ok(())
     }
 
-    load_scoped_runtime_dir(
-        &base_dir,
-        "tenants",
-        &mut layered_skills,
-        &mut layered_agents,
-    )
-    .await?;
-    load_scoped_runtime_dir(
-        &base_dir,
-        "enterprises",
-        &mut layered_skills,
-        &mut layered_agents,
-    )
-    .await?;
-    load_scoped_runtime_dir(
-        &base_dir,
-        "departments",
-        &mut layered_skills,
-        &mut layered_agents,
-    )
-    .await?;
-    load_scoped_runtime_dir(&base_dir, "roles", &mut layered_skills, &mut layered_agents).await?;
-    load_scoped_runtime_dir(&base_dir, "users", &mut layered_skills, &mut layered_agents).await?;
+    load_scoped_runtime_dir(&base_dir, "tenants", &mut layered_agents).await?;
+    load_scoped_runtime_dir(&base_dir, "enterprises", &mut layered_agents).await?;
+    load_scoped_runtime_dir(&base_dir, "departments", &mut layered_agents).await?;
+    load_scoped_runtime_dir(&base_dir, "roles", &mut layered_agents).await?;
+    load_scoped_runtime_dir(&base_dir, "users", &mut layered_agents).await?;
 
     let memory = LayeredMemoryStore::new(base_dir.join("workspace"));
     memory.init_workspace().await?;
+    let layered_skills = load_runtime_skills(&base_dir).await?;
 
     Ok(WebAgentRuntime {
+        runtime_root: base_dir,
         agent_manager: Arc::new(agent_manager),
         agents: Arc::new(layered_agents),
         memory_store: Arc::new(memory),
-        skills: Arc::new(layered_skills),
+        skills: Arc::new(RwLock::new(layered_skills)),
     })
 }
 
@@ -1766,6 +2113,8 @@ async fn execute_local_skill(
     let skill = state
         .agent_runtime
         .skills
+        .read()
+        .await
         .get_for_scopes(&visibility_chain, skill_name)
         .ok_or_else(|| format!("Skill not found: {}", skill_name))?;
     let output = skill.execute(input).await?;
@@ -2041,6 +2390,8 @@ pub fn create_router_with_health_config(state: WebState, health_config: &HealthC
         .route("/api/v1/agents", get(list_runtime_agents))
         .route("/api/v1/agents/:agent_id", get(get_runtime_agent))
         .route("/api/v1/skills", get(list_runtime_skills))
+        .route("/api/v1/skills/install", post(install_runtime_skill))
+        .route("/api/v1/skills/refresh", post(refresh_runtime_skill))
         .route("/api/v1/skills/:skill_name", get(get_runtime_skill))
         .route("/api/v1/sessions", get(list_runtime_sessions))
         .route("/api/v1/sessions/:session_id", get(get_runtime_session))
@@ -2184,11 +2535,15 @@ async fn dingtalk_webhook_verify() -> &'static str {
     "DingTalk webhook endpoint is ready"
 }
 
+/// 处理 DingTalk 入站消息。
 pub async fn handle_dingtalk_inbound(
     state: &Arc<WebState>,
     inbound: DingTalkInboundMessage,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if try_handle_dingtalk_pairing_command(state, &inbound).await? {
+        return Ok(());
+    }
+    if try_handle_dingtalk_skill_install_command(state, &inbound).await? {
         return Ok(());
     }
 
@@ -2440,6 +2795,8 @@ async fn decide_dingtalk_action(
             &state
                 .agent_runtime
                 .skills
+                .read()
+                .await
                 .list_names_for_scopes(&visibility_chain),
         ))
         .await?;
@@ -2608,7 +2965,7 @@ fn build_agent_decision_messages(
         ChatMessage::system(agent_system_prompt.to_string()),
         ChatMessage::system(
             format!(
-                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\"}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。用户只是要在宿主机打开网页时使用 open_system；只有需要继续读取网页内容、点击或抓取文本时才使用 navigate / wait_for / get_text / close。若返回 execute_command，workspace_path 必须填写目标 Node workspace 根路径；路径必须限制在该 workspace 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供决策参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
+                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\"}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。用户只是要在宿主机打开网页时使用 open_system；只有需要继续读取网页内容、点击或抓取文本时才使用 navigate / wait_for / get_text / close。shell 命令请优先输出最简合法 JSON，例如 {{\"type\":\"shell\",\"command\":\"pwd\"}} 或 {{\"type\":\"shell\",\"command\":\"git\",\"args\":[\"status\"]}}。若返回 execute_command，workspace_path 必须填写目标 Node workspace 根路径；路径必须限制在该 workspace 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供决策参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
                 if skill_names.is_empty() {
                     "（无）".to_string()
                 } else {
@@ -2648,7 +3005,7 @@ fn build_dingtalk_plan_messages(
     let workspace_context =
         build_workspace_roots_context(online_workspace_roots, Some(workspace_root));
     let mut messages = vec![ChatMessage::system(
-        "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\" }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 或 browser 命令。禁止生成 code/database/api/skill 命令。workspace_path 必须填写目标 Node workspace 根路径。路径必须限制在 workspace_path 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标；仅当用户要在宿主机打开网页时使用 open_system；读取网页内容或继续交互时使用 navigate / wait_for / get_text / close。shell 命令只允许只读、安全的本地仓库检查或目录查看。".to_string(),
+        "你是 uHorse Hub 的任务规划器。你必须把用户的自然语言请求转换为单个 JSON 对象，且只能输出 JSON，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\" }。优先生成 file 命令；只有文件命令无法完成时才生成 shell 或 browser 命令。禁止生成 code/database/api/skill 命令。workspace_path 必须填写目标 Node workspace 根路径。路径必须限制在 workspace_path 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标；仅当用户要在宿主机打开网页时使用 open_system；读取网页内容或继续交互时使用 navigate / wait_for / get_text / close。shell 命令只允许只读、安全的本地仓库检查或目录查看，优先输出最简合法 JSON，例如 {{\"type\":\"shell\",\"command\":\"pwd\"}} 或 {{\"type\":\"shell\",\"command\":\"git\",\"args\":[\"status\"]}}。".to_string(),
     )];
 
     messages.push(ChatMessage::system(format!(
@@ -3201,6 +3558,7 @@ async fn list_runtime_agents(
             acc
         });
 
+    let skill_names = state.agent_runtime.skills.read().await.list_all_names();
     let mut agents: Vec<_> = state
         .agent_runtime
         .agents
@@ -3222,7 +3580,7 @@ async fn list_runtime_agents(
                     .scope()
                     .map(|scope| scope.config().is_default)
                     .unwrap_or(false),
-                skill_names: state.agent_runtime.skills.list_all_names(),
+                skill_names: skill_names.clone(),
                 active_session_count: session_counts.get(&key).copied().unwrap_or(0),
                 source_layer: entry.source_layer.to_string(),
                 source_scope: entry.source_scope,
@@ -3285,7 +3643,7 @@ async fn get_runtime_agent(
                         .scope()
                         .map(|scope| scope.config().is_default)
                         .unwrap_or(false),
-                    skill_names: state.agent_runtime.skills.list_all_names(),
+                    skill_names: state.agent_runtime.skills.read().await.list_all_names(),
                     active_session_count,
                     source_layer: entry.source_layer.to_string(),
                     source_scope: entry.source_scope,
@@ -3305,6 +3663,8 @@ async fn list_runtime_skills(
     let mut skills: Vec<_> = state
         .agent_runtime
         .skills
+        .read()
+        .await
         .list_all_entries()
         .into_iter()
         .map(skill_to_summary)
@@ -3323,18 +3683,57 @@ async fn list_runtime_skills(
     Json(ApiResponse::success(skills))
 }
 
+async fn install_runtime_skill(
+    State(state): State<Arc<WebState>>,
+    Json(request): Json<SkillInstallRequest>,
+) -> (StatusCode, Json<ApiResponse<SkillInstallResponse>>) {
+    let actor = SkillInstallActor {
+        channel: "http_api",
+        sender_user_id: None,
+        sender_staff_id: None,
+        sender_corp_id: None,
+    };
+
+    match install_skill_from_request(&state, actor, request).await {
+        Ok(response) => (StatusCode::CREATED, Json(ApiResponse::success(response))),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error(&error.to_string())),
+        ),
+    }
+}
+
+async fn refresh_runtime_skill(
+    State(state): State<Arc<WebState>>,
+) -> (StatusCode, Json<ApiResponse<SkillRefreshResponse>>) {
+    match refresh_runtime_skills(state.agent_runtime.as_ref()).await {
+        Ok(skill_count) => {
+            info!(action = "skill_refresh", channel = "http_api", result = "success", skill_count, "Refreshed runtime skills");
+            (
+                StatusCode::OK,
+                Json(ApiResponse::success(SkillRefreshResponse { skill_count })),
+            )
+        }
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(&error.to_string())),
+        ),
+    }
+}
+
 async fn get_runtime_skill(
     State(state): State<Arc<WebState>>,
     Path(skill_name): Path<String>,
     Query(query): Query<SkillRuntimeQuery>,
 ) -> (StatusCode, Json<ApiResponse<SkillRuntimeDetail>>) {
+    let skills = state.agent_runtime.skills.read().await;
     let entry = match query.source_layer.as_deref() {
-        Some(source_layer) => state.agent_runtime.skills.get_entry_by_source(
+        Some(source_layer) => skills.get_entry_by_source(
             &skill_name,
             source_layer,
             query.source_scope.as_deref(),
         ),
-        None => state.agent_runtime.skills.get_any_entry(&skill_name),
+        None => skills.get_any_entry(&skill_name),
     };
 
     match entry {
@@ -3699,6 +4098,31 @@ fn resolve_pairing_command(text: &str) -> Option<&str> {
     }
 }
 
+fn resolve_dingtalk_skill_install_request(text: &str) -> Option<SkillInstallRequest> {
+    let trimmed = text.trim();
+    let normalized = trimmed
+        .strip_prefix("安装技能")
+        .or_else(|| trimmed.strip_prefix("install skill"))
+        .map(str::trim)?;
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let mut parts = normalized.split_whitespace();
+    let package = parts.next()?.to_string();
+    let download_url = parts.next()?.to_string();
+    let version = parts.next().map(str::to_string);
+
+    Some(SkillInstallRequest {
+        source_type: SkillInstallSourceType::Skillhub,
+        package,
+        version,
+        download_url,
+        target_layer: SkillInstallTargetLayer::Global,
+        target_scope: None,
+    })
+}
+
 async fn process_dingtalk_pairing_command(
     state: &Arc<WebState>,
     inbound: &DingTalkInboundMessage,
@@ -3752,6 +4176,38 @@ async fn try_handle_dingtalk_pairing_command(
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     let Some(reply_text) = process_dingtalk_pairing_command(state, inbound).await? else {
         return Ok(false);
+    };
+
+    let route = reply_route_from_inbound(inbound);
+    let Some(channel) = state.dingtalk_channel.as_ref() else {
+        return Err("DingTalk channel is not configured".into());
+    };
+
+    send_dingtalk_reply(channel, &route, &reply_text).await?;
+    Ok(true)
+}
+
+async fn try_handle_dingtalk_skill_install_command(
+    state: &Arc<WebState>,
+    inbound: &DingTalkInboundMessage,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(text) = inbound.message.content.as_text().map(str::trim) else {
+        return Ok(false);
+    };
+    let Some(request) = resolve_dingtalk_skill_install_request(text) else {
+        return Ok(false);
+    };
+
+    let actor = SkillInstallActor {
+        channel: "dingtalk",
+        sender_user_id: inbound.sender_user_id.clone(),
+        sender_staff_id: inbound.sender_staff_id.clone(),
+        sender_corp_id: inbound.sender_corp_id.clone(),
+    };
+
+    let reply_text = match install_skill_from_request(state, actor, request).await {
+        Ok(result) => format!("Skill {} 安装成功。", result.skill_name),
+        Err(error) => format!("Skill 安装失败：{}", error),
     };
 
     let route = reply_route_from_inbound(inbound);
@@ -4447,20 +4903,7 @@ mod tests {
     ) -> (Arc<WebAgentRuntime>, Arc<WebState>) {
         let base_dir = tempdir().unwrap().keep();
         let runtime_root = base_dir.join("agent-runtime");
-        let skill_dir = runtime_root.join("skills").join(skill_name);
-        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
-        tokio::fs::write(
-            skill_dir.join("SKILL.md"),
-            format!(
-                "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
-                skill_name, skill_name
-            ),
-        )
-        .await
-        .unwrap();
-        tokio::fs::write(skill_dir.join("skill.toml"), skill_toml)
-            .await
-            .unwrap();
+        write_test_skill(&runtime_root, skill_name, skill_toml).await;
 
         let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
         let (hub, _rx) = Hub::new(HubConfig::default());
@@ -4475,6 +4918,107 @@ mod tests {
         ));
 
         (runtime, state)
+    }
+
+    async fn write_test_skill(runtime_root: &std::path::Path, skill_name: &str, skill_toml: &str) {
+        let skill_dir = runtime_root.join("skills").join(skill_name);
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        tokio::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!(
+                "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
+                skill_name, skill_name
+            ),
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(skill_dir.join("skill.toml"), skill_toml)
+            .await
+            .unwrap();
+    }
+
+    fn build_test_skill_archive(skill_name: &str, skill_toml: &str) -> Vec<u8> {
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        let skill_md = format!(
+            "---\nname: {}\nversion: 1.0.0\ndescription: {} skill\nauthor: test\nparameters: []\npermissions: []\n---\n",
+            skill_name, skill_name
+        );
+
+        let mut skill_md_header = tar::Header::new_gnu();
+        skill_md_header.set_size(skill_md.len() as u64);
+        skill_md_header.set_mode(0o644);
+        skill_md_header.set_cksum();
+        builder
+            .append_data(
+                &mut skill_md_header,
+                format!("{}/SKILL.md", skill_name),
+                skill_md.as_bytes(),
+            )
+            .unwrap();
+
+        let mut skill_toml_header = tar::Header::new_gnu();
+        skill_toml_header.set_size(skill_toml.len() as u64);
+        skill_toml_header.set_mode(0o644);
+        skill_toml_header.set_cksum();
+        builder
+            .append_data(
+                &mut skill_toml_header,
+                format!("{}/skill.toml", skill_name),
+                skill_toml.as_bytes(),
+            )
+            .unwrap();
+
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap()
+    }
+
+    async fn start_test_archive_server(bytes: Vec<u8>) -> (String, tokio::task::JoinHandle<()>) {
+        let bytes = Arc::new(bytes);
+        let app = Router::new().route(
+            "/skill.tar.gz",
+            get(move || {
+                let bytes = bytes.clone();
+                async move { bytes.as_ref().clone() }
+            }),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (format!("http://{}/skill.tar.gz", address), handle)
+    }
+
+    async fn create_skill_install_test_state(
+        installers: Vec<DingTalkSkillInstaller>,
+    ) -> (TempDir, Arc<WebState>) {
+        let workspace = tempdir().unwrap();
+        let runtime_root = workspace.path().join("agent-runtime");
+        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let mut config = UHorseConfig::default();
+        config.channels.dingtalk = Some(uhorse_config::DingTalkConfig {
+            app_key: "key".to_string(),
+            app_secret: "secret".to_string(),
+            agent_id: 1,
+            notification_bindings: vec![],
+            skill_installers: installers,
+        });
+        let state = Arc::new(WebState::new_with_runtime_and_config(
+            Arc::new(config),
+            Arc::new(hub),
+            None,
+            None,
+            None,
+            runtime,
+        ));
+
+        (workspace, state)
     }
 
     struct StubLlmClient {
@@ -4901,6 +5445,80 @@ mod tests {
         let response = r#"{"command":{"type":"shell","command":"git","args":["reset","--hard"],"cwd":"/tmp/workspace","env":{},"timeout":30,"capture_stderr":true}}"#;
         let error = parse_planned_command(response, "/tmp/workspace").unwrap_err();
         assert!(error.to_string().contains("危险 git"));
+    }
+
+    #[test]
+    fn test_parse_planned_command_accepts_minimal_shell_command() {
+        let planned = parse_planned_command(
+            r#"{"command":{"type":"shell","command":"pwd"}}"#,
+            "/tmp/workspace",
+        )
+        .unwrap();
+
+        assert_eq!(planned.workspace_path.as_deref(), Some("/tmp/workspace"));
+        match planned.command {
+            Command::Shell(shell) => {
+                assert_eq!(shell.command, "pwd");
+                assert!(shell.args.is_empty());
+                assert_eq!(shell.cwd, None);
+                assert!(shell.env.is_empty());
+                assert_eq!(shell.timeout.as_secs(), 60);
+                assert!(shell.capture_stderr);
+            }
+            other => panic!("expected shell command, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_extracts_shell_execute_command_json_from_wrapped_text() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let workspace = tempdir().unwrap();
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        let response = format!(
+            "好的，执行如下：\n{{\"type\":\"execute_command\",\"command\":{{\"type\":\"shell\",\"command\":\"pwd\"}},\"workspace_path\":\"{}\"}}",
+            workspace_path
+        );
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient { response })),
+            None,
+            runtime,
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-shell-json");
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router().register_node_sender(node_id.clone(), tx).await;
+        hub.handle_node_connection(
+            node_id,
+            "test-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_path.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+        let session_key = SessionKey::new("dingtalk", "user-shell-command");
+
+        let decision = decide_dingtalk_action(&state, "列出当前目录", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::ExecuteCommand {
+                command: Command::Shell(_),
+                workspace_path: Some(ref resolved_workspace_path),
+            } if resolved_workspace_path == &workspace_path
+        ));
     }
 
     #[tokio::test]
@@ -7131,6 +7749,211 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["success"], json!(false));
         assert_eq!(body["error"], json!("Skill not found"));
+    }
+
+    #[tokio::test]
+    async fn test_install_runtime_skill_api_installs_and_refreshes_registry() {
+        let (_workspace, state) = create_skill_install_test_state(vec![]).await;
+        let skill_toml = r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "print('installed')"]
+"#;
+        let archive = build_test_skill_archive("installed-skill", skill_toml);
+        let (download_url, server_handle) = start_test_archive_server(archive).await;
+        let app = create_router((*state).clone());
+
+        let (status, body) = post_json(
+            app,
+            "/api/v1/skills/install",
+            &json!({
+                "source_type": "skillhub",
+                "package": "installed-skill",
+                "download_url": download_url
+            }),
+        )
+        .await;
+
+        server_handle.abort();
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"]["skill_name"], json!("installed-skill"));
+        assert_eq!(body["data"]["target_layer"], json!("global"));
+
+        let skills = state.agent_runtime.skills.read().await;
+        let entry = skills.get_any_entry("installed-skill").unwrap();
+        assert_eq!(entry.source_layer, "global");
+        assert!(entry.source_scope.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_runtime_skill_api_reloads_new_files() {
+        let (workspace, state) = create_skill_install_test_state(vec![]).await;
+        let app = create_router((*state).clone());
+
+        write_test_skill(
+            &workspace.path().join("agent-runtime"),
+            "manual-refresh-skill",
+            r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "print('manual')"]
+"#,
+        )
+        .await;
+
+        let (status, body) = post_json(app, "/api/v1/skills/refresh", &json!({})).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], json!(true));
+        assert_eq!(body["data"]["skill_count"], json!(1));
+        assert!(state
+            .agent_runtime
+            .skills
+            .read()
+            .await
+            .get_any_entry("manual-refresh-skill")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_actor_can_install_skill_allows_matching_dingtalk_user() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+
+        let allowed = actor_can_install_skill(
+            state.as_ref(),
+            &SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+        );
+
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn test_actor_can_install_skill_rejects_corp_mismatch() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+
+        let allowed = actor_can_install_skill(
+            state.as_ref(),
+            &SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-2".to_string()),
+            },
+        );
+
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_skill_install_request_parses_command() {
+        let request = resolve_dingtalk_skill_install_request(
+            "安装技能 demo-skill https://127.0.0.1/skill.tar.gz v1.2.3",
+        )
+        .unwrap();
+
+        assert!(matches!(request.source_type, SkillInstallSourceType::Skillhub));
+        assert_eq!(request.package, "demo-skill");
+        assert_eq!(request.download_url, "https://127.0.0.1/skill.tar.gz");
+        assert_eq!(request.version.as_deref(), Some("v1.2.3"));
+        assert!(matches!(request.target_layer, SkillInstallTargetLayer::Global));
+        assert!(request.target_scope.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_install_skill_from_request_allows_authorized_dingtalk_actor() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+        let skill_toml = r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "print('authorized')"]
+"#;
+        let archive = build_test_skill_archive("ding-install-skill", skill_toml);
+        let (download_url, server_handle) = start_test_archive_server(archive).await;
+
+        let result = install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: "ding-install-skill".to_string(),
+                version: None,
+                download_url,
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await;
+
+        server_handle.abort();
+
+        let response = result.unwrap();
+        assert_eq!(response.skill_name, "ding-install-skill");
+        assert!(state
+            .agent_runtime
+            .skills
+            .read()
+            .await
+            .get_any_entry("ding-install-skill")
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_install_skill_from_request_rejects_unauthorized_dingtalk_actor() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+
+        let error = install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-2".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: "ding-install-skill".to_string(),
+                version: None,
+                download_url: "http://127.0.0.1:9/skill.tar.gz".to_string(),
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "当前账号没有安装 Skill 的权限。");
     }
 
     #[tokio::test]

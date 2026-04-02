@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>uHorse v4.3.0 当前正式发布线</strong>
+  <strong>uHorse v4.4.0 当前正式发布线</strong>
 </p>
 
 <p align="center">
-  <em>Hub 负责调度与通道接入，Node 负责本地执行与结果回传；当前仓库 HEAD 已收口为正式发布的 `v4.3.0`，主交付物为 `uhorse-hub` 与 `uhorse-node-desktop`。</em>
+  <em>Hub 负责调度与通道接入，Node 负责本地执行与结果回传；当前仓库 HEAD 已收口为正式发布的 `v4.4.0`，主交付物为 `uhorse-hub` 与 `uhorse-node-desktop`。</em>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.3.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.4.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-released-green" alt="Status">
@@ -35,7 +35,7 @@
 
 ## 概述
 
-uHorse 当前对外正式发布口径是 **v4.3.0 Hub-Node 主线**。
+uHorse 当前对外正式发布口径是 **v4.4.0 Hub-Node 主线**。
 
 核心组件与主交付物：
 
@@ -45,7 +45,7 @@ uHorse 当前对外正式发布口径是 **v4.3.0 Hub-Node 主线**。
 - `uhorse-protocol`：Hub 和 Node 之间的协议定义，包括 `TaskAssignment`、`TaskResult`、`ApprovalRequest`、`ApprovalResponse` 等消息。
 - `uhorse-config`：Hub 统一配置模型，承载 `server`、`channels`、`security`、`llm` 等配置段。
 
-`v4.3.0` 已落地并对外可见的能力包括：
+`v4.4.0` 已落地并对外可见的能力包括：
 
 - DingTalk 自然语言请求可进入 Hub → Node 链路，并在受控场景下规划为 `BrowserCommand`。
 - Hub 已对浏览器目标执行本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标。
@@ -55,7 +55,7 @@ uHorse 当前对外正式发布口径是 **v4.3.0 Hub-Node 主线**。
 - runtime API 与 Web UI 已支持 `source_layer`、`source_scope` 的来源感知展示与按来源详情查询。
 - Node Desktop 当前交付边界是 `bin/ + web/` archive、macOS `.pkg`、Windows installer、对应 smoke 与 GitHub release / nightly artifacts，而不是原生 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器。
 
-当前文档以 **仓库里已实现并验证的行为** 为准，不再把旧版 `/health/live`、`/health/ready`、`/api/v1/auth/*`、`/api/v1/messages` 当作当前主线，也不把 `v4.3.0` 写成旧单体 Agent 平台回归。
+当前文档以 **仓库里已实现并验证的行为** 为准，不再把旧版 `/health/live`、`/health/ready`、`/api/v1/auth/*`、`/api/v1/messages` 当作当前主线，也不把 `v4.4.0` 写成旧单体 Agent 平台回归。
 
 ## 当前状态
 
@@ -266,7 +266,7 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 
 | 文档 | 说明 |
 |------|------|
-| [CHANGELOG.md](CHANGELOG.md) | `v4.3.0` 发布事实、文档同步记录与当前非目标说明 |
+| [CHANGELOG.md](CHANGELOG.md) | `v4.4.0` 发布事实、文档同步记录与当前非目标说明 |
 | [INSTALL.md](INSTALL.md) | 当前 Hub-Node 安装路径与 Node Desktop archive / smoke 边界 |
 | [API.md](API.md) | 当前已实现的 Hub-Node API 参考 |
 | [LOCAL_SETUP.md](LOCAL_SETUP.md) | 本地双进程联调、JWT 引导、审批与重连回归 |
@@ -274,7 +274,7 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 | [CHANNELS.md](CHANNELS.md) | 通道现状、DingTalk Stream、浏览器规划链路与通知镜像说明 |
 | [scripts/README.md](scripts/README.md) | 主线脚本说明，包括 Node Desktop package / smoke 与 CI / release 对齐 |
 | [TESTING.md](TESTING.md) | 包级测试、工作区测试与手工回归顺序 |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.3.0` 发布说明 |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.4.0` 发布说明 |
 | [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4 Hub-Node 部署路径 |
 | [docs/architecture/v4.0-architecture.md](docs/architecture/v4.0-architecture.md) | v4 架构说明 |
 

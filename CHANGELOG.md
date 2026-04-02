@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-04-02
+
+### Added
+
+- Hub 新增 `POST /api/v1/skills/install`，支持在运行时目录在线安装 Skill，并在安装后立即刷新 registry
+- Hub 新增 `POST /api/v1/skills/refresh`，用于在不重启进程的情况下重新加载运行时 Skill
+- DingTalk 新增文本安装命令 `安装技能 <package> <download_url> [version]` / `install skill <package> <download_url> [version]`
+- 统一配置新增 `[[channels.dingtalk.skill_installers]]` 白名单，支持按 `user_id` / `staff_id` 并可选叠加 `corp_id` 限制 DingTalk 安装入口
+- `uhorse-hub` 已补齐在线安装 Skill、运行时 refresh、DingTalk 授权判定与命令解析测试覆盖
+
+### Changed
+
+- 在线安装当前仅接受 `source = "skillhub"` 的 Skill 包，并拒绝覆盖已存在的 Skill 目录
+- DingTalk 安装入口现在会先按 `skill_installers` 校验发送者身份；未授权账号会在下载前直接被拒绝
+- README / INSTALL / CHANNELS / CONFIG / SKILLS / API / RELEASE_NOTES 已统一升级到 `v4.4.0`，并补齐在线安装 Skill 与 DingTalk 权限控制说明
+- GitHub release 文案将继续以 `CHANGELOG.md` 的版本段为事实源，`v4.4.0` release 无需改动现有 workflow
+
 ## [4.3.0] - 2026-04-01
 
 ### Added
@@ -279,7 +296,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.3.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.4.0...HEAD
+[4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0
 [4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3
 [4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2

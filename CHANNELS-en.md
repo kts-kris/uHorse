@@ -1,6 +1,6 @@
 # uHorse Channel Guide
 
-This document only describes the **channel path that is actually wired into the current `v4.1.3` mainline runtime**.
+This document only describes the **channel path that is actually wired into the current `v4.4.0` mainline runtime**.
 
 The most important and recommended path today is:
 
@@ -68,6 +68,11 @@ agent_id = 123456789
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
+
+[[channels.dingtalk.skill_installers]]
+user_id = "your-admin-user-id"
+# staff_id = "your-staff-id"
+# corp_id = "dingcorp-xxx"
 ```
 
 > DingTalk can only be initialized from the **unified config** path. The legacy `HubConfig` mode cannot initialize DingTalk.
@@ -107,9 +112,16 @@ DingTalk inbound message
 
 So DingTalk messages do not stop at the channel layer. They first go through LLM planning, then enter the Hub-Node execution pipeline.
 
+In addition, the current runtime exposes a **controlled thin entrypoint** for Skill installation:
+
+- `安装技能 <package> <download_url> [version]`
+- `install skill <package> <download_url> [version]`
+
+This path does not go through general natural-language task planning. It is parsed directly as a Skill install request.
+
 ## Source-aware runtime
 
-Under the current `v4.1.3` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
+Under the current `v4.4.0` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
 
 The goal is not to turn DingTalk into a management surface for `memory / agent / skill`, but to let the runtime distinguish where a resource came from and what sharing or isolation boundary it should follow.
 
@@ -134,6 +146,13 @@ The current `uhorse-hub` runtime no longer limits DingTalk text to a fixed comma
 6. blocks dangerous git commands such as `git reset --hard`, `git clean -fd`, and `git push --force`
 
 If the LLM returns invalid JSON, an out-of-workspace path, an invalid browser target, or a dangerous command, Hub rejects it before anything is dispatched to the Node.
+
+For the Skill install thin entrypoint, the current boundary is:
+
+- only `skillhub` packages are accepted
+- the sender must match `channels.dingtalk.skill_installers` before installation starts
+- the allowlist can match on `user_id` / `staff_id` and optionally require `corp_id`
+- the current DingTalk text entrypoint supports install only, not refresh
 
 ---
 
