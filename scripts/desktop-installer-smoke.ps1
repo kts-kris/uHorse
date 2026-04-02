@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$InstallRoot = $env:DESKTOP_INSTALL_ROOT,
     [string]$Listen = $env:DESKTOP_SMOKE_LISTEN
 )
+
+$ErrorActionPreference = 'Stop'
 
 if (-not $Listen) {
     $Listen = '127.0.0.1:8757'
