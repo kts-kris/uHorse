@@ -39,7 +39,7 @@ function Invoke-Text([string]$Uri) {
 
 try {
     if (-not $InstallRoot) {
-        Fail '用法：./scripts/desktop-installer-smoke.ps1 -InstallRoot <install-root>'
+        Fail 'usage: ./scripts/desktop-installer-smoke.ps1 -InstallRoot <install-root>'
     }
 
     New-Item -ItemType Directory -Path $RuntimeDir | Out-Null
@@ -49,13 +49,13 @@ try {
     $AssetsPath = Join-Path $InstallRoot 'web/assets'
 
     if (-not (Test-Path $BinPath -PathType Leaf)) {
-        Fail "未找到安装后的宿主二进制：$BinPath"
+        Fail "missing installed host binary: $BinPath"
     }
     if (-not (Test-Path $IndexPath -PathType Leaf)) {
-        Fail "未找到安装后的 web/index.html：$IndexPath"
+        Fail "missing installed web/index.html: $IndexPath"
     }
     if (-not (Test-Path $AssetsPath -PathType Container)) {
-        Fail "未找到安装后的 web/assets：$AssetsPath"
+        Fail "missing installed web/assets: $AssetsPath"
     }
 
     $ProjectRootToml = $ProjectRoot.Replace('\', '\\')
@@ -69,14 +69,14 @@ require_git_repo = false
 hub_url = "ws://localhost:8765/ws"
 "@ | Set-Content -Path $ConfigPath -Encoding Ascii
 
-    Info '启动安装后的 Node Desktop 宿主...'
+    Info 'Starting installed Node Desktop host...'
     $process = Start-Process -FilePath $BinPath -WorkingDirectory $InstallRoot -ArgumentList @('--config', $ConfigPath, 'serve', '--listen', $Listen) -RedirectStandardOutput $StdoutLogPath -RedirectStandardError $StderrLogPath -PassThru -WindowStyle Hidden
 
     $started = $false
     for ($i = 0; $i -lt 30; $i++) {
         try {
             $null = Invoke-Json "$BaseUrl/api/settings/defaults"
-            Pass '安装后的宿主 API 已启动'
+            Pass 'Installed host API started'
             $started = $true
             break
         }
@@ -92,7 +92,7 @@ hub_url = "ws://localhost:8765/ws"
         if (Test-Path $StderrLogPath) {
             Get-Content $StderrLogPath | Write-Host
         }
-        Fail '安装后的宿主 API 启动失败'
+        Fail 'Installed host API failed to start'
     }
 
     foreach ($path in @(
@@ -104,29 +104,29 @@ hub_url = "ws://localhost:8765/ws"
     )) {
         $payload = Invoke-Json ($BaseUrl + $path)
         if ($payload.success -ne $true) {
-            Fail "API 返回 success != true：$path"
+            Fail "API returned success != true: $path"
         }
     }
-    Pass '安装后的关键 API smoke 通过'
+    Pass 'Installed key API smoke passed'
 
     $indexHtml = Invoke-Text "$BaseUrl/"
     if ($indexHtml -match 'id="root"') {
-        Pass '安装后的静态首页可访问'
+        Pass 'Installed static homepage reachable'
     }
     else {
-        Fail '安装后的静态首页内容不符合预期'
+        Fail 'Installed static homepage content mismatch'
     }
 
     $appHtml = Invoke-Text "$BaseUrl/dashboard"
     if ($appHtml -match 'id="root"') {
-        Pass '安装后的前端路由回退可访问'
+        Pass 'Installed frontend route fallback reachable'
     }
     else {
-        Fail '安装后的前端路由回退不可用'
+        Fail 'Installed frontend route fallback unavailable'
     }
 
     Write-Host ''
-    Write-Host "Node Desktop installer smoke 完成。日志：$StdoutLogPath , $StderrLogPath"
+    Write-Host "Node Desktop installer smoke completed. Logs: $StdoutLogPath , $StderrLogPath"
 }
 finally {
     if ($process -and -not $process.HasExited) {
