@@ -73,6 +73,7 @@ const DEFAULT_SKILLHUB_SEARCH_URL: &str =
     "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/search";
 const SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE: &str =
     "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug={slug}";
+const SKILLHUB_HTTP_TIMEOUT_SECS: u64 = 15;
 const SKILLHUB_OFFICIAL_HOSTS: [&str; 2] = [
     "skillhub-1388575217.cos.ap-guangzhou.myqcloud.com",
     "lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com",
@@ -937,6 +938,12 @@ fn resolve_skill_install_target_dir(
     }
 }
 
+fn build_skillhub_http_client() -> Result<reqwest::Client, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(SKILLHUB_HTTP_TIMEOUT_SECS))
+        .build()?)
+}
+
 async fn fetch_skillhub_archive(
     client: &reqwest::Client,
     request: &SkillInstallRequest,
@@ -1019,7 +1026,8 @@ async fn install_skill_from_request(
     tokio::fs::create_dir_all(&target_root).await?;
 
     let temp_dir = tempfile::tempdir()?;
-    let archive_bytes = fetch_skillhub_archive(&reqwest::Client::new(), &request).await?;
+    let client = build_skillhub_http_client()?;
+    let archive_bytes = fetch_skillhub_archive(&client, &request).await?;
     let skill_name = unpack_skill_archive(&archive_bytes, temp_dir.path()).await?;
     let source_dir = temp_dir.path().join(&skill_name);
     let destination_dir = target_root.join(&skill_name);
@@ -4252,7 +4260,7 @@ async fn search_skillhub_skill(
         version: Option<String>,
     }
 
-    let client = reqwest::Client::new();
+    let client = build_skillhub_http_client()?;
     let response = client
         .get(skillhub_search_url())
         .query(&[("q", query), ("limit", "1")])
@@ -4389,6 +4397,16 @@ async fn try_handle_dingtalk_skill_install_command(
     let Some(text) = inbound.message.content.as_text().map(str::trim) else {
         return Ok(false);
     };
+
+    let route = reply_route_from_inbound(inbound);
+    let Some(channel) = state.dingtalk_channel.as_ref() else {
+        return Err("DingTalk channel is not configured".into());
+    };
+
+    if looks_like_dingtalk_skill_install_intent(text) || resolve_dingtalk_skill_install_request(text).is_some() {
+        send_dingtalk_reply(channel, &route, DINGTALK_PROCESSING_ACK_TEXT).await?;
+    }
+
     let Some(intent) = resolve_dingtalk_skill_install_intent(text).await? else {
         return Ok(false);
     };
@@ -4426,11 +4444,6 @@ async fn try_handle_dingtalk_skill_install_command(
         DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query) => {
             format!("没有在 SkillHub 中找到与“{}”匹配的 Skill。", query)
         }
-    };
-
-    let route = reply_route_from_inbound(inbound);
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
-        return Err("DingTalk channel is not configured".into());
     };
 
     send_dingtalk_reply(channel, &route, &reply_text).await?;
