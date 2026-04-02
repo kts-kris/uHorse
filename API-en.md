@@ -1,6 +1,6 @@
 # uHorse API Reference
 
-This document only covers the APIs that are **actually implemented and used by the current v4.1.3 Hub-Node mainline**. Examples assume the Hub is reachable at `http://127.0.0.1:8765`.
+This document only covers the APIs that are **actually implemented and used by the current v4.4.0 Hub-Node mainline**. Examples assume the Hub is reachable at `http://127.0.0.1:8765`.
 
 ## Table of Contents
 
@@ -40,6 +40,8 @@ The current Hub runtime exposes these Hub-Node related endpoints:
 - `POST /api/approvals/:request_id/approve`
 - `POST /api/approvals/:request_id/reject`
 - `POST /api/node-auth/token`
+- `POST /api/v1/skills/install`
+- `POST /api/v1/skills/refresh`
 - `GET/POST /api/v1/channels/dingtalk/webhook`
 
 > Note: this document no longer treats the old `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` endpoints as the mainline API surface.
@@ -75,7 +77,7 @@ The health endpoint returns plain JSON instead of `ApiResponse<T>`:
 ```json
 {
   "status": "healthy",
-  "version": "4.1.3"
+  "version": "4.4.0"
 }
 ```
 
@@ -96,7 +98,7 @@ Successful response:
 ```json
 {
   "status": "healthy",
-  "version": "4.1.3"
+  "version": "4.4.0"
 }
 ```
 
@@ -351,7 +353,7 @@ Notes:
 - The current implementation now returns the **real** `command_type` and `priority` from scheduler state instead of hard-coded defaults.
 - `command_type` comes from the actual queued/running/completed task metadata, such as `file` or `shell`.
 - `execution_workspace_id` is the real execution workspace identity, while `collaboration_workspace` is the Hub-side logical collaboration view and not the Node's actual directory.
-- `collaboration_workspace.materialization` is currently fixed to `none`, which means v4.1.3 only keeps a logical collaboration layer and does not materialize real directories on the Hub side.
+- `collaboration_workspace.materialization` is currently fixed to `none`, which means v4.4.0 only keeps a logical collaboration layer and does not materialize real directories on the Hub side.
 
 ### 3. Cancel a task: `POST /api/tasks/:task_id/cancel`
 
@@ -366,6 +368,83 @@ curl http://127.0.0.1:8765/api/tasks
 ```
 
 Note: the current `GET /api/tasks` implementation is still a **placeholder** and returns an empty list. Use `GET /api/tasks/:task_id` when you need real task status.
+
+---
+
+## Skill Install and Refresh APIs
+
+### 1. Install a Skill online: `POST /api/v1/skills/install`
+
+Use this endpoint to download a Skill package into the Hub runtime directory and refresh the registry immediately after installation.
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/skills/install \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "skillhub",
+    "package": "demo-skill",
+    "download_url": "https://example.com/demo-skill.tar.gz"
+  }'
+```
+
+Request fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_type` | string | currently only `skillhub` is accepted |
+| `package` | string | Skill package name |
+| `download_url` | string | downloadable tar.gz URL |
+| `version` | string? | optional version string carried with the request |
+| `target_layer` | string? | optional, currently `global` or `user`, default `global` |
+| `target_scope` | string? | required when `target_layer = user` |
+
+Successful response example:
+
+```json
+{
+  "success": true,
+  "data": {
+    "skill_name": "demo-skill",
+    "target_layer": "global",
+    "target_scope": null,
+    "skill_count": 4
+  },
+  "error": null
+}
+```
+
+Current limits:
+
+- only `source_type = "skillhub"` is accepted
+- overwriting an existing Skill directory is rejected
+- `skill_installers` does **not** restrict this HTTP API; it only restricts the DingTalk text install entrypoint
+
+### 2. Refresh runtime Skills: `POST /api/v1/skills/refresh`
+
+Use this endpoint to rescan runtime Skill directories without restarting Hub.
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/skills/refresh \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Successful response example:
+
+```json
+{
+  "success": true,
+  "data": {
+    "skill_count": 4
+  },
+  "error": null
+}
+```
+
+Notes:
+
+- this is the intended path after manually adding or updating runtime Skills on disk
+- the current DingTalk text entrypoint does **not** support a refresh command; use the HTTP API for refresh
 
 ---
 

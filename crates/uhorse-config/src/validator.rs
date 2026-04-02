@@ -2,7 +2,7 @@
 //!
 //! 验证配置的有效性。
 
-use super::{DingTalkNotificationBinding, UHorseConfig};
+use super::{DingTalkNotificationBinding, DingTalkSkillInstaller, UHorseConfig};
 use anyhow::Result as AnyhowResult;
 use std::path::Path;
 
@@ -227,6 +227,9 @@ impl ConfigValidator for ChannelsValidator {
                 for binding in &dingtalk.notification_bindings {
                     validate_dingtalk_notification_binding(binding, &mut errors);
                 }
+                for installer in &dingtalk.skill_installers {
+                    validate_dingtalk_skill_installer(installer, &mut errors);
+                }
             } else {
                 errors.push("DingTalk config is missing".to_string());
             }
@@ -344,6 +347,30 @@ fn validate_dingtalk_notification_binding(
     }
 }
 
+fn validate_dingtalk_skill_installer(
+    installer: &DingTalkSkillInstaller,
+    errors: &mut Vec<String>,
+) {
+    let user_id = installer.user_id.as_deref().map(str::trim);
+    let staff_id = installer.staff_id.as_deref().map(str::trim);
+    let corp_id = installer.corp_id.as_deref().map(str::trim);
+
+    if user_id.is_some_and(str::is_empty) {
+        errors.push("DingTalk skill installer user_id cannot be empty".to_string());
+    }
+    if staff_id.is_some_and(str::is_empty) {
+        errors.push("DingTalk skill installer staff_id cannot be empty".to_string());
+    }
+    if corp_id.is_some_and(str::is_empty) {
+        errors.push("DingTalk skill installer corp_id cannot be empty".to_string());
+    }
+    if user_id.is_none() && staff_id.is_none() {
+        errors.push(
+            "DingTalk skill installer requires either user_id or staff_id".to_string(),
+        );
+    }
+}
+
 /// 验证配置
 pub fn validate_config(config: &UHorseConfig, production: bool) -> AnyhowResult<()> {
     let validator = if production {
@@ -373,6 +400,7 @@ mod tests {
             app_secret: "secret".to_string(),
             agent_id: 1,
             notification_bindings: vec![],
+            skill_installers: vec![],
         });
         config
     }
@@ -404,5 +432,39 @@ mod tests {
         assert!(errors
             .iter()
             .any(|error| error == "DingTalk notification binding user_id is required"));
+    }
+
+    #[test]
+    fn test_validate_dingtalk_skill_installer_requires_user_or_staff_id() {
+        let mut config = base_config();
+        config.channels.dingtalk.as_mut().unwrap().skill_installers = vec![
+            DingTalkSkillInstaller {
+                user_id: None,
+                staff_id: None,
+                corp_id: Some("corp-1".to_string()),
+            },
+            DingTalkSkillInstaller {
+                user_id: Some(" ".to_string()),
+                staff_id: Some("staff-1".to_string()),
+                corp_id: None,
+            },
+            DingTalkSkillInstaller {
+                user_id: Some("user-1".to_string()),
+                staff_id: None,
+                corp_id: Some(" ".to_string()),
+            },
+        ];
+
+        let result = ChannelsValidator.validate(&config);
+        let errors = result.errors();
+        assert!(errors.iter().any(|error| {
+            error == "DingTalk skill installer requires either user_id or staff_id"
+        }));
+        assert!(errors
+            .iter()
+            .any(|error| error == "DingTalk skill installer user_id cannot be empty"));
+        assert!(errors
+            .iter()
+            .any(|error| error == "DingTalk skill installer corp_id cannot be empty"));
     }
 }

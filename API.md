@@ -1,6 +1,6 @@
 # uHorse API 使用指南
 
-本文档只描述 **当前仓库已经实现并用于 v4.1.3 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
+本文档只描述 **当前仓库已经实现并用于 v4.4.0 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
 
 ## 目录
 
@@ -40,6 +40,8 @@
 - `POST /api/approvals/:request_id/approve`
 - `POST /api/approvals/:request_id/reject`
 - `POST /api/node-auth/token`
+- `POST /api/v1/skills/install`
+- `POST /api/v1/skills/refresh`
 - `GET/POST /api/v1/channels/dingtalk/webhook`
 
 > 注意：本文档不再把旧版 `/health/live`、`/health/ready`、`/api/v1/auth/*`、`/api/v1/messages` 当作当前主线 API。
@@ -75,7 +77,7 @@
 ```json
 {
   "status": "healthy",
-  "version": "4.1.3"
+  "version": "4.4.0"
 }
 ```
 
@@ -96,7 +98,7 @@ curl http://127.0.0.1:8765/api/health
 ```json
 {
   "status": "healthy",
-  "version": "4.1.3"
+  "version": "4.4.0"
 }
 ```
 
@@ -351,7 +353,7 @@ curl http://127.0.0.1:8765/api/tasks/task-0
 - 当前实现已经保证 `command_type` 与 `priority` 返回**真实任务元数据**，不再写死为默认值。
 - `command_type` 来自调度器里的真实命令类型，例如 `file`、`shell`。
 - `execution_workspace_id` 表示真实执行工作空间标识；`collaboration_workspace` 是 Hub 侧逻辑协作工作空间视图，不等于 Node 实际目录。
-- `collaboration_workspace.materialization` 当前固定为 `none`，表示 v4.1.3 只维护逻辑协作层，不在 Hub 侧物化真实目录。
+- `collaboration_workspace.materialization` 当前固定为 `none`，表示 v4.4.0 只维护逻辑协作层，不在 Hub 侧物化真实目录。
 
 ### 3. 取消任务：`POST /api/tasks/:task_id/cancel`
 
@@ -366,6 +368,83 @@ curl http://127.0.0.1:8765/api/tasks
 ```
 
 注意：当前实现里的 `GET /api/tasks` 仍是**占位实现**，会返回空列表；如果要查询真实任务状态，请直接使用 `GET /api/tasks/:task_id`。
+
+---
+
+## Skill 安装与刷新 API
+
+### 1. 在线安装 Skill：`POST /api/v1/skills/install`
+
+用于把 Skill 包下载到 Hub 运行时目录，并在安装完成后立即刷新 registry。
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/skills/install \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "skillhub",
+    "package": "demo-skill",
+    "download_url": "https://example.com/demo-skill.tar.gz"
+  }'
+```
+
+请求体字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `source_type` | string | 当前仅支持 `skillhub` |
+| `package` | string | Skill 包名 |
+| `download_url` | string | 可下载的 tar.gz 地址 |
+| `version` | string? | 可选版本字符串，仅作为记录随请求透传 |
+| `target_layer` | string? | 可选，当前支持 `global` 或 `user`，默认 `global` |
+| `target_scope` | string? | 当 `target_layer = user` 时必填 |
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "skill_name": "demo-skill",
+    "target_layer": "global",
+    "target_scope": null,
+    "skill_count": 4
+  },
+  "error": null
+}
+```
+
+限制说明：
+
+- 当前只接受 `source_type = "skillhub"`
+- 当前会拒绝覆盖已存在的 Skill 目录
+- `skill_installers` **不会**限制这个 HTTP API；它只限制 DingTalk 文本安装入口
+
+### 2. 刷新运行时 Skill：`POST /api/v1/skills/refresh`
+
+用于在不重启 Hub 的情况下重新扫描运行时 Skill 目录。
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/skills/refresh \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+成功响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "skill_count": 4
+  },
+  "error": null
+}
+```
+
+说明：
+
+- 该接口适合手工放置 / 更新运行时目录中的 Skill 后触发重载
+- 当前 DingTalk 文本入口**不支持** refresh 命令；如需 refresh，请使用 HTTP API
 
 ---
 

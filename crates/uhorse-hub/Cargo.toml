@@ -64,6 +64,9 @@ tracing-subscriber = { workspace = true }
 
 # Config
 toml = { workspace = true }
+tar = "0.4"
+flate2 = "1.0"
+tempfile = { workspace = true }
 
 [dev-dependencies]
 uhorse-node-runtime = { path = "../uhorse-node-runtime" }

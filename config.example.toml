@@ -52,6 +52,12 @@ agent_id = 123456789
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
 
+# 允许在线安装 Skill 的 DingTalk 账号。
+# 可按 user_id / staff_id 做白名单，必要时再叠加 corp_id 限制企业范围。
+[[channels.dingtalk.skill_installers]]
+user_id = "your-admin-user-id"
+# corp_id = "dingcorp-xxx"
+
 [security]
 # 生产环境请替换为至少 32 个字符的随机密钥
 jwt_secret = "replace-with-a-random-secret-at-least-32-chars"

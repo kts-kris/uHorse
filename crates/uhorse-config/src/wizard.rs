@@ -784,6 +784,7 @@ impl ConfigWizard {
                     config.push_str(&format!("{} = \"{}\"\n", key, value));
                 }
                 config.push_str("notification_bindings = []\n");
+                config.push_str("skill_installers = []\n");
                 config.push_str("\n");
             }
         }

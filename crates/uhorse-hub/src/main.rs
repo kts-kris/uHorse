@@ -155,7 +155,8 @@ async fn main() -> anyhow::Result<()> {
                 .with_pairing_ttl(runtime_config.app_config.security.pairing_expiry),
         )
     });
-    let web_state = WebState::new_with_runtime_and_health(
+    let web_state = WebState::new_with_runtime_and_health_and_config(
+        Arc::new(runtime_config.app_config.clone()),
         hub.clone(),
         health_service,
         metrics_collector,
@@ -425,6 +426,7 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
             node_id: "your-stable-node-id".to_string(),
             user_id: "your-dingtalk-user-id".to_string(),
         }],
+        skill_installers: vec![],
     });
 
     let content = toml::to_string_pretty(&config)?;

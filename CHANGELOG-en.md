@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-04-02
+
+### Added
+
+- Hub now exposes `POST /api/v1/skills/install` to install a Skill into the runtime directory and refresh the registry immediately after installation
+- Hub now exposes `POST /api/v1/skills/refresh` to reload runtime Skills without restarting the process
+- DingTalk now supports text install commands: `安装技能 <package> <download_url> [version]` / `install skill <package> <download_url> [version]`
+- Unified config now supports the `[[channels.dingtalk.skill_installers]]` allowlist, matching `user_id` / `staff_id` and optionally `corp_id` for the DingTalk install entrypoint
+- `uhorse-hub` now includes test coverage for online Skill install, runtime refresh, DingTalk authorization checks, and command parsing
+
+### Changed
+
+- Online install currently only accepts Skill packages with `source = "skillhub"` and refuses to overwrite an existing Skill directory
+- The DingTalk install entrypoint now validates the sender against `skill_installers` before any download starts; unauthorized users are rejected immediately
+- README / INSTALL / CHANNELS / CONFIG / SKILLS / API / RELEASE_NOTES are now aligned to `v4.4.0` and document online Skill install plus DingTalk installer controls
+- GitHub release notes continue to use the `CHANGELOG.md` version section as the source of truth, so the existing `v4.4.0` workflow path requires no workflow change
+
 ## [4.3.0] - 2026-04-01
 
 ### Added
@@ -279,7 +296,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.3.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.4.0...HEAD
+[4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0
 [4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3
 [4.1.2]: https://github.com/kts-kris/uHorse/compare/v4.1.1...v4.1.2

@@ -271,6 +271,17 @@ pub struct DingTalkNotificationBinding {
     pub user_id: String,
 }
 
+/// DingTalk Skill 安装权限
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DingTalkSkillInstaller {
+    /// 允许安装的 DingTalk 用户 ID
+    pub user_id: Option<String>,
+    /// 允许安装的 DingTalk 员工 ID
+    pub staff_id: Option<String>,
+    /// 限制企业 ID（可选）
+    pub corp_id: Option<String>,
+}
+
 /// DingTalk 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DingTalkConfig {
@@ -283,6 +294,9 @@ pub struct DingTalkConfig {
     /// 节点通知绑定
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notification_bindings: Vec<DingTalkNotificationBinding>,
+    /// 允许在线安装 Skill 的 DingTalk 用户
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_installers: Vec<DingTalkSkillInstaller>,
 }
 
 /// Slack 配置
@@ -624,6 +638,7 @@ agent_id = 1
 
         let dingtalk = config.channels.dingtalk.unwrap();
         assert!(dingtalk.notification_bindings.is_empty());
+        assert!(dingtalk.skill_installers.is_empty());
     }
 
     #[test]
@@ -652,6 +667,47 @@ user_id = "manager-1"
                 node_id: "node-desktop-test".to_string(),
                 user_id: "manager-1".to_string(),
             }]
+        );
+        assert!(dingtalk.skill_installers.is_empty());
+    }
+
+    #[test]
+    fn test_dingtalk_skill_installers_deserialize() {
+        let config: UHorseConfig = toml::from_str(
+            r#"
+[channels]
+enabled = ["dingtalk"]
+
+[channels.dingtalk]
+app_key = "key"
+app_secret = "secret"
+agent_id = 1
+
+[[channels.dingtalk.skill_installers]]
+user_id = "user-1"
+corp_id = "corp-1"
+
+[[channels.dingtalk.skill_installers]]
+staff_id = "staff-1"
+"#,
+        )
+        .unwrap();
+
+        let dingtalk = config.channels.dingtalk.unwrap();
+        assert_eq!(
+            dingtalk.skill_installers,
+            vec![
+                DingTalkSkillInstaller {
+                    user_id: Some("user-1".to_string()),
+                    staff_id: None,
+                    corp_id: Some("corp-1".to_string()),
+                },
+                DingTalkSkillInstaller {
+                    user_id: None,
+                    staff_id: Some("staff-1".to_string()),
+                    corp_id: None,
+                }
+            ]
         );
     }
 

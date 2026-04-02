@@ -1,6 +1,6 @@
 # uHorse 通道指南
 
-本文档只描述 **`v4.1.3` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
+本文档只描述 **`v4.4.0` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
 
 当前最重要、也是主推荐路径的是：
 
@@ -68,6 +68,11 @@ agent_id = 123456789
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
+
+[[channels.dingtalk.skill_installers]]
+user_id = "your-admin-user-id"
+# staff_id = "your-staff-id"
+# corp_id = "dingcorp-xxx"
 ```
 
 > 注意：DingTalk 只能通过 **统一配置** 初始化。legacy `HubConfig` 模式不能初始化 DingTalk。
@@ -107,9 +112,16 @@ DingTalk inbound message
 
 这意味着 DingTalk 消息不是在通道层本地直接处理，而是会先进入 LLM 规划，再进入 Hub-Node 任务执行链路。
 
+此外，当前还提供一条**受控 Skill 安装薄入口**：
+
+- `安装技能 <package> <download_url> [version]`
+- `install skill <package> <download_url> [version]`
+
+这条入口不会把文本交给自然语言任务规划，而是直接解析成 Skill 安装请求。
+
 ## 来源感知运行时
 
-在当前 `v4.1.3` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
+在当前 `v4.4.0` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
 
 这里的目标不是把 DingTalk 变成 `memory / agent / skill` 管理入口，而是让运行时能够区分资源来自哪里、应该按什么边界共享或隔离。
 
@@ -134,6 +146,13 @@ DingTalk inbound message
 6. 拒绝危险 git，例如 `git reset --hard`、`git clean -fd`、`git push --force`
 
 如果 LLM 返回非法 JSON、越界路径、非法浏览器目标或危险命令，Hub 会直接报错，不会下发到 Node。
+
+对于 Skill 安装薄入口，当前边界还包括：
+
+- 只接受 `skillhub` 来源
+- 安装前会按 `channels.dingtalk.skill_installers` 校验发送者是否命中白名单
+- 白名单可按 `user_id` / `staff_id` 命中，并可选叠加 `corp_id`
+- 当前 DingTalk 文本入口只支持 install，不支持 refresh
 
 ---
 

@@ -1,15 +1,16 @@
-# Skill Development Guide
+# uHorse Skill Guide
 
-This document explains how to develop custom skills for uHorse.
+This document describes Skill development, runtime loading, and online installation boundaries for the current `v4.4.0` mainline.
 
 ## 📖 Table of Contents
 
 - [Overview](#overview)
+- [Runtime loading and source layers](#runtime-loading-and-source-layers)
+- [Install Skills online](#install-skills-online)
 - [SKILL.md Format](#skillmd-format)
 - [Skill Directory Structure](#skill-directory-structure)
-- [Built-in Skills](#built-in-skills)
 - [Developing Custom Skills](#developing-custom-skills)
-- [Publishing Skills](#publishing-skills)
+- [Current limits](#current-limits)
 
 ---
 
@@ -27,6 +28,54 @@ uHorse uses a **SKILL.md** driven skill system. Each skill is an independent dir
 |---------|-------------|
 | **Skill** | A complete functional module containing multiple related tools |
 | **Tool** | A single executable operation with clear inputs and outputs |
+
+---
+
+## Runtime loading and source layers
+
+The current `uhorse-hub` runtime loads Skills from runtime directories and preserves source metadata:
+
+- `global`
+- `tenant`
+- `enterprise`
+- `department`
+- `role`
+- `user`
+
+This means same-name Skills may coexist across different source layers and scopes, and the Web API / UI distinguishes them through `source_layer` and `source_scope`.
+
+## Install Skills online
+
+`v4.4.0` adds two runtime management APIs:
+
+- `POST /api/v1/skills/install`
+- `POST /api/v1/skills/refresh`
+
+Minimal install example:
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/v1/skills/install \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "skillhub",
+    "package": "demo-skill",
+    "download_url": "https://example.com/demo-skill.tar.gz"
+  }'
+```
+
+When DingTalk is enabled, Skills can also be installed through text commands:
+
+```text
+安装技能 <package> <download_url> [version]
+install skill <package> <download_url> [version]
+```
+
+The DingTalk text install entrypoint is gated by `[[channels.dingtalk.skill_installers]]`:
+
+- it only restricts the DingTalk text path
+- matching can use `user_id` / `staff_id`
+- `corp_id` may be added to limit the enterprise scope
+- there is currently no DingTalk text refresh command
 
 ---
 
@@ -358,23 +407,12 @@ echo 'skills = ["my_skill"]' >> ~/.uhorse/config.toml
 
 ---
 
-## Publishing Skills
+## Current limits
 
-### Publish to Skill Marketplace
-
-1. Create a GitHub repository
-2. Add `uhorse-skill` label
-3. Submit to [uHorse Skills Registry](https://github.com/uhorse/skills)
-
-### Install Community Skills
-
-```bash
-# Install from GitHub
-uhorse skill install github:user/uhorse-skill-name
-
-# Install from local path
-uhorse skill install /path/to/skill
-```
+- online install currently only accepts `source_type = "skillhub"`
+- installation refuses to overwrite an existing Skill directory
+- the DingTalk text entrypoint supports install only, not refresh
+- `skill_installers` is not global RBAC; it only restricts the DingTalk text install path
 
 ---
 
