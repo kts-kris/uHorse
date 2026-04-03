@@ -31,6 +31,8 @@ cargo test -p uhorse-hub
 cargo test --workspace
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 cargo test -p uhorse-hub test_local_hub_rejects_node_with_mismatched_auth_token -- --nocapture
+make skill-install-smoke
+make test-quick
 ```
 
 ---
@@ -119,7 +121,22 @@ cargo test -p uhorse-hub test_local_hub_rejects_node_with_mismatched_auth_token 
 - token 内 `node_id` 与 Node 注册时提供的 `node_id` 不一致
 - Hub 拒绝该 Node 上线
 
-### 3. 安全与审批相关测试
+### 3. Agent Browser Skill 安装自动化回归
+
+```bash
+make skill-install-smoke
+# 或
+cargo test -p uhorse-hub test_agent_browser_natural_language_install_flow_returns_chinese_hint -- --nocapture
+```
+
+这条回归验证：
+
+- “帮我安装 Agent Browser 技能”自然语言安装入口
+- SkillHub 搜索结果解析与安装请求组装
+- 运行时安装与 registry 刷新
+- 安装成功后的简体中文功能介绍与使用示例
+
+### 4. 安全与审批相关测试
 
 ```bash
 cargo test -p uhorse-hub security_test -- --nocapture

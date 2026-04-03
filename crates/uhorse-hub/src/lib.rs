@@ -41,6 +41,7 @@ pub mod node_manager;
 pub mod notification_binding;
 pub mod orchestrator;
 pub mod security_integration;
+pub mod session_runtime;
 pub mod task_scheduler;
 pub mod web;
 
@@ -57,6 +58,7 @@ pub use security_integration::{
     HubFieldEncryptor, HubTlsConfig, NodeAuthInfo, NodeAuthenticator, SecurityManager,
     SensitiveOperationApprover,
 };
+pub use session_runtime::SessionRuntimeManager;
 pub use task_scheduler::{
     QueuedTask, ScheduledTask, SchedulerStats, TaskResult, TaskScheduler, TaskStatusInfo,
 };

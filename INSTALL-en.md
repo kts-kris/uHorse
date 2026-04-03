@@ -1,6 +1,6 @@
 # uHorse Installation Guide
 
-This document only describes the **current `v4.4.0` Hub-Node mainline** installation path that matches the repository as it exists today.
+This document only describes the **current `v4.5.0` Hub-Node mainline** installation path that matches the repository as it exists today.
 
 The recommended path is:
 
@@ -108,7 +108,7 @@ Terminal 2:
 
 If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script.
 
-The fixed `v4.4.0` delivery boundary is: **`bin + web` archives, installer smoke, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging, macOS `.pkg`, Windows installer packaging, and matching smoke validation, but it still does **not** include native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installers.
+The fixed `v4.5.0` delivery boundary is: **`bin + web` archives, installer smoke, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging, macOS `.pkg`, Windows installer packaging, and matching smoke validation, but it still does **not** include native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installers.
 
 Use the built-in archive packaging script:
 
@@ -200,24 +200,32 @@ curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
-### 4. Run the verified local roundtrip test
+### 4. Run the verified local regression tests
 
 ```bash
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
+make skill-install-smoke
 ```
 
-These tests start real:
+These checks cover:
 
 - Hub
 - WebSocket server
 - Node
 - a file existence roundtrip task
 - a real file write roundtrip, including on-disk persistence and structured `file_operation` output
+- the Agent Browser Skill natural-language install path, SkillHub install, and Chinese reply-hint regression
 
-### 5. Verify the Node Desktop `v4.4.0` delivery boundary
+If you want the default quick regression entrypoint instead, run:
 
-If you are validating the `v4.4.0` Node Desktop deliverable, also run:
+```bash
+make test-quick
+```
+
+### 5. Verify the Node Desktop `v4.5.0` delivery boundary
+
+If you are validating the `v4.5.0` Node Desktop deliverable, also run:
 
 ```bash
 ./scripts/package-node-desktop.sh

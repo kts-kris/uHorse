@@ -422,6 +422,8 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
         app_key: "your-app-key".to_string(),
         app_secret: "your-app-secret".to_string(),
         agent_id: 123456789,
+        skillhub_search_url: None,
+        skillhub_download_url_template: None,
         notification_bindings: vec![DingTalkNotificationBinding {
             node_id: "your-stable-node-id".to_string(),
             user_id: "your-dingtalk-user-id".to_string(),

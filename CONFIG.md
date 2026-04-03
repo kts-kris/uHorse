@@ -313,6 +313,7 @@ user_id = "your-admin-user-id"
 - Hub 仍保留 `GET/POST /api/v1/channels/dingtalk/webhook` 路由，用于兼容或辅助测试。
 - 若要镜像 Node Desktop 本地通知到钉钉，当前主路径是启用 pairing，并在 Node Desktop 中发起绑定、在 DingTalk 中确认；`channels.dingtalk.notification_bindings` 仅用于兼容 seed/fallback。
 - `[[channels.dingtalk.skill_installers]]` 只限制 DingTalk 文本安装入口，不限制 HTTP `POST /api/v1/skills/install`。
+- 当前默认快速回归已包含 Agent Browser Skill 安装 smoke，可通过 `make skill-install-smoke` 单独执行。
 - 白名单匹配支持 `user_id` / `staff_id`，并可选叠加 `corp_id` 限制企业范围。
 - DingTalk 文本会先经过 LLM 规划，再转换为单个安全命令；文件操作、shell，以及受控 `BrowserCommand` 都在当前主线上。
 - 但 `安装技能 <package> <download_url> [version]` / `install skill ...` 会直接走 Skill 安装薄入口，不经过通用自然语言命令规划。

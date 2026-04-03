@@ -1,6 +1,6 @@
 # uHorse Channel Guide
 
-This document only describes the **channel path that is actually wired into the current `v4.4.0` mainline runtime**.
+This document only describes the **channel path that is actually wired into the current `v4.5.0` mainline runtime**.
 
 The most important and recommended path today is:
 
@@ -121,7 +121,7 @@ This path does not go through general natural-language task planning. It is pars
 
 ## Source-aware runtime
 
-Under the current `v4.4.0` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
+Under the current `v4.5.0` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
 
 The goal is not to turn DingTalk into a management surface for `memory / agent / skill`, but to let the runtime distinguish where a resource came from and what sharing or isolation boundary it should follow.
 
@@ -225,6 +225,15 @@ So if you want to plug DingTalk into an internal enterprise model platform, that
 ---
 
 ## Testing and verification
+
+### Default quick regression entrypoints
+
+```bash
+make skill-install-smoke
+make test-quick
+```
+
+`make skill-install-smoke` validates the Agent Browser Skill natural-language install flow, SkillHub installation, and Chinese reply hint generation; `make test-quick` now includes that regression by default.
 
 ### Start Hub and inspect logs
 

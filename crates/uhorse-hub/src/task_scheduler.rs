@@ -80,6 +80,8 @@ pub struct CompletedTask {
     pub started_at: DateTime<Utc>,
     /// 完成时间
     pub completed_at: DateTime<Utc>,
+    /// 终态状态
+    pub status: TaskStatus,
     /// 完整执行结果
     pub result: CommandResult,
 }
@@ -203,6 +205,33 @@ impl TaskScheduler {
         TaskId::from_string(format!("task-{}", id))
     }
 
+    fn terminal_status_from_result(result: &CommandResult) -> TaskStatus {
+        if result.success {
+            TaskStatus::Completed
+        } else {
+            TaskStatus::Failed
+        }
+    }
+
+    async fn store_completed_task(&self, completed: CompletedTask) {
+        let mut completed_tasks = self.completed_tasks.write().await;
+        completed_tasks.insert(completed.task_id.clone(), completed);
+
+        if completed_tasks.len() > 500 {
+            let tasks: Vec<_> = completed_tasks.iter().collect();
+            let mut sorted_tasks: Vec<_> = tasks.into_iter().collect();
+            sorted_tasks.sort_by_key(|(_, t)| t.completed_at);
+            let ids_to_remove: Vec<_> = sorted_tasks
+                .iter()
+                .take(250)
+                .map(|(id, _)| (*id).clone())
+                .collect();
+            for id in ids_to_remove {
+                completed_tasks.remove(&id);
+            }
+        }
+    }
+
     /// 提交任务
     pub async fn submit_task(
         &self,
@@ -228,7 +257,6 @@ impl TaskScheduler {
             workspace_hint,
         };
 
-        // 添加到待调度队列
         {
             let mut pending = self.pending_tasks.write().await;
             if let Some(queue) = pending.get_mut(&priority) {
@@ -369,8 +397,6 @@ impl TaskScheduler {
                     }
 
                     let task = task.take().expect("task should only be scheduled once");
-
-                    // 记录运行中的任务
                     let running = RunningTask {
                         task_id: task.task_id.clone(),
                         command: task.command,
@@ -429,34 +455,15 @@ impl TaskScheduler {
                 command: running.command,
                 context: running.context,
                 priority: running.priority,
-                node_id: node_id.clone(),
+                node_id: running.node_id.clone(),
                 started_at: running.started_at,
                 completed_at: Utc::now(),
+                status: Self::terminal_status_from_result(&result),
                 result: result.clone(),
             };
+            drop(running_tasks);
+            self.store_completed_task(completed).await;
 
-            // 添加到已完成任务列表
-            {
-                let mut completed_tasks = self.completed_tasks.write().await;
-                completed_tasks.insert(task_id.clone(), completed);
-
-                // 清理旧任务（保留最近 500 个）
-                if completed_tasks.len() > 500 {
-                    let tasks: Vec<_> = completed_tasks.iter().collect();
-                    let mut sorted_tasks: Vec<_> = tasks.into_iter().collect();
-                    sorted_tasks.sort_by_key(|(_, t)| t.completed_at);
-                    let ids_to_remove: Vec<_> = sorted_tasks
-                        .iter()
-                        .take(250)
-                        .map(|(id, _)| (*id).clone())
-                        .collect();
-                    for id in ids_to_remove {
-                        completed_tasks.remove(&id);
-                    }
-                }
-            }
-
-            // 发送结果通知
             let task_result = TaskResult {
                 task_id: task_id.clone(),
                 node_id: node_id.clone(),
@@ -473,23 +480,103 @@ impl TaskScheduler {
                 node_id,
                 if result.success { "success" } else { "failed" }
             );
+            return Ok(());
+        }
+        drop(running_tasks);
+
+        if let Some(existing) = self.completed_tasks.read().await.get(task_id).cloned() {
+            warn!(
+                "Ignore late result for task {} from node {} because terminal status is already {:?}",
+                task_id, node_id, existing.status
+            );
+            return Ok(());
         }
 
+        warn!(
+            "Ignore result for unknown task {} from node {} because task is no longer tracked",
+            task_id, node_id
+        );
         Ok(())
     }
 
     /// 取消任务
     pub async fn cancel_task(&self, task_id: &TaskId) -> HubResult<()> {
-        // 检查待调度队列
         {
             let mut pending = self.pending_tasks.write().await;
             for queue in pending.values_mut() {
                 if let Some(pos) = queue.iter().position(|t| &t.task_id == task_id) {
-                    queue.remove(pos);
-                    info!("Task {} removed from queue", task_id);
+                    let queued = queue.remove(pos);
+                    drop(pending);
+
+                    let result =
+                        CommandResult::failure(ExecutionError::execution_failed("Task cancelled"));
+                    let completed = CompletedTask {
+                        task_id: queued.task_id.clone(),
+                        command: queued.command,
+                        context: queued.context,
+                        priority: queued.priority,
+                        node_id: NodeId::from_string("pending-cancelled"),
+                        started_at: queued.created_at,
+                        completed_at: Utc::now(),
+                        status: TaskStatus::Cancelled,
+                        result: result.clone(),
+                    };
+                    self.store_completed_task(completed).await;
+
+                    if self
+                        .result_tx
+                        .send(TaskResult {
+                            task_id: task_id.clone(),
+                            node_id: NodeId::from_string("pending-cancelled"),
+                            result,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        warn!("Failed to send queued cancelled task result notification");
+                    }
+
+                    info!("Task {} cancelled while queued", task_id);
                     return Ok(());
                 }
             }
+        }
+
+        let running = {
+            let mut running_tasks = self.running_tasks.write().await;
+            running_tasks.remove(task_id)
+        };
+
+        if let Some(running) = running {
+            let result = CommandResult::failure(ExecutionError::execution_failed("Task cancelled"));
+            let completed = CompletedTask {
+                task_id: task_id.clone(),
+                command: running.command,
+                context: running.context,
+                priority: running.priority,
+                node_id: running.node_id.clone(),
+                started_at: running.started_at,
+                completed_at: Utc::now(),
+                status: TaskStatus::Cancelled,
+                result: result.clone(),
+            };
+            self.store_completed_task(completed).await;
+
+            if self
+                .result_tx
+                .send(TaskResult {
+                    task_id: task_id.clone(),
+                    node_id: running.node_id,
+                    result,
+                })
+                .await
+                .is_err()
+            {
+                warn!("Failed to send cancelled task result notification");
+            }
+
+            info!("Task {} cancelled while running", task_id);
+            return Ok(());
         }
 
         Err(HubError::Task(format!("Task not found: {}", task_id)))
@@ -512,7 +599,6 @@ impl TaskScheduler {
                 warn!("Task {} timed out on node {}", task_id, running.node_id);
 
                 let result = CommandResult::failure(ExecutionError::timeout("Task timed out"));
-
                 let completed = CompletedTask {
                     task_id: task_id.clone(),
                     command: running.command,
@@ -521,11 +607,11 @@ impl TaskScheduler {
                     node_id: running.node_id.clone(),
                     started_at: running.started_at,
                     completed_at: now,
+                    status: TaskStatus::Timeout,
                     result: result.clone(),
                 };
-
-                let mut completed_tasks = self.completed_tasks.write().await;
-                completed_tasks.insert(task_id.clone(), completed);
+                drop(running_tasks);
+                self.store_completed_task(completed).await;
 
                 if self
                     .result_tx
@@ -539,6 +625,8 @@ impl TaskScheduler {
                 {
                     warn!("Failed to send timeout task result notification");
                 }
+
+                running_tasks = self.running_tasks.write().await;
             }
         }
 
@@ -547,7 +635,6 @@ impl TaskScheduler {
 
     /// 获取任务状态
     pub async fn get_task_status(&self, task_id: &TaskId) -> Option<TaskStatusInfo> {
-        // 检查运行中的任务
         {
             let running_tasks = self.running_tasks.read().await;
             if let Some(running) = running_tasks.get(task_id) {
@@ -564,17 +651,12 @@ impl TaskScheduler {
             }
         }
 
-        // 检查已完成的任务
         {
             let completed_tasks = self.completed_tasks.read().await;
             if let Some(completed) = completed_tasks.get(task_id) {
                 return Some(TaskStatusInfo {
                     task_id: task_id.clone(),
-                    status: if completed.result.success {
-                        TaskStatus::Completed
-                    } else {
-                        TaskStatus::Failed
-                    },
+                    status: completed.status.clone(),
                     command_type: Some(completed.command.command_type()),
                     priority: Some(completed.priority),
                     node_id: Some(completed.node_id.clone()),
@@ -589,7 +671,6 @@ impl TaskScheduler {
             }
         }
 
-        // 检查待调度队列
         {
             let pending = self.pending_tasks.read().await;
             for queue in pending.values() {
@@ -609,6 +690,24 @@ impl TaskScheduler {
         }
 
         None
+    }
+
+    /// 仅测试使用：插入已完成任务。
+    #[cfg(test)]
+    pub async fn insert_completed_task_for_test(&self, completed: CompletedTask) {
+        self.completed_tasks
+            .write()
+            .await
+            .insert(completed.task_id.clone(), completed);
+    }
+
+    /// 仅测试使用：插入运行中任务。
+    #[cfg(test)]
+    pub async fn insert_running_task_for_test(&self, running: RunningTask) {
+        self.running_tasks
+            .write()
+            .await
+            .insert(running.task_id.clone(), running);
     }
 
     /// 获取任务上下文
@@ -658,10 +757,10 @@ impl TaskScheduler {
         let mut completed_count = 0;
         let mut failed_count = 0;
         for task in completed_tasks.values() {
-            if task.result.success {
-                completed_count += 1;
-            } else {
-                failed_count += 1;
+            match task.status {
+                TaskStatus::Completed => completed_count += 1,
+                TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Timeout => failed_count += 1,
+                _ => {}
             }
         }
 
@@ -671,5 +770,158 @@ impl TaskScheduler {
             completed_tasks: completed_count,
             failed_tasks: failed_count,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node_manager::NodeManager;
+    use uhorse_protocol::UserId;
+
+    #[tokio::test]
+    async fn test_cancel_running_task_sets_cancelled_status() {
+        let node_manager = Arc::new(NodeManager::new(8, 30));
+        let (scheduler, mut rx) = TaskScheduler::new(node_manager, 3, 300);
+        let task_id = TaskId::from_string("task-cancel-status");
+        scheduler
+            .insert_running_task_for_test(RunningTask {
+                task_id: task_id.clone(),
+                command: Command::File(uhorse_protocol::FileCommand::Exists {
+                    path: "README.md".to_string(),
+                }),
+                context: TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                ),
+                priority: Priority::Normal,
+                node_id: NodeId::from_string("node-1"),
+                started_at: Utc::now(),
+                timeout_at: Utc::now() + chrono::Duration::seconds(30),
+                retry_count: 0,
+            })
+            .await;
+
+        scheduler.cancel_task(&task_id).await.unwrap();
+
+        let status = scheduler.get_task_status(&task_id).await.unwrap();
+        assert_eq!(status.status, TaskStatus::Cancelled);
+        assert_eq!(status.error.as_deref(), Some("Task cancelled"));
+        let result = rx.recv().await.unwrap();
+        assert_eq!(result.task_id, task_id);
+        assert!(!result.result.success);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_queued_task_sets_cancelled_status() {
+        let node_manager = Arc::new(NodeManager::new(8, 30));
+        let (scheduler, mut rx) = TaskScheduler::new(node_manager, 3, 300);
+        let task_id = scheduler
+            .submit_task(
+                Command::File(uhorse_protocol::FileCommand::Exists {
+                    path: "README.md".to_string(),
+                }),
+                TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                ),
+                Priority::Normal,
+                None,
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+
+        scheduler.cancel_task(&task_id).await.unwrap();
+
+        let status = scheduler.get_task_status(&task_id).await.unwrap();
+        assert_eq!(status.status, TaskStatus::Cancelled);
+        assert_eq!(status.error.as_deref(), Some("Task cancelled"));
+        let result = rx.recv().await.unwrap();
+        assert_eq!(result.task_id, task_id);
+        assert!(!result.result.success);
+    }
+
+    #[tokio::test]
+    async fn test_timeout_task_sets_timeout_status() {
+        let node_manager = Arc::new(NodeManager::new(8, 30));
+        let (scheduler, mut rx) = TaskScheduler::new(node_manager, 3, 300);
+        let task_id = TaskId::from_string("task-timeout-status");
+        scheduler
+            .insert_running_task_for_test(RunningTask {
+                task_id: task_id.clone(),
+                command: Command::File(uhorse_protocol::FileCommand::Exists {
+                    path: "README.md".to_string(),
+                }),
+                context: TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                ),
+                priority: Priority::Normal,
+                node_id: NodeId::from_string("node-1"),
+                started_at: Utc::now() - chrono::Duration::seconds(60),
+                timeout_at: Utc::now() - chrono::Duration::seconds(1),
+                retry_count: 0,
+            })
+            .await;
+
+        let timed_out = scheduler.check_timeouts().await;
+        assert_eq!(timed_out, vec![task_id.clone()]);
+        let status = scheduler.get_task_status(&task_id).await.unwrap();
+        assert_eq!(status.status, TaskStatus::Timeout);
+        assert_eq!(status.error.as_deref(), Some("Task timed out"));
+        let result = rx.recv().await.unwrap();
+        assert_eq!(result.task_id, task_id);
+        assert!(!result.result.success);
+    }
+
+    #[tokio::test]
+    async fn test_late_result_does_not_override_terminal_status() {
+        let node_manager = Arc::new(NodeManager::new(8, 30));
+        let (scheduler, mut rx) = TaskScheduler::new(node_manager, 3, 300);
+        let task_id = TaskId::from_string("task-late-result");
+        let node_id = NodeId::from_string("node-1");
+        scheduler
+            .insert_running_task_for_test(RunningTask {
+                task_id: task_id.clone(),
+                command: Command::File(uhorse_protocol::FileCommand::Exists {
+                    path: "README.md".to_string(),
+                }),
+                context: TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                ),
+                priority: Priority::Normal,
+                node_id: node_id.clone(),
+                started_at: Utc::now(),
+                timeout_at: Utc::now() + chrono::Duration::seconds(30),
+                retry_count: 0,
+            })
+            .await;
+
+        scheduler.cancel_task(&task_id).await.unwrap();
+        let first_result = rx.recv().await.unwrap();
+        assert_eq!(first_result.task_id, task_id);
+
+        scheduler
+            .complete_task(
+                &task_id,
+                &node_id,
+                CommandResult::success(uhorse_protocol::CommandOutput::text("late success")),
+            )
+            .await
+            .unwrap();
+
+        let status = scheduler.get_task_status(&task_id).await.unwrap();
+        assert_eq!(status.status, TaskStatus::Cancelled);
+        assert_eq!(status.error.as_deref(), Some("Task cancelled"));
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv())
+            .await
+            .is_err());
     }
 }

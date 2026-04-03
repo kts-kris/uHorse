@@ -7,6 +7,7 @@ use crate::message_router::MessageRouter;
 use crate::node_manager::{NodeManager, NodeManagerStats};
 use crate::notification_binding::NotificationBindingManager;
 use crate::security_integration::SecurityManager;
+use crate::session_runtime::SessionRuntimeManager;
 use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskStatusInfo};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,8 @@ pub struct Hub {
     message_router: Arc<MessageRouter>,
     /// DingTalk 通知绑定管理器
     notification_bindings: Arc<NotificationBindingManager>,
+    /// Session 串行运行时
+    session_runtime: Arc<SessionRuntimeManager>,
     /// 安全管理器
     security_manager: Option<Arc<SecurityManager>>,
     /// 关闭信号
@@ -143,6 +146,7 @@ impl Hub {
             dingtalk_channel,
             notification_bindings.clone(),
         ));
+        let session_runtime = Arc::new(SessionRuntimeManager::new());
 
         let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -154,6 +158,7 @@ impl Hub {
                 task_scheduler,
                 message_router,
                 notification_bindings,
+                session_runtime,
                 security_manager,
                 shutdown_tx,
             },
@@ -359,6 +364,11 @@ impl Hub {
     /// 获取任务调度器（供内部使用）
     pub fn task_scheduler(&self) -> Arc<TaskScheduler> {
         self.task_scheduler.clone()
+    }
+
+    /// 获取 session 串行运行时。
+    pub fn session_runtime(&self) -> Arc<SessionRuntimeManager> {
+        self.session_runtime.clone()
     }
 
     /// 获取消息路由器（供内部使用）

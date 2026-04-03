@@ -492,6 +492,8 @@ async fn test_metrics_follow_websocket_and_http_paths() {
         axum::serve(listener, app).await.unwrap();
     });
 
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
     let http_client = reqwest::Client::new();
     let metrics_url = format!("http://127.0.0.1:{}/metrics", hub_config.port);
     let health_url = format!("http://127.0.0.1:{}/api/health", hub_config.port);
@@ -625,6 +627,22 @@ async fn test_local_hub_node_roundtrip_file_exists() {
         axum::serve(listener, app).await.unwrap();
     });
 
+    let http_client = reqwest::Client::new();
+    let health_url = format!("http://127.0.0.1:{}/api/health", hub_config.port);
+    let health_response = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(response) = http_client.get(&health_url).send().await {
+                if response.status() == StatusCode::OK {
+                    break response;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(health_response.status(), StatusCode::OK);
+
     let mut node = Node::new(NodeConfig {
         node_id: Some(node_id.clone()),
         name: "roundtrip-node".to_string(),
@@ -748,6 +766,22 @@ async fn test_local_hub_node_roundtrip_file_write() {
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
+
+    let http_client = reqwest::Client::new();
+    let health_url = format!("http://127.0.0.1:{}/api/health", hub_config.port);
+    let health_response = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(response) = http_client.get(&health_url).send().await {
+                if response.status() == StatusCode::OK {
+                    break response;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(health_response.status(), StatusCode::OK);
 
     let mut node = Node::new(NodeConfig {
         node_id: Some(node_id.clone()),

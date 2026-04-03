@@ -29,6 +29,10 @@ info "运行真实 roundtrip 回归..."
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture >/tmp/uhorse-quick-roundtrip.log 2>&1
 pass "roundtrip 回归通过"
 
+info "运行 Agent Browser Skill 安装自动化回归..."
+cargo test -p uhorse-hub test_agent_browser_natural_language_install_flow_returns_chinese_hint -- --nocapture >/tmp/uhorse-quick-skill-install.log 2>&1
+pass "Agent Browser Skill 安装回归通过"
+
 info "检查当前 workspace 是否可作为 Node 工作区..."
 cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-quick-node-check.log 2>&1
 pass "Node workspace 检查通过"
@@ -60,6 +64,7 @@ echo ""
 echo "快速测试完成。关键日志："
 echo "  /tmp/uhorse-quick-build.log"
 echo "  /tmp/uhorse-quick-roundtrip.log"
+echo "  /tmp/uhorse-quick-skill-install.log"
 echo "  /tmp/uhorse-quick-node-check.log"
 echo "  /tmp/uhorse-quick-docker.log"
 echo "  /tmp/uhorse-quick-compose.log"

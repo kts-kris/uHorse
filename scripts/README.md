@@ -1,6 +1,6 @@
 # uHorse 主线脚本说明
 
-本目录脚本围绕 **当前 `v4.1.3` Hub + Node 主线** 组织，不再默认验证旧单体 `uhorse`、旧 `/health/live`、旧 `/health/ready`。
+本目录脚本围绕 **当前 `v4.5.0` Hub + Node 主线** 组织，不再默认验证旧单体 `uhorse`、旧 `/health/live`、旧 `/health/ready`。
 
 ## 可用脚本
 
@@ -40,9 +40,16 @@
 
 - `uhorse-hub` / `uhorse-node` release 编译
 - 真实 `test_local_hub_node_roundtrip_file_exists`
+- `test_agent_browser_natural_language_install_flow_returns_chinese_hint`
 - `uhorse-node check --workspace .`
 - Hub Docker 构建
 - Docker 内 `GET /api/health` 与 `GET /api/nodes` smoke
+
+如果你只想单独跑 Agent Browser Skill 安装回归，可直接执行：
+
+```bash
+make skill-install-smoke
+```
 
 ### `test.sh`
 
@@ -65,7 +72,7 @@
 
 打包 Node Desktop 宿主与前端静态资源。
 
-这是当前 `v4.1.3` Node Desktop 交付链路里的 archive 打包入口：
+这是当前 `v4.5.0` Node Desktop 交付链路里的 archive 打包入口：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -122,7 +129,7 @@
 
 运行 Node Desktop 宿主 API + 静态资源 smoke。
 
-这是当前 `v4.1.3` archive 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
+这是当前 `v4.5.0` archive 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
 
 ```bash
 ./scripts/desktop-smoke.sh
@@ -172,6 +179,21 @@
 - Windows installer `.exe`
 
 当前仍不包含 `.app/.dmg`、签名、公证、`.msi` 或 Linux 原生安装器。
+
+### `skill-install-smoke`
+
+单独运行 Agent Browser Skill 安装自动化回归。
+
+```bash
+make skill-install-smoke
+```
+
+覆盖内容：
+
+- `test_agent_browser_natural_language_install_flow_returns_chinese_hint`
+- “帮我安装 Agent Browser 技能”自然语言安装
+- SkillHub 搜索与安装
+- 安装成功后的中文提示文案
 
 ## 推荐搭配
 

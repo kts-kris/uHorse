@@ -1,22 +1,20 @@
-## uHorse 4.4.0 发布
+## uHorse 4.5.0 发布
 
 **发布日期**：2026-04-02
 
 ### 本次发布重点
 
-`v4.4.0` 把上一轮已经完成实现并通过测试的在线安装 Skill 能力正式收口为 release 事实：Hub 现在可以在运行时目录在线安装 / refresh Skill，DingTalk 也提供了受控的文本安装入口，并且安装权限可以被限制到指定账号。
+`v4.5.0` 在上一轮已经完成实现并通过测试的在线安装 Skill 能力基础上，进一步把 **Agent Browser Skill 安装自动化回归**、**默认快速回归入口** 与 **中英文文档 / release 口径统一** 收口为正式发布事实。
 
-本次版本重点不是扩大 Skill 平台边界，而是把 **在线安装**、**运行时 refresh**、**DingTalk 白名单权限控制** 和 **文档 / release 口径统一** 一次性收口到当前 Hub-Node 主线中。
+本次版本重点不是扩大 Skill 平台边界，而是把 **默认回归入口**、**Agent Browser Skill 自然语言安装 smoke** 与 **README / INSTALL / TESTING / scripts / release 文档同步** 一次性收口到当前 Hub-Node 主线中。
 
 ### 主要变更
 
-- Hub 新增 `POST /api/v1/skills/install`，支持把 Skill 包安装到运行时目录并在安装后立即刷新 registry
-- Hub 新增 `POST /api/v1/skills/refresh`，支持不重启进程重载运行时 Skill
-- DingTalk 新增文本安装命令：`安装技能 <package> <download_url> [version]` / `install skill <package> <download_url> [version]`
-- 统一配置新增 `[[channels.dingtalk.skill_installers]]`，可按 `user_id` / `staff_id` 并可选叠加 `corp_id` 控制 DingTalk 安装入口
-- DingTalk 安装入口会在下载前先校验授权，未授权账号会被直接拒绝，不再误入后续下载 / 安装路径
-- 在线安装当前只接受 `source = "skillhub"` 的 Skill 包，并拒绝覆盖已存在的 Skill 目录
-- README / INSTALL / CHANNELS / CONFIG / SKILLS / API / CHANGELOG 已同步更新到 `v4.4.0` 口径
+- 新增 `make skill-install-smoke`，用于单独运行 Agent Browser Skill 安装 smoke 回归
+- `make test-quick` 现在默认包含 Agent Browser Skill 安装自动化回归
+- `uhorse-hub` 新增 `test_agent_browser_natural_language_install_flow_returns_chinese_hint`，覆盖“帮我安装 Agent Browser 技能”的自然语言安装、SkillHub 安装与中文提示
+- README / INSTALL / TESTING / CHANNELS / CONFIG / scripts / CHANGELOG 已同步更新到 `v4.5.0` 口径，并补齐默认回归入口说明
+- 在线安装、运行时 refresh、DingTalk 文本安装入口与 `[[channels.dingtalk.skill_installers]]` 白名单控制继续保留为当前主线事实
 
 ### 当前主交付物
 
@@ -29,7 +27,7 @@
 
 ### 不包含内容
 
-`v4.4.0` 明确 **不包含**：
+`v4.5.0` 明确 **不包含**：
 
 - DingTalk 文本入口的 Skill refresh 命令；当前 refresh 只开放 HTTP API
 - 对非 `skillhub` 来源的在线安装支持

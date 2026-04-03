@@ -21,6 +21,7 @@ use std::net::IpAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tar::Archive;
+use zip::ZipArchive;
 use tokio::sync::RwLock;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
@@ -43,6 +44,7 @@ use uhorse_security::{ApprovalRequest, DevicePairingManager, PairingRequest, Pai
 
 use crate::{
     node_manager::workspace_matches_hint,
+    session_runtime::{TaskContinuationBinding, TranscriptEventKind},
     task_scheduler::{CompletedTask, TaskResult},
     Hub, HubStats,
 };
@@ -70,13 +72,13 @@ pub struct DingTalkReplyRoute {
 const DINGTALK_PROCESSING_ACK_TEXT: &str = "收到啦，正在处理，请稍等～";
 const BEARER_AUTH_PREFIX: &str = "Bearer ";
 const DEFAULT_SKILLHUB_SEARCH_URL: &str =
-    "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/search";
+    "https://api.skillhub.tencent.com/api/skills";
 const SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE: &str =
-    "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug={slug}";
+    "https://api.skillhub.tencent.com/api/v1/download?slug={slug}";
 const SKILLHUB_HTTP_TIMEOUT_SECS: u64 = 15;
 const SKILLHUB_OFFICIAL_HOSTS: [&str; 2] = [
     "skillhub-1388575217.cos.ap-guangzhou.myqcloud.com",
-    "lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com",
+    "api.skillhub.tencent.com",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +115,35 @@ enum AgentDecision {
     ExecuteSkill {
         skill_name: String,
         input: String,
+    },
+    ListInstalledSkills,
+    QuerySkill {
+        skill_name: String,
+    },
+    InstallSkill {
+        query: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum PlannedTurnStep {
+    Finalize {
+        text: String,
+    },
+    SubmitTask {
+        command: Command,
+        workspace_path: Option<String>,
+    },
+    ExecuteSkill {
+        skill_name: String,
+        input: String,
+    },
+    ListInstalledSkills,
+    QuerySkill {
+        skill_name: String,
+    },
+    InstallSkill {
+        query: String,
     },
 }
 
@@ -949,50 +980,252 @@ async fn fetch_skillhub_archive(
     request: &SkillInstallRequest,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let response = client.get(&request.download_url).send().await?;
-    if !response.status().is_success() {
-        return Err(format!("Skill 下载失败：HTTP {}", response.status()).into());
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Skill 下载失败：HTTP {}", status).into());
     }
-    Ok(response.bytes().await?.to_vec())
+    response.bytes().await.map(|bytes| bytes.to_vec()).map_err(|error| {
+        format!(
+            "Skill 下载响应解析失败：url={} status={} error={}",
+            request.download_url, status, error
+        )
+        .into()
+    })
 }
 
 async fn unpack_skill_archive(
     bytes: &[u8],
     destination_root: &FsPath,
+    package_hint: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let destination_root = destination_root.to_path_buf();
     let bytes = bytes.to_vec();
+    let package_hint = package_hint.to_string();
     tokio::task::spawn_blocking(
         move || -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            fn collect_skill_dir(root: &FsPath) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+                let mut skill_dirs = Vec::new();
+                for entry in std::fs::read_dir(root)? {
+                    let entry = entry?;
+                    if entry.file_type()?.is_dir() {
+                        let skill_md = entry.path().join("SKILL.md");
+                        if skill_md.exists() {
+                            skill_dirs.push(entry.path());
+                        }
+                    }
+                }
+
+                if skill_dirs.len() != 1 {
+                    return Err("Skill 安装包必须且只能包含一个 Skill 目录".into());
+                }
+
+                let skill_dir = skill_dirs.remove(0);
+                Ok(skill_dir
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| "Skill 目录名称非法".to_string())?
+                    .to_string())
+            }
+
             std::fs::create_dir_all(&destination_root)?;
+
+            if bytes.starts_with(b"PK\x03\x04") {
+                let skill_root = destination_root.join(&package_hint);
+                std::fs::create_dir_all(&skill_root)?;
+                let reader = Cursor::new(bytes);
+                let mut archive = ZipArchive::new(reader)?;
+                for index in 0..archive.len() {
+                    let mut file = archive.by_index(index)?;
+                    let Some(path) = file.enclosed_name().map(|path| path.to_path_buf()) else {
+                        continue;
+                    };
+                    let output_path = skill_root.join(path);
+                    if file.is_dir() {
+                        std::fs::create_dir_all(&output_path)?;
+                        continue;
+                    }
+                    if let Some(parent) = output_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    let mut output = std::fs::File::create(&output_path)?;
+                    std::io::copy(&mut file, &mut output)?;
+                }
+
+                if !skill_root.join("SKILL.md").exists() {
+                    return Err("Skill 安装包缺少 SKILL.md".into());
+                }
+                return Ok(package_hint);
+            }
+
+            if !bytes.starts_with(&[0x1f, 0x8b]) {
+                return Err("Skill 安装包格式非法：既不是 zip，也不是 tar.gz".into());
+            }
+
             let decoder = GzDecoder::new(Cursor::new(bytes));
             let mut archive = Archive::new(decoder);
             archive.unpack(&destination_root)?;
-
-            let mut skill_dirs = Vec::new();
-            for entry in std::fs::read_dir(&destination_root)? {
-                let entry = entry?;
-                if entry.file_type()?.is_dir() {
-                    let skill_md = entry.path().join("SKILL.md");
-                    if skill_md.exists() {
-                        skill_dirs.push(entry.path());
-                    }
-                }
-            }
-
-            if skill_dirs.len() != 1 {
-                return Err("Skill 安装包必须且只能包含一个 Skill 目录".into());
-            }
-
-            let skill_dir = skill_dirs.remove(0);
-            let skill_name = skill_dir
-                .file_name()
-                .and_then(|value| value.to_str())
-                .ok_or_else(|| "Skill 目录名称非法".to_string())?
-                .to_string();
-            Ok(skill_name)
+            collect_skill_dir(&destination_root)
         },
     )
     .await?
+}
+
+fn build_skill_install_dir(runtime_root: &FsPath, result: &SkillInstallResponse) -> PathBuf {
+    match result.target_layer.as_str() {
+        "user" => runtime_root
+            .join("users")
+            .join(result.target_scope.as_deref().unwrap_or_default())
+            .join("skills")
+            .join(&result.skill_name),
+        _ => runtime_root.join("skills").join(&result.skill_name),
+    }
+}
+
+fn extract_skill_manifest_description(skill_md: &str) -> Option<String> {
+    let frontmatter = skill_md.splitn(3, "---").nth(1)?.trim();
+    frontmatter
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("description:"))
+        .map(|value| value.trim().trim_matches('"').trim_matches('\'').trim_end_matches('。').to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn build_skill_install_example_in_chinese(
+    skill_name: &str,
+    description: &str,
+    usage_hint: Option<&str>,
+) -> String {
+    let lower_name = skill_name.to_ascii_lowercase();
+    let lower_description = description.to_ascii_lowercase();
+    let lower_usage_hint = usage_hint.unwrap_or_default().to_ascii_lowercase();
+    let browser_related = ["browser", "web", "网页", "表单", "截图", "自动化"]
+        .iter()
+        .any(|keyword| {
+            lower_name.contains(keyword)
+                || lower_description.contains(keyword)
+                || lower_usage_hint.contains(keyword)
+        });
+
+    if browser_related {
+        "请打开目标网页，帮我完成点击、输入或截图，并把结果发给我".to_string()
+    } else {
+        format!("请使用 {} 帮我处理这个任务", skill_name)
+    }
+}
+
+fn build_skill_install_summary_messages(skill_name: &str, skill_md: &str) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage::system(
+            "你是 uHorse Hub 的 Skill 安装提示生成器。请基于提供的 SKILL.md 内容，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。JSON 结构必须是 {\"description_zh\":\"...\",\"example_zh\":\"...\"}。要求：1）两个字段都必须是简体中文；2）description_zh 用一句话概括 Skill 能力；3）example_zh 必须是用户可以直接发送给机器人的自然语言请求示例，不能是命令、不能夹杂英文、不能用反引号；4）如果是浏览器/网页自动化相关 Skill，示例应贴近打开网页、点击、输入、截图、抓取信息等场景；5）不要照抄英文原文。".to_string(),
+        ),
+        ChatMessage::user(format!(
+            "skill_name: {}\nSKILL.md:\n{}\n请输出单个 JSON 对象。",
+            skill_name, skill_md
+        )),
+    ]
+}
+
+#[derive(Debug, Deserialize)]
+struct SkillInstallHintSummary {
+    description_zh: String,
+    example_zh: String,
+}
+
+async fn summarize_skill_install_hint_in_chinese(
+    state: &Arc<WebState>,
+    skill_name: &str,
+    skill_md: &str,
+) -> Option<SkillInstallHintSummary> {
+    let llm_client = state.llm_client.as_ref()?;
+    let response = llm_client
+        .chat_completion(build_skill_install_summary_messages(skill_name, skill_md))
+        .await
+        .ok()?;
+    let summary: SkillInstallHintSummary = serde_json::from_str(&response).ok()?;
+    let description_zh = summary.description_zh.trim().trim_end_matches('。').to_string();
+    let example_zh = summary.example_zh.trim().trim_end_matches('。').to_string();
+    if description_zh.is_empty() || example_zh.is_empty() {
+        return None;
+    }
+    Some(SkillInstallHintSummary {
+        description_zh,
+        example_zh,
+    })
+}
+
+async fn build_skill_install_trigger_hint(
+    state: &Arc<WebState>,
+    result: &SkillInstallResponse,
+) -> String {
+    let exact_entry = {
+        let skills = state.agent_runtime.skills.read().await;
+        skills
+            .get_entry_by_source(
+                &result.skill_name,
+                &result.target_layer,
+                result.target_scope.as_deref(),
+            )
+            .or_else(|| skills.get_any_entry(&result.skill_name))
+    };
+    let manifest_description = exact_entry
+        .as_ref()
+        .map(|entry| entry.skill.manifest.description.clone());
+    let skill_md_path = build_skill_install_dir(&state.agent_runtime.runtime_root, result).join("SKILL.md");
+    let skill_md = tokio::fs::read_to_string(&skill_md_path).await.ok();
+    let description = skill_md
+        .as_deref()
+        .and_then(extract_skill_manifest_description)
+        .or(manifest_description)
+        .unwrap_or_else(|| "帮助你完成特定任务".to_string());
+    let usage_hint = skill_md.as_deref().and_then(extract_skill_usage_hint);
+
+    let (description_zh, chinese_example) = match skill_md.as_deref() {
+        Some(skill_md) => summarize_skill_install_hint_in_chinese(state, &result.skill_name, skill_md)
+            .await
+            .map(|summary| (summary.description_zh, summary.example_zh))
+            .unwrap_or_else(|| {
+                (
+                    description.clone(),
+                    build_skill_install_example_in_chinese(
+                        &result.skill_name,
+                        &description,
+                        usage_hint.as_deref(),
+                    ),
+                )
+            }),
+        None => (
+            description.clone(),
+            build_skill_install_example_in_chinese(
+                &result.skill_name,
+                &description,
+                usage_hint.as_deref(),
+            ),
+        ),
+    };
+
+    format!(
+        "这个 Skill 主要用于：{}。你现在可以直接用自然语言描述需求，例如：{}。",
+        description_zh, chinese_example
+    )
+}
+
+fn extract_skill_usage_hint(skill_md: &str) -> Option<String> {
+    let body = skill_md.splitn(3, "---").nth(2)?.trim();
+    for line in body.lines() {
+        let text = line.trim();
+        if text.is_empty() || text.starts_with('#') || text.starts_with("```") {
+            continue;
+        }
+        if text.starts_with('-') || text.starts_with('*') {
+            let bullet = text[1..].trim();
+            if !bullet.is_empty() {
+                return Some(bullet.trim_end_matches('。').to_string());
+            }
+            continue;
+        }
+        return Some(text.trim_end_matches('。').to_string());
+    }
+    None
 }
 
 async fn install_skill_from_request(
@@ -1028,7 +1261,7 @@ async fn install_skill_from_request(
     let temp_dir = tempfile::tempdir()?;
     let client = build_skillhub_http_client()?;
     let archive_bytes = fetch_skillhub_archive(&client, &request).await?;
-    let skill_name = unpack_skill_archive(&archive_bytes, temp_dir.path()).await?;
+    let skill_name = unpack_skill_archive(&archive_bytes, temp_dir.path(), &request.package).await?;
     let source_dir = temp_dir.path().join(&skill_name);
     let destination_dir = target_root.join(&skill_name);
     if destination_dir.exists() {
@@ -1764,6 +1997,21 @@ async fn collect_agent_planning_context(
         ));
     }
 
+    if let Some(turn_state) = state
+        .hub
+        .session_runtime()
+        .turn_state(&session_key.as_str())
+        .await
+    {
+        if let Some(summary) = turn_state.compacted_summary.as_deref() {
+            sections.push(format!(
+                "--- Compacted Turn Summary ---\n{}\n\ncovered_events: {}",
+                summary,
+                turn_state.pruned_event_count
+            ));
+        }
+    }
+
     sections.join("\n\n")
 }
 
@@ -2260,6 +2508,13 @@ async fn read_session_messages(
     state: &Arc<WebState>,
     session_id: &str,
 ) -> Result<Vec<SessionMessageRecord>, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(transcript) = state.hub.session_runtime().transcript(session_id).await {
+        let projected = project_transcript_messages(&transcript);
+        if !projected.is_empty() {
+            return Ok(projected);
+        }
+    }
+
     let context = state
         .agent_runtime
         .memory_store
@@ -2308,6 +2563,61 @@ fn parse_session_messages(content: &str) -> Vec<SessionMessageRecord> {
             })
         })
         .collect()
+}
+
+fn project_transcript_messages(
+    transcript: &crate::session_runtime::SessionTranscript,
+) -> Vec<SessionMessageRecord> {
+    let mut current_user: Option<(String, String)> = None;
+    let mut assistant_events: Vec<String> = Vec::new();
+    let mut records = Vec::new();
+
+    for event in &transcript.events {
+        match event.kind {
+            TranscriptEventKind::UserMessage => {
+                current_user = Some((event.created_at.to_rfc3339(), event.content.clone()));
+                assistant_events.clear();
+            }
+            TranscriptEventKind::AssistantFinal => {
+                if let Some((timestamp, user_message)) = current_user.take() {
+                    let assistant_message = if assistant_events.is_empty() {
+                        event.content.clone()
+                    } else {
+                        format!("{}\n\n{}", assistant_events.join("\n"), event.content)
+                    };
+                    records.push(SessionMessageRecord {
+                        timestamp,
+                        user_message,
+                        assistant_message,
+                    });
+                }
+                assistant_events.clear();
+            }
+            TranscriptEventKind::AssistantStep => {
+                assistant_events.push(format!("[assistant_step] {}", event.content));
+            }
+            TranscriptEventKind::ToolCallPlanned => {
+                assistant_events.push(format!("[tool_call_planned] {}", event.content));
+            }
+            TranscriptEventKind::ToolCallDispatched => {
+                assistant_events.push(format!("[tool_call_dispatched] {}", event.content));
+            }
+            TranscriptEventKind::ToolResultObserved => {
+                assistant_events.push(format!("[tool_result_observed] {}", event.content));
+            }
+            TranscriptEventKind::TurnCompacted => {
+                assistant_events.push(format!("[turn_compacted] {}", event.content));
+            }
+            TranscriptEventKind::TurnFailed => {
+                assistant_events.push(format!("[turn_failed] {}", event.content));
+            }
+            TranscriptEventKind::TurnCancelled => {
+                assistant_events.push(format!("[turn_cancelled] {}", event.content));
+            }
+        }
+    }
+
+    records
 }
 
 /// Web 服务器配置
@@ -2526,13 +2836,19 @@ async fn dingtalk_webhook(
 
     match channel.handle_event_with_metadata(&event).await {
         Ok(Some(inbound)) => {
-            if let Err(error) = handle_dingtalk_inbound(&state, inbound).await {
+            if let Err(error) = handle_dingtalk_inbound(&state, inbound.clone()).await {
                 error!("Failed to handle DingTalk inbound message: {}", error);
+                if let Err(reply_error) = reply_dingtalk_error(&state, &inbound, &error.to_string()).await {
+                    error!(
+                        "Failed to reply DingTalk inbound error for conversation {}: {}",
+                        inbound.conversation_id,
+                        reply_error
+                    );
+                }
                 return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::OK,
                     Json(serde_json::json!({
-                        "status": "error",
-                        "message": error.to_string()
+                        "status": "ok"
                     })),
                 );
             }
@@ -2573,9 +2889,6 @@ pub async fn handle_dingtalk_inbound(
     if try_handle_dingtalk_pairing_command(state, &inbound).await? {
         return Ok(());
     }
-    if try_handle_dingtalk_skill_install_command(state, &inbound).await? {
-        return Ok(());
-    }
 
     submit_dingtalk_task(state, inbound).await
 }
@@ -2604,12 +2917,88 @@ pub async fn submit_dingtalk_task(
         inbound.sender_staff_id.as_deref(),
         inbound.sender_corp_id.as_deref(),
     );
+    let session_key_string = session_key.as_str().to_string();
+    let state = Arc::clone(state);
+
+    state
+        .hub
+        .session_runtime()
+        .run_serialized(&session_key_string, async move {
+            process_dingtalk_task_serialized(&state, inbound, session_key).await
+        })
+        .await
+}
+
+async fn process_dingtalk_task_serialized(
+    state: &Arc<WebState>,
+    inbound: DingTalkInboundMessage,
+    session_key: SessionKey,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let text = match &inbound.message.content {
+        MessageContent::Text(text) => text.trim(),
+        _ => "",
+    };
     let agent_id = resolve_agent_id_for_session(state, &session_key).await;
     let route = reply_route_from_inbound(&inbound);
-    let decision = decide_dingtalk_action(state, text, &agent_id, &session_key).await?;
+    let turn_id = state
+        .hub
+        .session_runtime()
+        .start_turn(&session_key.as_str(), text.to_string())
+        .await;
+    let step = plan_next_dingtalk_step(state, text, &agent_id, &session_key).await?;
+    state
+        .hub
+        .session_runtime()
+        .append_transcript_event(
+            &session_key.as_str(),
+            TranscriptEventKind::AssistantStep,
+            format!("{:?}", step),
+        )
+        .await;
+    let turn_state = state
+        .hub
+        .session_runtime()
+        .increment_step_count(&session_key.as_str())
+        .await
+        .ok_or_else(|| "session turn is missing before step execution".to_string())?;
+    if turn_state.step_count > turn_state.max_steps {
+        let reply_text = "当前这轮操作步骤过多，我先到这里，并基于已有结果收口。".to_string();
+        state
+            .hub
+            .session_runtime()
+            .append_transcript_event(
+                &session_key.as_str(),
+                TranscriptEventKind::AssistantFinal,
+                reply_text.clone(),
+            )
+            .await;
+        state
+            .hub
+            .session_runtime()
+            .complete_turn(&session_key.as_str(), None)
+            .await;
+        if let Some(channel) = state.dingtalk_channel.as_ref() {
+            send_dingtalk_reply(channel, &route, &reply_text).await?;
+        }
+        return Ok(());
+    }
 
-    match decision {
-        AgentDecision::DirectReply { text: reply_text } => {
+    match step {
+        PlannedTurnStep::Finalize { text: reply_text } => {
+            state
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    &session_key.as_str(),
+                    TranscriptEventKind::AssistantFinal,
+                    reply_text.clone(),
+                )
+                .await;
+            state
+                .hub
+                .session_runtime()
+                .complete_turn(&session_key.as_str(), None)
+                .await;
             persist_direct_reply_memory(state, &session_key, &agent_id, text, &reply_text).await;
             persist_session_state(
                 state,
@@ -2634,33 +3023,32 @@ pub async fn submit_dingtalk_task(
             );
             Ok(())
         }
-        AgentDecision::ExecuteSkill { skill_name, input } => {
-            let reply_text = execute_local_skill(state, &session_key, &skill_name, &input).await?;
-            persist_direct_reply_memory(state, &session_key, &agent_id, text, &reply_text).await;
-            persist_session_state(
+        PlannedTurnStep::ExecuteSkill { .. }
+        | PlannedTurnStep::ListInstalledSkills
+        | PlannedTurnStep::QuerySkill { .. }
+        | PlannedTurnStep::InstallSkill { .. } => {
+            execute_local_turn_step(
                 state,
+                &route,
                 &session_key,
                 &agent_id,
-                &inbound.conversation_id,
+                text,
+                &step,
                 inbound.sender_user_id.as_deref(),
                 inbound.sender_staff_id.as_deref(),
-                None,
-                None,
-                None,
+                inbound.sender_corp_id.as_deref(),
+                &inbound.conversation_id,
             )
-            .await;
-            if let Some(channel) = state.dingtalk_channel.as_ref() {
-                send_dingtalk_reply(channel, &route, &reply_text).await?;
-            } else {
-                warn!("Skip DingTalk skill reply because channel is unavailable");
+            .await?;
+            if let PlannedTurnStep::ExecuteSkill { skill_name, .. } = &step {
+                info!(
+                    "Executed local skill {} for session {} via agent {}",
+                    skill_name, session_key, agent_id
+                );
             }
-            info!(
-                "Executed local skill {} for session {} via agent {}",
-                skill_name, session_key, agent_id
-            );
             Ok(())
         }
-        AgentDecision::ExecuteCommand {
+        PlannedTurnStep::SubmitTask {
             command,
             workspace_path,
         } => {
@@ -2745,6 +3133,21 @@ pub async fn submit_dingtalk_task(
                 }
             }
 
+            let tool_call_id = state
+                .hub
+                .session_runtime()
+                .begin_tool_call(&session_key.as_str(), "hub_task")
+                .await
+                .ok_or_else(|| "session turn is missing before task submission".to_string())?;
+            state
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    &session_key.as_str(),
+                    TranscriptEventKind::ToolCallPlanned,
+                    format!("{}:{}", tool_call_id, "hub_task"),
+                )
+                .await;
             let task_id = state
                 .hub
                 .submit_task(
@@ -2756,6 +3159,20 @@ pub async fn submit_dingtalk_task(
                     Some(workspace_hint),
                 )
                 .await?;
+            state
+                .hub
+                .session_runtime()
+                .bind_task_to_turn(
+                    task_id.clone(),
+                    TaskContinuationBinding {
+                        session_key: session_key.as_str().to_string(),
+                        turn_id: turn_id.clone(),
+                        tool_call_id,
+                        agent_id: agent_id.clone(),
+                        route: route.clone(),
+                    },
+                )
+                .await;
 
             persist_session_state(
                 state,
@@ -2788,6 +3205,158 @@ pub async fn submit_dingtalk_task(
 
             Ok(())
         }
+    }
+}
+
+async fn execute_local_turn_step(
+    state: &Arc<WebState>,
+    route: &DingTalkReplyRoute,
+    session_key: &SessionKey,
+    agent_id: &str,
+    user_text: &str,
+    step: &PlannedTurnStep,
+    sender_user_id: Option<&str>,
+    sender_staff_id: Option<&str>,
+    sender_corp_id: Option<&str>,
+    conversation_id: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let reply_text = match step {
+        PlannedTurnStep::ExecuteSkill { skill_name, input } => {
+            execute_local_skill(state, session_key, skill_name, input).await?
+        }
+        PlannedTurnStep::ListInstalledSkills => {
+            let mut skills: Vec<_> = state
+                .agent_runtime
+                .skills
+                .read()
+                .await
+                .list_all_entries()
+                .into_iter()
+                .map(skill_to_summary)
+                .collect();
+            skills.sort_by(|left, right| left.name.cmp(&right.name));
+            build_installed_skills_reply(&skills)
+        }
+        PlannedTurnStep::QuerySkill { skill_name } => {
+            let skill_entry = state.agent_runtime.skills.read().await.get_any_entry(skill_name);
+            if let Some(entry) = skill_entry {
+                let detail = skill_to_detail(entry);
+                format!(
+                    "Skill {}：{}。当前版本：{}。{}",
+                    detail.name,
+                    detail.description,
+                    detail.version,
+                    if detail.enabled { "当前已启用" } else { "当前未启用" }
+                )
+            } else {
+                format!("没有找到名为 {} 的 Skill。", skill_name)
+            }
+        }
+        PlannedTurnStep::InstallSkill { query } => {
+            let intent = resolve_dingtalk_skill_install_intent(state.as_ref(), query).await?;
+            let actor = SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: sender_user_id.map(str::to_string),
+                sender_staff_id: sender_staff_id.map(str::to_string),
+                sender_corp_id: sender_corp_id.map(str::to_string),
+            };
+            match intent {
+                Some(DingtalkSkillInstallIntent::ExplicitCommand(request)) => {
+                    let requested_name = request.package.clone();
+                    match install_skill_from_request(state, actor, request).await {
+                        Ok(result) => {
+                            let trigger_hint = build_skill_install_trigger_hint(state, &result).await;
+                            format!("Skill {} 安装成功。{}", result.skill_name, trigger_hint)
+                        }
+                        Err(error) => format!("Skill {} 安装失败：{}", requested_name, error),
+                    }
+                }
+                Some(DingtalkSkillInstallIntent::NaturalLanguage(entry)) => {
+                    let requested_name = entry.name.clone();
+                    let request = SkillInstallRequest {
+                        source_type: SkillInstallSourceType::Skillhub,
+                        package: entry.slug.clone(),
+                        version: entry.version,
+                        download_url: build_skillhub_download_url(state.as_ref(), &entry.slug),
+                        target_layer: SkillInstallTargetLayer::Global,
+                        target_scope: None,
+                    };
+                    match install_skill_from_request(state, actor, request).await {
+                        Ok(result) => {
+                            let trigger_hint = build_skill_install_trigger_hint(state, &result).await;
+                            format!("Skill {} 安装成功。{}", result.skill_name, trigger_hint)
+                        }
+                        Err(error) => format!("Skill {} 安装失败：{}", requested_name, error),
+                    }
+                }
+                Some(DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query)) => {
+                    format!("没有在 SkillHub 中找到与“{}”匹配的 Skill。", query)
+                }
+                None => "我理解到你在说 Skill，但没有识别出明确的安装目标。请直接说出要安装的 Skill 名称。".to_string(),
+            }
+        }
+        _ => return Err("unsupported local turn step".into()),
+    };
+
+    state
+        .hub
+        .session_runtime()
+        .append_transcript_event(
+            &session_key.as_str(),
+            TranscriptEventKind::AssistantFinal,
+            reply_text.clone(),
+        )
+        .await;
+    state
+        .hub
+        .session_runtime()
+        .complete_turn(&session_key.as_str(), None)
+        .await;
+    persist_direct_reply_memory(state, session_key, agent_id, user_text, &reply_text).await;
+    persist_session_state(
+        state,
+        session_key,
+        agent_id,
+        conversation_id,
+        sender_user_id,
+        sender_staff_id,
+        None,
+        None,
+        None,
+    )
+    .await;
+    if let Some(channel) = state.dingtalk_channel.as_ref() {
+        send_dingtalk_reply(channel, route, &reply_text).await?;
+    }
+    Ok(reply_text)
+}
+
+async fn plan_next_dingtalk_step(
+    state: &Arc<WebState>,
+    text: &str,
+    agent_id: &str,
+    session_key: &SessionKey,
+) -> Result<PlannedTurnStep, Box<dyn std::error::Error + Send + Sync>> {
+    let decision = decide_dingtalk_action(state, text, agent_id, session_key).await?;
+    Ok(planned_step_from_agent_decision(decision))
+}
+
+fn planned_step_from_agent_decision(decision: AgentDecision) -> PlannedTurnStep {
+    match decision {
+        AgentDecision::DirectReply { text } => PlannedTurnStep::Finalize { text },
+        AgentDecision::ExecuteCommand {
+            command,
+            workspace_path,
+        } => PlannedTurnStep::SubmitTask {
+            command,
+            workspace_path,
+        },
+        AgentDecision::ExecuteSkill { skill_name, input } => {
+            PlannedTurnStep::ExecuteSkill { skill_name, input }
+        }
+        AgentDecision::ListInstalledSkills => PlannedTurnStep::ListInstalledSkills,
+        AgentDecision::QuerySkill { skill_name } => PlannedTurnStep::QuerySkill { skill_name },
+        AgentDecision::InstallSkill { query } => PlannedTurnStep::InstallSkill { query },
     }
 }
 
@@ -2995,7 +3564,7 @@ fn build_agent_decision_messages(
         ChatMessage::system(agent_system_prompt.to_string()),
         ChatMessage::system(
             format!(
-                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许三种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\"}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}。优先 direct_reply；只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。用户只是要在宿主机打开网页时使用 open_system；只有需要继续读取网页内容、点击或抓取文本时才使用 navigate / wait_for / get_text / close。shell 命令请优先输出最简合法 JSON，例如 {{\"type\":\"shell\",\"command\":\"pwd\"}} 或 {{\"type\":\"shell\",\"command\":\"git\",\"args\":[\"status\"]}}。若返回 execute_command，workspace_path 必须填写目标 Node workspace 根路径；路径必须限制在该 workspace 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供决策参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
+                "你是 uHorse Hub 的 Agent 决策器。你必须根据用户输入与上下文，只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。允许六种结构：1）直接回复：{{\"type\":\"direct_reply\",\"text\":\"...\"}}；2）需要继续规划命令：{{\"type\":\"execute_command\",\"command\": <uhorse_protocol::Command JSON>, \"workspace_path\": \"...\"}}；3）执行 Hub 本地技能：{{\"type\":\"execute_skill\",\"skill_name\":\"...\",\"input\":\"...\"}}；4）列出已安装技能：{{\"type\":\"list_installed_skills\"}}；5）查询某个技能：{{\"type\":\"query_skill\",\"skill_name\":\"...\"}}；6）安装技能：{{\"type\":\"install_skill\",\"query\":\"...\"}}。优先做正确意图理解，不要因为句子里出现“技能”“安装”等字样就误判。像“帮我列出已经安装的技能”必须返回 list_installed_skills；像“帮我安装 Browser Use 技能”才返回 install_skill；像“Browser Use 技能怎么用”优先返回 query_skill 或 direct_reply。只有确实需要 Node 执行文件、shell 或浏览器操作时才返回 execute_command。只有当请求明确适合本地技能时才返回 execute_skill。可用技能列表：{}。禁止生成 code/database/api 命令。browser 命令只允许访问安全的 http/https 公网页面，不允许 localhost、127.0.0.1、私网 IP、file:// 等本机或内网目标。用户只是要在宿主机打开网页时使用 open_system；只有需要继续读取网页内容、点击或抓取文本时才使用 navigate / wait_for / get_text / close。shell 命令请优先输出最简合法 JSON，例如 {{\"type\":\"shell\",\"command\":\"pwd\"}} 或 {{\"type\":\"shell\",\"command\":\"git\",\"args\":[\"status\"]}}。若返回 execute_command，workspace_path 必须填写目标 Node workspace 根路径；路径必须限制在该 workspace 内，不允许绝对路径越界，不允许使用 ..。若当前存在多个在线 workspace，workspace_path 必须显式填写，并且只能从提供的在线 workspace 列表中选择。下方的 Agent Workspace Context 和 Session Memory Context 仅供决策参考，不等于 Node 实际工作目录。禁止危险 git：git reset --hard、git clean -fd、git checkout --、git restore --source、git push --force、git push -f。",
                 if skill_names.is_empty() {
                     "（无）".to_string()
                 } else {
@@ -3256,31 +3825,346 @@ pub async fn reply_task_result(
     state: Arc<WebState>,
     task_result: TaskResult,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let completed_task = state.hub.get_completed_task(&task_result.task_id).await;
-    let reply_text = build_task_result_reply_text(&state, &task_result).await;
+    let Some(binding) = state
+        .hub
+        .session_runtime()
+        .take_task_binding(&task_result.task_id)
+        .await
+    else {
+        let route = {
+            let mut routes = state.dingtalk_routes.write().await;
+            routes.remove(&task_result.task_id)
+        };
+        if route.is_none() {
+            return Ok(());
+        }
 
-    if let Some(completed_task) = completed_task.as_ref() {
-        persist_task_result_memory(&state, completed_task, &reply_text).await;
-    }
+        let completed_task = state.hub.get_completed_task(&task_result.task_id).await;
+        let reply_text = build_task_result_reply_text(&state, &task_result).await;
 
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
-        warn!("Skip DingTalk reply because channel is unavailable");
+        if let Some(completed_task) = completed_task.as_ref() {
+            persist_task_result_memory(&state, completed_task, &reply_text).await;
+        }
+
+        let Some(channel) = state.dingtalk_channel.as_ref() else {
+            warn!("Skip DingTalk reply because channel is unavailable");
+            return Ok(());
+        };
+        send_dingtalk_reply(channel, route.as_ref().unwrap(), &reply_text).await?;
+        info!("Replied DingTalk task result for {}", task_result.task_id);
         return Ok(());
     };
 
-    let route = {
-        let mut routes = state.dingtalk_routes.write().await;
-        routes.remove(&task_result.task_id)
-    };
+    let session_key = binding.session_key.clone();
+    let lane_session_key = session_key.clone();
+    let state_for_actor = Arc::clone(&state);
+    state
+        .hub
+        .session_runtime()
+        .run_serialized(&lane_session_key, async move {
+            let Some(completed_task) = state_for_actor.hub.get_completed_task(&task_result.task_id).await else {
+                let reply_text = build_task_result_reply_text(&state_for_actor, &task_result).await;
+                let Some(channel) = state_for_actor.dingtalk_channel.as_ref() else {
+                    warn!("Skip DingTalk reply because channel is unavailable");
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .fail_turn(&session_key, Some(&task_result.task_id))
+                        .await;
+                    return Ok(());
+                };
+                send_dingtalk_reply(channel, &binding.route, &reply_text).await?;
+                state_for_actor
+                    .hub
+                    .session_runtime()
+                    .complete_turn(&session_key, Some(&task_result.task_id))
+                    .await;
+                return Ok(());
+            };
 
-    let Some(route) = route else {
-        return Ok(());
-    };
+            state_for_actor
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    &session_key,
+                    TranscriptEventKind::ToolResultObserved,
+                    serde_json::to_string(&completed_task.result)
+                        .unwrap_or_else(|_| "tool result".to_string()),
+                )
+                .await;
 
-    send_dingtalk_reply(channel, &route, &reply_text).await?;
+            if state_for_actor
+                .hub
+                .session_runtime()
+                .turn_state(&session_key)
+                .await
+                .map(|turn| turn.cancel_requested)
+                .unwrap_or(false)
+            {
+                state_for_actor
+                    .hub
+                    .session_runtime()
+                    .prune_completed_turn_transcript(&session_key, 6)
+                    .await;
+                info!(
+                    "Skip continuation for {} because session turn was cancelled",
+                    completed_task.task_id
+                );
+                return Ok(());
+            }
 
-    info!("Replied DingTalk task result for {}", task_result.task_id);
-    Ok(())
+            let step = match continue_task_result(&state_for_actor, &binding, &completed_task).await {
+                Ok(step) => {
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .reset_planner_retry(&session_key)
+                        .await;
+                    step
+                }
+                Err(error) => {
+                    warn!(
+                        "Failed to continue task result with LLM for {}: {}",
+                        completed_task.task_id, error
+                    );
+                    let retry_state = state_for_actor
+                        .hub
+                        .session_runtime()
+                        .increment_planner_retry(&session_key)
+                        .await;
+                    if let Some(retry_state) = retry_state {
+                        if retry_state.planner_retry_count <= retry_state.max_planner_retries {
+                            let compact_summary = format!(
+                                "user_request: {}; last_command: {}; last_result: {}",
+                                completed_task.context.intent.clone().unwrap_or_default(),
+                                serde_json::to_string(&completed_task.command)
+                                    .unwrap_or_else(|_| "{}".to_string()),
+                                serde_json::to_string(&completed_task.result)
+                                    .unwrap_or_else(|_| "{}".to_string())
+                            );
+                            state_for_actor
+                                .hub
+                                .session_runtime()
+                                .record_compaction(
+                                    &session_key,
+                                    compact_summary.clone(),
+                                    state_for_actor
+                                        .hub
+                                        .session_runtime()
+                                        .transcript(&session_key)
+                                        .await
+                                        .map(|transcript| transcript.events.len())
+                                        .unwrap_or_default(),
+                                )
+                                .await;
+                            state_for_actor
+                                .hub
+                                .session_runtime()
+                                .append_transcript_event(
+                                    &session_key,
+                                    TranscriptEventKind::TurnCompacted,
+                                    compact_summary,
+                                )
+                                .await;
+                            match continue_task_result(&state_for_actor, &binding, &completed_task).await {
+                                Ok(step) => {
+                                    state_for_actor
+                                        .hub
+                                        .session_runtime()
+                                        .reset_planner_retry(&session_key)
+                                        .await;
+                                    step
+                                }
+                                Err(retry_error) => {
+                                    warn!(
+                                        "Retry continuation failed for {}: {}",
+                                        completed_task.task_id, retry_error
+                                    );
+                                    PlannedTurnStep::Finalize {
+                                        text: summarize_task_result_or_fallback(&state_for_actor, &completed_task).await,
+                                    }
+                                }
+                            }
+                        } else {
+                            PlannedTurnStep::Finalize {
+                                text: summarize_task_result_or_fallback(&state_for_actor, &completed_task).await,
+                            }
+                        }
+                    } else {
+                        PlannedTurnStep::Finalize {
+                            text: summarize_task_result_or_fallback(&state_for_actor, &completed_task).await,
+                        }
+                    }
+                }
+            };
+            state_for_actor
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    &session_key,
+                    TranscriptEventKind::AssistantStep,
+                    format!("{:?}", step),
+                )
+                .await;
+            let turn_state = state_for_actor
+                .hub
+                .session_runtime()
+                .increment_step_count(&session_key)
+                .await
+                .ok_or_else(|| "session turn is missing before continuation step".to_string())?;
+            if turn_state.step_count > turn_state.max_steps {
+                let reply_text = summarize_task_result_or_fallback(&state_for_actor, &completed_task).await;
+                state_for_actor
+                    .hub
+                    .session_runtime()
+                    .append_transcript_event(
+                        &session_key,
+                        TranscriptEventKind::AssistantFinal,
+                        reply_text.clone(),
+                    )
+                    .await;
+                persist_task_result_memory(&state_for_actor, &completed_task, &reply_text).await;
+                if let Some(channel) = state_for_actor.dingtalk_channel.as_ref() {
+                    send_dingtalk_reply(channel, &binding.route, &reply_text).await?;
+                } else {
+                    warn!("Skip DingTalk reply because channel is unavailable");
+                }
+                state_for_actor
+                    .hub
+                    .session_runtime()
+                    .complete_turn(&session_key, Some(&task_result.task_id))
+                    .await;
+                state_for_actor
+                    .hub
+                    .session_runtime()
+                    .prune_completed_turn_transcript(&session_key, 6)
+                    .await;
+                return Ok(());
+            }
+
+            match step {
+                PlannedTurnStep::Finalize { text: reply_text } => {
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .append_transcript_event(
+                            &session_key,
+                            TranscriptEventKind::AssistantFinal,
+                            reply_text.clone(),
+                        )
+                        .await;
+                    persist_task_result_memory(&state_for_actor, &completed_task, &reply_text).await;
+
+                    if let Some(channel) = state_for_actor.dingtalk_channel.as_ref() {
+                        send_dingtalk_reply(channel, &binding.route, &reply_text).await?;
+                    } else {
+                        warn!("Skip DingTalk reply because channel is unavailable");
+                    }
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .complete_turn(&session_key, Some(&task_result.task_id))
+                        .await;
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .prune_completed_turn_transcript(&session_key, 6)
+                        .await;
+                }
+                PlannedTurnStep::SubmitTask {
+                    command,
+                    workspace_path,
+                } => {
+                    let online_nodes = state_for_actor.hub.get_online_nodes().await;
+                    let online_workspace_roots = collect_online_workspace_roots(&online_nodes);
+                    let workspace_hint = workspace_path
+                        .or_else(|| resolve_default_workspace_root(&online_workspace_roots))
+                        .ok_or_else(|| "workspace_path is required for continuation task".to_string())?;
+                    let required_capabilities = match &command {
+                        Command::Browser(_) => Some(NodeCapabilities {
+                            supported_commands: vec![CommandType::Browser],
+                            ..NodeCapabilities::default()
+                        }),
+                        _ => None,
+                    };
+                    validate_planned_command(&command, &workspace_hint)?;
+                    let mut task_context = completed_task.context.clone();
+                    task_context.intent = completed_task.context.intent.clone();
+                    let tool_call_id = state_for_actor
+                        .hub
+                        .session_runtime()
+                        .begin_tool_call(&session_key, "hub_task")
+                        .await
+                        .ok_or_else(|| "session turn is missing before continuation task submission".to_string())?;
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .append_transcript_event(
+                            &session_key,
+                            TranscriptEventKind::ToolCallPlanned,
+                            format!("{}:{}", tool_call_id, "hub_task"),
+                        )
+                        .await;
+                    let task_id = state_for_actor
+                        .hub
+                        .submit_task(
+                            command,
+                            task_context,
+                            uhorse_protocol::Priority::Normal,
+                            required_capabilities,
+                            vec![],
+                            Some(workspace_hint),
+                        )
+                        .await?;
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .bind_task_to_turn(
+                            task_id.clone(),
+                            TaskContinuationBinding {
+                                session_key: binding.session_key.clone(),
+                                turn_id: binding.turn_id.clone(),
+                                tool_call_id,
+                                agent_id: binding.agent_id.clone(),
+                                route: binding.route.clone(),
+                            },
+                        )
+                        .await;
+                }
+                PlannedTurnStep::ExecuteSkill { .. }
+                | PlannedTurnStep::ListInstalledSkills
+                | PlannedTurnStep::QuerySkill { .. }
+                | PlannedTurnStep::InstallSkill { .. } => {
+                    let continuation_session_key = SessionKey::parse(&binding.session_key)
+                        .map_err(|error| format!("invalid session key in binding: {}", error))?;
+                    execute_local_turn_step(
+                        &state_for_actor,
+                        &binding.route,
+                        &continuation_session_key,
+                        &binding.agent_id,
+                        completed_task.context.intent.as_deref().unwrap_or_default(),
+                        &step,
+                        binding.route.sender_user_id.as_deref(),
+                        binding.route.sender_staff_id.as_deref(),
+                        continuation_session_key.team_id.as_deref(),
+                        &binding.route.conversation_id,
+                    )
+                    .await?;
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .prune_completed_turn_transcript(&session_key, 6)
+                        .await;
+                }
+            }
+
+            info!(
+                "Replied DingTalk task result for {} via session actor turn {}",
+                task_result.task_id, binding.turn_id
+            );
+            Ok(())
+        })
+        .await
 }
 
 /// 将任务提交阶段的错误回传到 DingTalk 会话
@@ -3305,6 +4189,22 @@ pub async fn reply_dingtalk_error(
     };
     let reply_text = format!("执行失败：{}", error_message);
 
+    let session_key = build_dingtalk_session_key(
+        &inbound.session.channel_user_id,
+        inbound.sender_user_id.as_deref(),
+        inbound.sender_staff_id.as_deref(),
+        inbound.sender_corp_id.as_deref(),
+    );
+    state
+        .hub
+        .session_runtime()
+        .append_transcript_event(
+            &session_key.as_str(),
+            TranscriptEventKind::TurnFailed,
+            error_message.to_string(),
+        )
+        .await;
+
     send_dingtalk_reply(channel, &route, &reply_text).await?;
 
     info!(
@@ -3316,12 +4216,12 @@ pub async fn reply_dingtalk_error(
 
 fn resolve_dingtalk_reply_target(route: &DingTalkReplyRoute) -> Option<DingTalkReplyTarget> {
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let webhook_available = route
-        .session_webhook
-        .as_deref()
-        .zip(route.session_webhook_expired_time)
-        .map(|(_, expires_at)| now_ms < expires_at)
-        .unwrap_or(false);
+    let webhook_available = route.session_webhook.as_ref().is_some_and(|_| {
+        route
+            .session_webhook_expired_time
+            .map(|expires_at| now_ms < expires_at)
+            .unwrap_or(true)
+    });
 
     if webhook_available {
         let at_user_ids = route
@@ -3380,9 +4280,16 @@ async fn send_dingtalk_reply(
         }
         None => {
             warn!(
-                "Skip DingTalk personal reply for conversation {} because sender_user_id is missing",
-                route.conversation_id
+                conversation_id = %route.conversation_id,
+                conversation_type = ?route.conversation_type,
+                sender_user_id = ?route.sender_user_id,
+                sender_staff_id = ?route.sender_staff_id,
+                has_session_webhook = route.session_webhook.is_some(),
+                session_webhook_expired_time = ?route.session_webhook_expired_time,
+                robot_code = ?route.robot_code,
+                "Skip DingTalk reply because no reply target could be resolved"
             );
+            return Err("No DingTalk reply target could be resolved".into());
         }
     }
 
@@ -3399,6 +4306,98 @@ async fn build_task_result_reply_text(state: &Arc<WebState>, task_result: &TaskR
     }
 
     summarize_task_result_or_fallback(state, &completed_task).await
+}
+
+async fn continue_task_result(
+    state: &Arc<WebState>,
+    binding: &TaskContinuationBinding,
+    completed_task: &CompletedTask,
+) -> Result<PlannedTurnStep, Box<dyn std::error::Error + Send + Sync>> {
+    let Some(llm_client) = state.llm_client.as_ref() else {
+        return Err("LLM client is not configured".into());
+    };
+
+    let session_key = SessionKey::parse(&binding.session_key)
+        .map_err(|error| format!("invalid session key in binding: {}", error))?;
+    let compacted_summary = state
+        .hub
+        .session_runtime()
+        .turn_state(&binding.session_key)
+        .await
+        .and_then(|turn| turn.compacted_summary);
+
+    let response = llm_client
+        .chat_completion(build_task_result_continuation_messages(
+            binding,
+            completed_task,
+            compacted_summary.as_deref(),
+        ))
+        .await?;
+
+    let planned = parse_next_step_response(
+        state,
+        response.trim(),
+        completed_task.context.intent.as_deref().unwrap_or_default(),
+        &binding.agent_id,
+        &session_key,
+    )
+    .await?;
+
+    Ok(planned)
+}
+
+async fn parse_next_step_response(
+    state: &Arc<WebState>,
+    response: &str,
+    original_text: &str,
+    agent_id: &str,
+    session_key: &SessionKey,
+) -> Result<PlannedTurnStep, Box<dyn std::error::Error + Send + Sync>> {
+    let trimmed = response.trim();
+    if let Some(json_payload) = extract_first_json_object(trimmed) {
+        if let Ok(step) = serde_json::from_str::<AgentDecision>(&json_payload) {
+            return Ok(planned_step_from_agent_decision(step));
+        }
+    }
+
+    if !trimmed.is_empty() {
+        return Ok(PlannedTurnStep::Finalize {
+            text: trimmed.to_string(),
+        });
+    }
+
+    plan_next_dingtalk_step(state, original_text, agent_id, session_key).await
+}
+
+fn build_task_result_continuation_messages(
+    binding: &TaskContinuationBinding,
+    completed_task: &CompletedTask,
+    compacted_summary: Option<&str>,
+) -> Vec<ChatMessage> {
+    let mut messages = vec![
+        ChatMessage::system(
+            "你是 uHorse Hub 的 ReAct continuation planner。上一个 tool 调用已经完成，现在你要基于用户原始请求和最新 observation 决定下一步。你必须只输出一个 JSON 对象或最终中文回复。允许的 JSON 结构与首轮决策一致：direct_reply / execute_command / execute_skill / list_installed_skills / query_skill / install_skill。如果 observation 已经足够回答用户，就直接输出最终中文回复；如果还需要继续操作，就输出下一步 JSON。不要暴露 turn/tool_call/observation 等内部术语。".to_string(),
+        ),
+        ChatMessage::user(format!(
+            "agent_id: {}\nsession_key: {}\nturn_id: {}\ntool_call_id: {}\nuser_request: {}\nexecuted_command: {}\nobservation: {}\n请给出下一步。",
+            binding.agent_id,
+            binding.session_key,
+            binding.turn_id,
+            binding.tool_call_id,
+            completed_task.context.intent.clone().unwrap_or_default(),
+            serde_json::to_string(&completed_task.command).unwrap_or_else(|_| "{}".to_string()),
+            serde_json::to_string(&completed_task.result).unwrap_or_else(|_| "{}".to_string())
+        )),
+    ];
+    if let Some(summary) = compacted_summary {
+        if !summary.trim().is_empty() {
+            messages.push(ChatMessage::system(format!(
+                "当前 turn 已压缩历史摘要：{}",
+                summary
+            )));
+        }
+    }
+    messages
 }
 
 async fn summarize_task_result_or_fallback(
@@ -4153,6 +5152,19 @@ fn resolve_dingtalk_skill_install_request(text: &str) -> Option<SkillInstallRequ
     })
 }
 
+fn build_installed_skills_reply(skills: &[SkillRuntimeSummary]) -> String {
+    if skills.is_empty() {
+        return "当前还没有安装任何 Skill。".to_string();
+    }
+
+    let lines = skills
+        .iter()
+        .map(|skill| format!("- {}：{}", skill.name, skill.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("当前已安装 {} 个 Skill：\n{}", skills.len(), lines)
+}
+
 fn looks_like_dingtalk_skill_install_intent(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -4160,61 +5172,19 @@ fn looks_like_dingtalk_skill_install_intent(text: &str) -> bool {
     }
 
     let lower = trimmed.to_ascii_lowercase();
-    let has_install_verb = trimmed.contains('装')
-        || trimmed.contains("安装")
-        || trimmed.contains("启用")
-        || lower.contains("install");
-    let has_skill_object = trimmed.contains("技能") || lower.contains("skill");
-    if !has_install_verb || !has_skill_object {
-        return false;
-    }
-
-    let guidance_like_patterns = [
-        "怎么安装",
-        "如何安装",
-        "安装说明",
-        "安装文档",
-        "安装教程",
-        "安装失败",
-        "安装不了怎么办",
-        "怎么用",
-        "如何使用",
-    ];
-    if guidance_like_patterns
-        .iter()
-        .any(|pattern| trimmed.contains(pattern))
-    {
-        return false;
-    }
-
-    true
+    trimmed.starts_with("安装技能")
+        || trimmed.starts_with("安装 ")
+        || trimmed.contains("帮我安装")
+        || trimmed.contains("请帮我安装")
+        || trimmed.contains("请安装")
+        || lower.starts_with("install skill")
+        || lower.starts_with("install ")
+        || lower.contains("please install")
 }
 
-fn parse_dingtalk_skill_install_search_query(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if !looks_like_dingtalk_skill_install_intent(trimmed) {
-        return None;
-    }
-
-    let without_prefix = trimmed
-        .strip_prefix("帮我")
-        .or_else(|| trimmed.strip_prefix("请帮我"))
-        .or_else(|| trimmed.strip_prefix("请"))
-        .unwrap_or(trimmed)
-        .trim();
-
-    let lower = without_prefix.to_ascii_lowercase();
-    let candidate = if let Some(rest) = without_prefix.strip_prefix("安装") {
-        rest.trim()
-    } else if let Some(index) = lower.find("install") {
-        without_prefix[index + "install".len()..].trim()
-    } else if let Some(index) = without_prefix.find('装') {
-        without_prefix[index + '装'.len_utf8()..].trim()
-    } else {
-        without_prefix
-    };
-
-    let candidate = candidate
+fn normalize_dingtalk_skill_install_query(text: &str) -> Option<String> {
+    let candidate = text
+        .trim()
         .trim_end_matches('。')
         .trim_end_matches('！')
         .trim_end_matches('!')
@@ -4235,20 +5205,128 @@ fn parse_dingtalk_skill_install_search_query(text: &str) -> Option<String> {
     }
 }
 
-fn skillhub_search_url() -> String {
-    std::env::var("UHORSE_SKILLHUB_SEARCH_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+fn is_likely_pure_skill_name(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let blocked_fragments = [
+        "帮我", "请帮我", "请", "看看", "列出", "已经安装", "已安装", "安装", "please",
+        "install", "list", "show", "query",
+    ];
+    if blocked_fragments.iter().any(|fragment| {
+        trimmed.contains(fragment) || lower.contains(&fragment.to_ascii_lowercase())
+    }) {
+        return false;
+    }
+
+    trimmed.chars().all(|ch| {
+        ch.is_ascii_alphanumeric()
+            || ch.is_ascii_whitespace()
+            || matches!(ch, '-' | '_' | '.' | '技' | '能')
+    })
+}
+
+fn parse_dingtalk_skill_install_search_query(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if looks_like_dingtalk_skill_install_intent(trimmed) {
+        let without_prefix = trimmed
+            .strip_prefix("帮我")
+            .or_else(|| trimmed.strip_prefix("请帮我"))
+            .or_else(|| trimmed.strip_prefix("请"))
+            .unwrap_or(trimmed)
+            .trim();
+
+        let lower = without_prefix.to_ascii_lowercase();
+        let candidate = if let Some(rest) = without_prefix.strip_prefix("安装") {
+            rest.trim()
+        } else if let Some(index) = lower.find("install") {
+            without_prefix[index + "install".len()..].trim()
+        } else if let Some(index) = without_prefix.find('装') {
+            without_prefix[index + '装'.len_utf8()..].trim()
+        } else {
+            without_prefix
+        };
+
+        return normalize_dingtalk_skill_install_query(candidate);
+    }
+
+    if is_likely_pure_skill_name(trimmed) {
+        return normalize_dingtalk_skill_install_query(trimmed);
+    }
+
+    None
+}
+
+fn infer_skillhub_slug_from_query(query: &str) -> Option<String> {
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+
+    for ch in query.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if (ch.is_ascii_whitespace() || ch == '-' || ch == '_') && !last_was_dash {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        None
+    } else {
+        Some(slug)
+    }
+}
+
+fn configured_skillhub_search_url(state: &WebState) -> String {
+    state
+        .app_config
+        .channels
+        .dingtalk
+        .as_ref()
+        .and_then(|config| config.skillhub_search_url.as_ref())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::var("UHORSE_SKILLHUB_SEARCH_URL")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
         .unwrap_or_else(|| DEFAULT_SKILLHUB_SEARCH_URL.to_string())
 }
 
+fn configured_skillhub_download_url_template(state: &WebState) -> String {
+    state
+        .app_config
+        .channels
+        .dingtalk
+        .as_ref()
+        .and_then(|config| config.skillhub_download_url_template.as_ref())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE.to_string())
+}
+
 async fn search_skillhub_skill(
+    state: &WebState,
     query: &str,
 ) -> Result<Option<SkillhubSearchEntry>, Box<dyn std::error::Error + Send + Sync>> {
     #[derive(Debug, Deserialize)]
     struct SkillhubSearchResponse {
+        data: SkillhubSearchData,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SkillhubSearchData {
         #[serde(default)]
-        results: Vec<SkillhubSearchItem>,
+        skills: Vec<SkillhubSearchItem>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -4257,21 +5335,35 @@ async fn search_skillhub_skill(
         #[serde(rename = "displayName")]
         display_name: Option<String>,
         name: Option<String>,
+        title: Option<String>,
         version: Option<String>,
     }
 
     let client = build_skillhub_http_client()?;
+    let search_url = configured_skillhub_search_url(state);
     let response = client
-        .get(skillhub_search_url())
-        .query(&[("q", query), ("limit", "1")])
+        .get(&search_url)
+        .query(&[
+            ("page", "1"),
+            ("pageSize", "24"),
+            ("sortBy", "score"),
+            ("order", "desc"),
+            ("keyword", query),
+        ])
         .send()
         .await?;
-    if !response.status().is_success() {
-        return Err(format!("Skill 搜索失败：HTTP {}", response.status()).into());
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Skill 搜索失败：HTTP {}", status).into());
     }
 
-    let payload: SkillhubSearchResponse = response.json().await?;
-    let Some(first) = payload.results.into_iter().next() else {
+    let payload: SkillhubSearchResponse = response.json().await.map_err(|error| {
+        format!(
+            "Skill 搜索响应解析失败：query={} url={} status={} error={}",
+            query, search_url, status, error
+        )
+    })?;
+    let Some(first) = payload.data.skills.into_iter().next() else {
         return Ok(None);
     };
 
@@ -4280,14 +5372,15 @@ async fn search_skillhub_skill(
         name: first
             .display_name
             .filter(|value| !value.trim().is_empty())
+            .or(first.title)
             .or(first.name)
             .unwrap_or(first.slug),
         version: first.version.filter(|value| !value.trim().is_empty()),
     }))
 }
 
-fn build_skillhub_download_url(slug: &str) -> String {
-    SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE.replace("{slug}", slug)
+fn build_skillhub_download_url(state: &WebState, slug: &str) -> String {
+    configured_skillhub_download_url_template(state).replace("{slug}", slug)
 }
 
 fn is_allowed_skillhub_download_url(download_url: &str) -> bool {
@@ -4306,6 +5399,7 @@ fn is_allowed_skillhub_download_url(download_url: &str) -> bool {
 }
 
 async fn resolve_dingtalk_skill_install_intent(
+    state: &WebState,
     text: &str,
 ) -> Result<Option<DingtalkSkillInstallIntent>, Box<dyn std::error::Error + Send + Sync>> {
     if let Some(request) = resolve_dingtalk_skill_install_request(text) {
@@ -4319,8 +5413,39 @@ async fn resolve_dingtalk_skill_install_intent(
         return Ok(None);
     };
 
-    let Some(entry) = search_skillhub_skill(&query).await? else {
-        return Ok(Some(DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query)));
+    let entry = match search_skillhub_skill(state, &query).await {
+        Ok(Some(entry)) => entry,
+        Ok(None) => {
+            let Some(slug) = infer_skillhub_slug_from_query(&query) else {
+                return Ok(Some(DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query)));
+            };
+            warn!(
+                query = %query,
+                inferred_slug = %slug,
+                "SkillHub search returned no match, fallback to inferred slug"
+            );
+            SkillhubSearchEntry {
+                slug,
+                name: query,
+                version: None,
+            }
+        }
+        Err(error) => {
+            let Some(slug) = infer_skillhub_slug_from_query(&query) else {
+                return Err(error);
+            };
+            warn!(
+                query = %query,
+                inferred_slug = %slug,
+                error = %error,
+                "SkillHub search failed, fallback to inferred slug"
+            );
+            SkillhubSearchEntry {
+                slug,
+                name: query,
+                version: None,
+            }
+        }
     };
 
     Ok(Some(DingtalkSkillInstallIntent::NaturalLanguage(entry)))
@@ -4390,65 +5515,6 @@ async fn try_handle_dingtalk_pairing_command(
     Ok(true)
 }
 
-async fn try_handle_dingtalk_skill_install_command(
-    state: &Arc<WebState>,
-    inbound: &DingTalkInboundMessage,
-) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    let Some(text) = inbound.message.content.as_text().map(str::trim) else {
-        return Ok(false);
-    };
-
-    let route = reply_route_from_inbound(inbound);
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
-        return Err("DingTalk channel is not configured".into());
-    };
-
-    if looks_like_dingtalk_skill_install_intent(text) || resolve_dingtalk_skill_install_request(text).is_some() {
-        send_dingtalk_reply(channel, &route, DINGTALK_PROCESSING_ACK_TEXT).await?;
-    }
-
-    let Some(intent) = resolve_dingtalk_skill_install_intent(text).await? else {
-        return Ok(false);
-    };
-
-    let actor = SkillInstallActor {
-        channel: "dingtalk",
-        sender_user_id: inbound.sender_user_id.clone(),
-        sender_staff_id: inbound.sender_staff_id.clone(),
-        sender_corp_id: inbound.sender_corp_id.clone(),
-    };
-
-    let reply_text = match intent {
-        DingtalkSkillInstallIntent::ExplicitCommand(request) => {
-            let requested_name = request.package.clone();
-            match install_skill_from_request(state, actor, request).await {
-                Ok(result) => format!("Skill {} 安装成功。", result.skill_name),
-                Err(error) => format!("Skill {} 安装失败：{}", requested_name, error),
-            }
-        }
-        DingtalkSkillInstallIntent::NaturalLanguage(entry) => {
-            let requested_name = entry.name.clone();
-            let request = SkillInstallRequest {
-                source_type: SkillInstallSourceType::Skillhub,
-                package: entry.slug.clone(),
-                version: entry.version,
-                download_url: build_skillhub_download_url(&entry.slug),
-                target_layer: SkillInstallTargetLayer::Global,
-                target_scope: None,
-            };
-            match install_skill_from_request(state, actor, request).await {
-                Ok(result) => format!("Skill {} 安装成功。", result.skill_name),
-                Err(error) => format!("Skill {} 安装失败：{}", requested_name, error),
-            }
-        }
-        DingtalkSkillInstallIntent::NaturalLanguageNoMatch(query) => {
-            format!("没有在 SkillHub 中找到与“{}”匹配的 Skill。", query)
-        }
-    };
-
-    send_dingtalk_reply(channel, &route, &reply_text).await?;
-    Ok(true)
-}
 
 async fn issue_node_token(
     State(state): State<Arc<WebState>>,
@@ -4769,14 +5835,16 @@ async fn cancel_task(
     State(state): State<Arc<WebState>>,
     Path(task_id): Path<String>,
 ) -> (StatusCode, Json<ApiResponse<&'static str>>) {
-    match state
-        .hub
-        .cancel_task(
-            &uhorse_protocol::TaskId::from_string(&task_id),
-            "User cancelled",
-        )
-        .await
-    {
+    let task_id = uhorse_protocol::TaskId::from_string(&task_id);
+    if let Some(binding) = state.hub.session_runtime().find_task_binding(&task_id).await {
+        state
+            .hub
+            .session_runtime()
+            .cancel_turn(&binding.session_key)
+            .await;
+    }
+
+    match state.hub.cancel_task(&task_id, "User cancelled").await {
         Ok(()) => (StatusCode::OK, Json(ApiResponse::success("Task cancelled"))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -5127,16 +6195,22 @@ mod tests {
         )
     }
 
+    async fn create_test_runtime_with_skill_only(
+        skill_name: &str,
+        skill_toml: &str,
+    ) -> Arc<WebAgentRuntime> {
+        let base_dir = tempdir().unwrap().keep();
+        let runtime_root = base_dir.join("agent-runtime");
+        write_test_skill(&runtime_root, skill_name, skill_toml).await;
+        Arc::new(init_default_agent_runtime(runtime_root).await.unwrap())
+    }
+
     async fn create_test_runtime_with_skill(
         skill_name: &str,
         skill_toml: &str,
         llm_response: &str,
     ) -> (Arc<WebAgentRuntime>, Arc<WebState>) {
-        let base_dir = tempdir().unwrap().keep();
-        let runtime_root = base_dir.join("agent-runtime");
-        write_test_skill(&runtime_root, skill_name, skill_toml).await;
-
-        let runtime = Arc::new(init_default_agent_runtime(runtime_root).await.unwrap());
+        let runtime = create_test_runtime_with_skill_only(skill_name, skill_toml).await;
         let (hub, _rx) = Hub::new(HubConfig::default());
         let state = Arc::new(WebState::new_with_runtime(
             Arc::new(hub),
@@ -5204,6 +6278,26 @@ mod tests {
         encoder.finish().unwrap()
     }
 
+    fn build_test_skill_zip_archive_with_skill_md(
+        skill_md: &str,
+        skill_toml: &str,
+    ) -> Vec<u8> {
+        let mut bytes = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(&mut bytes);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("SKILL.md", options).unwrap();
+        std::io::Write::write_all(&mut writer, skill_md.as_bytes()).unwrap();
+        writer.start_file("skill.toml", options).unwrap();
+        std::io::Write::write_all(&mut writer, skill_toml.as_bytes()).unwrap();
+        writer.finish().unwrap();
+        bytes.into_inner()
+    }
+
+    fn build_test_skill_zip_archive(skill_toml: &str) -> Vec<u8> {
+        let skill_md = "---\nname: agent-browser\nversion: 1.0.0\ndescription: agent browser skill\nauthor: test\nparameters: []\npermissions: []\n---\n";
+        build_test_skill_zip_archive_with_skill_md(skill_md, skill_toml)
+    }
+
     async fn start_test_archive_server(bytes: Vec<u8>) -> (String, tokio::task::JoinHandle<()>) {
         let bytes = Arc::new(bytes);
         let app = Router::new().route(
@@ -5249,8 +6343,11 @@ mod tests {
         (format!("http://{}/api/v1/search", address), handle)
     }
 
-    async fn create_skill_install_test_state(
+
+    async fn create_skill_install_test_state_with_skillhub(
         installers: Vec<DingTalkSkillInstaller>,
+        skillhub_search_url: Option<String>,
+        skillhub_download_url_template: Option<String>,
     ) -> (TempDir, Arc<WebState>) {
         let workspace = tempdir().unwrap();
         let runtime_root = workspace.path().join("agent-runtime");
@@ -5261,6 +6358,8 @@ mod tests {
             app_key: "key".to_string(),
             app_secret: "secret".to_string(),
             agent_id: 1,
+            skillhub_search_url,
+            skillhub_download_url_template,
             notification_bindings: vec![],
             skill_installers: installers,
         });
@@ -5276,6 +6375,13 @@ mod tests {
         (workspace, state)
     }
 
+    async fn create_skill_install_test_state(
+        installers: Vec<DingTalkSkillInstaller>,
+    ) -> (TempDir, Arc<WebState>) {
+        create_skill_install_test_state_with_skillhub(installers, None, None).await
+    }
+
+
     struct StubLlmClient {
         response: String,
     }
@@ -5287,12 +6393,42 @@ mod tests {
         }
     }
 
+    struct SequenceLlmClient {
+        responses: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMClient for SequenceLlmClient {
+        async fn chat_completion(&self, _messages: Vec<ChatMessage>) -> Result<String> {
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                anyhow::bail!("no llm response configured")
+            }
+            Ok(responses.remove(0))
+        }
+    }
+
     struct FailingLlmClient;
 
     #[async_trait::async_trait]
     impl LLMClient for FailingLlmClient {
         async fn chat_completion(&self, _messages: Vec<ChatMessage>) -> Result<String> {
             Err(anyhow::anyhow!("llm failed"))
+        }
+    }
+
+    struct FailThenSucceedLlmClient {
+        responses: std::sync::Mutex<Vec<Result<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LLMClient for FailThenSucceedLlmClient {
+        async fn chat_completion(&self, _messages: Vec<ChatMessage>) -> Result<String> {
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                anyhow::bail!("no llm response configured")
+            }
+            responses.remove(0)
         }
     }
 
@@ -5332,13 +6468,25 @@ mod tests {
         tokio::sync::mpsc::Receiver<HubToNode>,
         TempDir,
     ) {
+        create_registered_node_test_state_with_llm(None).await
+    }
+
+    async fn create_registered_node_test_state_with_llm(
+        llm_client: Option<Arc<dyn LLMClient>>,
+    ) -> (
+        Arc<WebState>,
+        Arc<Hub>,
+        uhorse_protocol::NodeId,
+        tokio::sync::mpsc::Receiver<HubToNode>,
+        TempDir,
+    ) {
         let workspace = tempdir().unwrap();
         let (hub, _rx) = Hub::new(HubConfig::default());
         let hub = Arc::new(hub);
         let state = Arc::new(WebState::new_with_pairing(
             hub.clone(),
             None,
-            None,
+            llm_client,
             Some(Arc::new(DevicePairingManager::new())),
         ));
         let node_id = uhorse_protocol::NodeId::from_string("node-web-runtime");
@@ -5799,6 +6947,7 @@ mod tests {
             started_at: chrono::Utc::now(),
             completed_at: chrono::Utc::now(),
             priority: Priority::Normal,
+            status: TaskStatus::Completed,
             result: CommandResult::success(CommandOutput::text("raw output")),
         };
 
@@ -5831,6 +6980,7 @@ mod tests {
             started_at: chrono::Utc::now(),
             completed_at: chrono::Utc::now(),
             priority: Priority::Normal,
+            status: TaskStatus::Completed,
             result: CommandResult::success(CommandOutput::text("raw output")),
         };
 
@@ -6567,6 +7717,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_decide_dingtalk_action_parses_list_installed_skills_json() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"list_installed_skills"}"#.to_string(),
+            })),
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-list-skills");
+
+        let decision = decide_dingtalk_action(
+            &state,
+            "帮我列出已经安装的技能",
+            "main",
+            &session_key,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(decision, AgentDecision::ListInstalledSkills));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_parses_install_skill_json() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"install_skill","query":"Browser Use"}"#.to_string(),
+            })),
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-install-skill");
+
+        let decision = decide_dingtalk_action(&state, "帮我安装 Browser Use 技能", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::InstallSkill { query } if query == "Browser Use"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_parses_query_skill_json() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"query_skill","skill_name":"browser-use"}"#.to_string(),
+            })),
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-query-skill");
+
+        let decision = decide_dingtalk_action(&state, "Browser Use 技能怎么用", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::QuerySkill { skill_name } if skill_name == "browser-use"
+        ));
+    }
+
+    #[tokio::test]
     async fn test_decide_dingtalk_action_extracts_execute_command_json_from_wrapped_text() {
         let runtime = create_test_runtime().await;
         let (hub, _rx) = Hub::new(HubConfig::default());
@@ -6620,6 +7847,796 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reply_task_result_continues_in_session_actor() {
+        let llm_client = Arc::new(SequenceLlmClient {
+            responses: std::sync::Mutex::new(vec![
+                "{\"type\":\"execute_command\",\"command\":{\"type\":\"file\",\"action\":\"exists\",\"path\":\"Cargo.toml\"},\"workspace_path\":null}".to_string(),
+            ]),
+        });
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(llm_client),
+            Some(Arc::new(DevicePairingManager::new())),
+            runtime,
+        ));
+        let binding = TaskContinuationBinding {
+            session_key: "dingtalk:user-react:corp-react".to_string(),
+            turn_id: "turn-1".to_string(),
+            tool_call_id: "tool-1".to_string(),
+            agent_id: "main".to_string(),
+            route: DingTalkReplyRoute {
+                conversation_id: "conv-react".to_string(),
+                conversation_type: Some("1".to_string()),
+                sender_user_id: Some("user-react".to_string()),
+                sender_staff_id: Some("staff-react".to_string()),
+                session_webhook: None,
+                session_webhook_expired_time: None,
+                robot_code: None,
+            },
+        };
+        let completed_task = CompletedTask {
+            task_id: TaskId::from_string("task-1"),
+            command: Command::File(FileCommand::Exists {
+                path: "README.md".to_string(),
+            }),
+            context: TaskContext::new(
+                UserId::from_string("user-react"),
+                uhorse_protocol::SessionId::from_string("dingtalk:user-react:corp-react"),
+                "dingtalk",
+            )
+            .with_intent("检查 README 是否存在并告诉我结果"),
+            priority: Priority::Normal,
+            node_id: uhorse_protocol::NodeId::from_string("node-1"),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            status: TaskStatus::Completed,
+            result: CommandResult::success(CommandOutput::text("README.md exists")),
+        };
+
+        let step = continue_task_result(&state, &binding, &completed_task)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            step,
+            PlannedTurnStep::SubmitTask {
+                command: Command::File(FileCommand::Exists { path }),
+                workspace_path: None,
+            } if path == "Cargo.toml"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_reply_task_result_dispatches_follow_up_task_and_updates_turn_state() {
+        let runtime = create_test_runtime().await;
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, mut task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(SequenceLlmClient {
+                responses: std::sync::Mutex::new(vec![
+                    format!(
+                        r#"{{"type":"execute_command","command":{{"type":"file","action":"exists","path":"{}/README.md"}},"workspace_path":"{}"}}"#,
+                        workspace_root, workspace_root
+                    ),
+                    "{\"type\":\"execute_command\",\"command\":{\"type\":\"file\",\"action\":\"exists\",\"path\":\"Cargo.toml\"},\"workspace_path\":null}".to_string(),
+                ]),
+            })),
+            None,
+            runtime,
+        ));
+
+        let node_id = uhorse_protocol::NodeId::from_string("node-react-follow-up");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(node_id.clone(), tx)
+            .await;
+        hub.handle_node_connection(
+            node_id.clone(),
+            "react-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("先检查 README，再检查 Cargo.toml".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-react-follow-up".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let first_assignment = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let first_task_id = match first_assignment {
+            HubToNode::TaskAssignment {
+                task_id,
+                command,
+                context,
+                ..
+            } => {
+                match command {
+                    Command::File(FileCommand::Exists { path }) => {
+                        assert_eq!(path, format!("{}/README.md", workspace_root));
+                    }
+                    other => panic!("unexpected command: {:?}", other),
+                }
+                assert_eq!(
+                    context.intent.as_deref(),
+                    Some("先检查 README，再检查 Cargo.toml")
+                );
+                task_id
+            }
+            other => panic!("unexpected message: {:?}", other),
+        };
+
+        hub.handle_node_message(
+            &node_id,
+            NodeToHub::TaskResult {
+                message_id: uhorse_protocol::MessageId::new(),
+                task_id: first_task_id.clone(),
+                result: CommandResult::success(CommandOutput::text("README exists")),
+                metrics: uhorse_protocol::ExecutionMetrics {
+                    duration_ms: 1,
+                    cpu_time_ms: 0,
+                    peak_memory_mb: 0,
+                    bytes_read: 0,
+                    bytes_written: 0,
+                    network_requests: 0,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+        let task_result = tokio::time::timeout(std::time::Duration::from_secs(1), task_result_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        reply_task_result(state.clone(), task_result).await.unwrap();
+
+        let second_assignment = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let second_task_id = match second_assignment {
+            HubToNode::TaskAssignment {
+                task_id,
+                command,
+                context,
+                ..
+            } => {
+                match command {
+                    Command::File(FileCommand::Exists { path }) => {
+                        assert_eq!(path, "Cargo.toml");
+                    }
+                    other => panic!("unexpected command: {:?}", other),
+                }
+                assert_eq!(
+                    context.intent.as_deref(),
+                    Some("先检查 README，再检查 Cargo.toml")
+                );
+                task_id
+            }
+            other => panic!("unexpected message: {:?}", other),
+        };
+
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let turn = state
+            .hub
+            .session_runtime()
+            .turn_state(&session_key.as_str())
+            .await
+            .unwrap();
+        assert_eq!(turn.step_count, 2);
+        assert_eq!(turn.status, crate::session_runtime::TurnStatus::WaitingForTool);
+        assert_eq!(
+            turn.tool_call.as_ref().and_then(|tool_call| tool_call.task_id.as_ref()),
+            Some(&second_task_id)
+        );
+
+        let transcript = state
+            .hub
+            .session_runtime()
+            .transcript(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(transcript
+            .events
+            .iter()
+            .any(|event| event.kind == crate::session_runtime::TranscriptEventKind::ToolResultObserved));
+        assert!(transcript.events.iter().any(|event| {
+            event.kind == crate::session_runtime::TranscriptEventKind::AssistantStep
+                && event.content.contains("SubmitTask")
+        }));
+        assert_eq!(
+            transcript
+                .events
+                .iter()
+                .filter(|event| event.kind == crate::session_runtime::TranscriptEventKind::ToolCallDispatched)
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reply_task_result_stops_when_turn_exceeds_max_steps() {
+        let runtime = create_test_runtime().await;
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, mut task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(SequenceLlmClient {
+                responses: std::sync::Mutex::new(vec![
+                    format!(
+                        r#"{{"type":"execute_command","command":{{"type":"file","action":"exists","path":"{}/README.md"}},"workspace_path":"{}"}}"#,
+                        workspace_root, workspace_root
+                    ),
+                    "README exists".to_string(),
+                ]),
+            })),
+            None,
+            runtime.clone(),
+        ));
+
+        let node_id = uhorse_protocol::NodeId::from_string("node-react-max-steps");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(node_id.clone(), tx)
+            .await;
+        hub.handle_node_connection(
+            node_id.clone(),
+            "react-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("一直继续执行".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-react-max-steps".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let first_assignment = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let first_task_id = match first_assignment {
+            HubToNode::TaskAssignment { task_id, .. } => task_id,
+            other => panic!("unexpected message: {:?}", other),
+        };
+
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        for _ in 0..3 {
+            state
+                .hub
+                .session_runtime()
+                .increment_step_count(&session_key.as_str())
+                .await
+                .unwrap();
+        }
+
+        hub.handle_node_message(
+            &node_id,
+            NodeToHub::TaskResult {
+                message_id: uhorse_protocol::MessageId::new(),
+                task_id: first_task_id.clone(),
+                result: CommandResult::success(CommandOutput::text("README exists")),
+                metrics: uhorse_protocol::ExecutionMetrics {
+                    duration_ms: 1,
+                    cpu_time_ms: 0,
+                    peak_memory_mb: 0,
+                    bytes_read: 0,
+                    bytes_written: 0,
+                    network_requests: 0,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+        let task_result = tokio::time::timeout(std::time::Duration::from_secs(1), task_result_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        reply_task_result(state.clone(), task_result).await.unwrap();
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
+                .await
+                .is_err()
+        );
+
+        let turn = state
+            .hub
+            .session_runtime()
+            .turn_state(&session_key.as_str())
+            .await
+            .unwrap();
+        assert_eq!(turn.step_count, 5);
+        assert_eq!(turn.status, crate::session_runtime::TurnStatus::Completed);
+
+        let transcript = state
+            .hub
+            .session_runtime()
+            .transcript(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(transcript.events.iter().any(|event| {
+            event.kind == crate::session_runtime::TranscriptEventKind::AssistantFinal
+                && event.content == "README exists"
+        }));
+
+        let history = runtime
+            .memory_store
+            .get_context(&CoreSessionId::from_string(session_key.as_str()))
+            .await
+            .unwrap();
+        assert!(history.contains("**User:** 一直继续执行"));
+        assert!(history.contains("**Assistant:** README exists"));
+    }
+
+    #[tokio::test]
+    async fn test_reply_task_result_skips_continuation_when_turn_cancelled() {
+        let runtime = create_test_runtime().await;
+        let (hub, mut task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(FailingLlmClient)),
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let turn_id = state
+            .hub
+            .session_runtime()
+            .start_turn(&session_key.as_str(), "取消当前执行")
+            .await;
+        let tool_call_id = state
+            .hub
+            .session_runtime()
+            .begin_tool_call(&session_key.as_str(), "hub_task")
+            .await
+            .unwrap();
+        let task_id = TaskId::from_string("task-cancelled");
+        state
+            .hub
+            .session_runtime()
+            .bind_task_to_turn(
+                task_id.clone(),
+                TaskContinuationBinding {
+                    session_key: session_key.as_str().to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: DingTalkReplyRoute {
+                        conversation_id: "conv-cancelled".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("actual-user".to_string()),
+                        sender_staff_id: Some("staff-1".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: Some("robot-1".to_string()),
+                    },
+                },
+            )
+            .await;
+        state
+            .hub
+            .session_runtime()
+            .cancel_turn(&session_key.as_str())
+            .await;
+
+        let completed_task = CompletedTask {
+            task_id: task_id.clone(),
+            command: Command::File(FileCommand::Exists {
+                path: "README.md".to_string(),
+            }),
+            context: TaskContext::new(
+                UserId::from_string("actual-user"),
+                uhorse_protocol::SessionId::from_string(session_key.as_str()),
+                "dingtalk",
+            )
+            .with_intent("取消当前执行"),
+            priority: Priority::Normal,
+            node_id: uhorse_protocol::NodeId::from_string("node-1"),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            status: TaskStatus::Completed,
+            result: CommandResult::success(CommandOutput::text("README exists")),
+        };
+        hub.task_scheduler()
+            .insert_completed_task_for_test(completed_task)
+            .await;
+
+        reply_task_result(
+            state.clone(),
+            TaskResult {
+                task_id: task_id.clone(),
+                node_id: uhorse_protocol::NodeId::from_string("node-1"),
+                result: CommandResult::success(CommandOutput::text("README exists")),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(100), task_result_rx.recv())
+            .await
+            .is_err());
+
+        let turn = state
+            .hub
+            .session_runtime()
+            .turn_state(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(turn.cancel_requested);
+        assert_eq!(turn.status, crate::session_runtime::TurnStatus::Cancelled);
+        assert_eq!(turn.planner_retry_count, 0);
+
+        let transcript = state
+            .hub
+            .session_runtime()
+            .transcript(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(transcript
+            .events
+            .iter()
+            .any(|event| event.kind == crate::session_runtime::TranscriptEventKind::TurnCancelled));
+        assert!(transcript
+            .events
+            .iter()
+            .any(|event| event.kind == crate::session_runtime::TranscriptEventKind::ToolResultObserved));
+        assert!(!transcript.events.iter().any(|event| {
+            event.kind == crate::session_runtime::TranscriptEventKind::AssistantStep
+                && event.content.contains("SubmitTask")
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_reply_task_result_records_compaction_and_retries_once() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(FailThenSucceedLlmClient {
+                responses: std::sync::Mutex::new(vec![
+                    Err(anyhow::anyhow!("llm failed")),
+                    Ok("重试后总结完成".to_string()),
+                ]),
+            })),
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let turn_id = state
+            .hub
+            .session_runtime()
+            .start_turn(&session_key.as_str(), "检查 README 后总结")
+            .await;
+        let tool_call_id = state
+            .hub
+            .session_runtime()
+            .begin_tool_call(&session_key.as_str(), "hub_task")
+            .await
+            .unwrap();
+        let task_id = TaskId::from_string("task-retry");
+        state
+            .hub
+            .session_runtime()
+            .bind_task_to_turn(
+                task_id.clone(),
+                TaskContinuationBinding {
+                    session_key: session_key.as_str().to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: DingTalkReplyRoute {
+                        conversation_id: "conv-retry".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("actual-user".to_string()),
+                        sender_staff_id: Some("staff-1".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: Some("robot-1".to_string()),
+                    },
+                },
+            )
+            .await;
+
+        let completed_task = CompletedTask {
+            task_id: task_id.clone(),
+            command: Command::File(FileCommand::Exists {
+                path: "README.md".to_string(),
+            }),
+            context: TaskContext::new(
+                UserId::from_string("actual-user"),
+                uhorse_protocol::SessionId::from_string(session_key.as_str()),
+                "dingtalk",
+            )
+            .with_intent("检查 README 后总结"),
+            priority: Priority::Normal,
+            node_id: uhorse_protocol::NodeId::from_string("node-1"),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            status: TaskStatus::Completed,
+            result: CommandResult::success(CommandOutput::text("README exists")),
+        };
+        state
+            .hub
+            .task_scheduler()
+            .insert_completed_task_for_test(completed_task)
+            .await;
+
+        reply_task_result(
+            state.clone(),
+            TaskResult {
+                task_id: task_id.clone(),
+                node_id: uhorse_protocol::NodeId::from_string("node-1"),
+                result: CommandResult::success(CommandOutput::text("README exists")),
+            },
+        )
+        .await
+        .unwrap();
+
+        let turn = state
+            .hub
+            .session_runtime()
+            .turn_state(&session_key.as_str())
+            .await
+            .unwrap();
+        assert_eq!(turn.status, crate::session_runtime::TurnStatus::Completed);
+        assert_eq!(turn.planner_retry_count, 0);
+        assert!(turn.compacted_summary.is_some());
+        assert!(turn.pruned_event_count >= 2);
+
+        let transcript = state
+            .hub
+            .session_runtime()
+            .transcript(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(transcript
+            .events
+            .iter()
+            .any(|event| event.kind == crate::session_runtime::TranscriptEventKind::TurnCompacted));
+        assert!(transcript.events.iter().any(|event| {
+            event.kind == crate::session_runtime::TranscriptEventKind::AssistantFinal
+                && event.content == "重试后总结完成"
+        }));
+    }
+
+    #[test]
+    fn test_project_transcript_messages_includes_intermediate_events() {
+        let transcript = crate::session_runtime::SessionTranscript {
+            turn_id: "turn-1".to_string(),
+            events: vec![
+                crate::session_runtime::TranscriptEvent {
+                    seq: 1,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::UserMessage,
+                    content: "请检查 README".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 2,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::AssistantStep,
+                    content: "SubmitTask".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 3,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::ToolCallDispatched,
+                    content: "tool-1:task-1".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 4,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::ToolResultObserved,
+                    content: "README exists".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 5,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::AssistantFinal,
+                    content: "README 存在。".to_string(),
+                },
+            ],
+        };
+
+        let projected = project_transcript_messages(&transcript);
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].user_message, "请检查 README");
+        assert!(projected[0]
+            .assistant_message
+            .contains("[assistant_step] SubmitTask"));
+        assert!(projected[0]
+            .assistant_message
+            .contains("[tool_call_dispatched] tool-1:task-1"));
+        assert!(projected[0]
+            .assistant_message
+            .contains("[tool_result_observed] README exists"));
+        assert!(projected[0].assistant_message.contains("README 存在。"));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_task_api_marks_session_turn_cancelled_for_running_task() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            None,
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let turn_id = state
+            .hub
+            .session_runtime()
+            .start_turn(&session_key.as_str(), "取消任务")
+            .await;
+        let tool_call_id = state
+            .hub
+            .session_runtime()
+            .begin_tool_call(&session_key.as_str(), "hub_task")
+            .await
+            .unwrap();
+
+        let task_id = hub.task_scheduler().generate_task_id();
+        state
+            .hub
+            .session_runtime()
+            .bind_task_to_turn(
+                task_id.clone(),
+                TaskContinuationBinding {
+                    session_key: session_key.as_str().to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: DingTalkReplyRoute {
+                        conversation_id: "conv-cancel-api".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("actual-user".to_string()),
+                        sender_staff_id: Some("staff-1".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: Some("robot-1".to_string()),
+                    },
+                },
+            )
+            .await;
+        let node_id = uhorse_protocol::NodeId::from_string("node-cancel-api");
+        hub.task_scheduler()
+            .insert_running_task_for_test(
+                crate::task_scheduler::RunningTask {
+                    task_id: task_id.clone(),
+                    command: Command::File(FileCommand::Exists {
+                        path: "README.md".to_string(),
+                    }),
+                    context: TaskContext::new(
+                        UserId::from_string("actual-user"),
+                        uhorse_protocol::SessionId::from_string(session_key.as_str()),
+                        "dingtalk",
+                    )
+                    .with_intent("取消任务"),
+                    priority: Priority::Normal,
+                    node_id: node_id.clone(),
+                    started_at: chrono::Utc::now(),
+                    timeout_at: chrono::Utc::now() + chrono::Duration::seconds(30),
+                    retry_count: 0,
+                },
+            )
+            .await;
+
+        let app = create_router((*state).clone());
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/tasks/{}/cancel", task_id))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["data"], serde_json::json!("Task cancelled"));
+
+        let turn = state
+            .hub
+            .session_runtime()
+            .turn_state(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(turn.cancel_requested);
+        assert_eq!(turn.status, crate::session_runtime::TurnStatus::Cancelled);
+
+        let task_status = hub.get_task_status(&task_id).await.unwrap();
+        assert_eq!(task_status.status, TaskStatus::Cancelled);
+        assert_eq!(task_status.error.as_deref(), Some("Task cancelled"));
+
+        let transcript = state
+            .hub
+            .session_runtime()
+            .transcript(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(transcript
+            .events
+            .iter()
+            .any(|event| event.kind == crate::session_runtime::TranscriptEventKind::TurnCancelled));
+    }
+
+    #[tokio::test]
     async fn test_persist_task_result_memory_updates_history_and_today_memory() {
         let runtime = create_test_runtime().await;
         let (hub, _rx) = Hub::new(HubConfig::default());
@@ -6662,6 +8679,7 @@ mod tests {
             started_at: chrono::Utc::now(),
             completed_at: chrono::Utc::now(),
             priority: Priority::Normal,
+            status: TaskStatus::Completed,
             result: CommandResult::success(CommandOutput::text("done")),
         };
 
@@ -7518,6 +9536,27 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_dingtalk_reply_target_prefers_session_webhook_without_expiry() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-webhook-no-expiry".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_reply_target(&route),
+            Some(DingTalkReplyTarget::SessionWebhook {
+                webhook: "https://example.com/hook".to_string(),
+                at_user_ids: vec!["staff-1".to_string()],
+            })
+        );
+    }
+
+    #[test]
     fn test_resolve_dingtalk_reply_target_falls_back_to_group_message() {
         let route = DingTalkReplyRoute {
             conversation_id: "conv-group".to_string(),
@@ -7645,6 +9684,105 @@ mod tests {
                 .map(String::as_str),
             Some("collab:session:dingtalk:actual-user:corp-1")
         );
+    }
+
+    #[tokio::test]
+    async fn test_submit_dingtalk_task_lists_installed_skills_without_dispatching_task() {
+        let (runtime, state) = create_test_runtime_with_skill(
+            "echo",
+            r#"enabled = true
+ timeout = 5
+ executable = "python3"
+ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
+ "#,
+            r#"{"type":"list_installed_skills"}"#,
+        )
+        .await;
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("帮我列出已经安装的技能".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-list-skills".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let history = runtime
+            .memory_store
+            .get_context(&CoreSessionId::from_string(session_key.as_str()))
+            .await
+            .unwrap();
+        assert!(history.contains("**User:** 帮我列出已经安装的技能"));
+        assert!(history.contains("当前已安装 1 个 Skill"));
+        assert!(history.contains("- echo：echo skill"));
+        assert!(state.dingtalk_routes.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_submit_dingtalk_task_runs_through_session_runtime_lane() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"direct_reply","text":"串行答复"}"#.to_string(),
+            })),
+            None,
+            runtime.clone(),
+        ));
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("phase1 测试".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-phase1".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let history = runtime
+            .memory_store
+            .get_context(&CoreSessionId::from_string(session_key.as_str()))
+            .await
+            .unwrap();
+        assert!(history.contains("**User:** phase1 测试"));
+        assert!(history.contains("**Assistant:** 串行答复"));
+        assert!(state.dingtalk_routes.read().await.is_empty());
     }
 
     #[tokio::test]
@@ -8132,29 +10270,6 @@ args = ["-c", "print('manual')"]
     }
 
     #[test]
-    fn test_looks_like_dingtalk_skill_install_intent_accepts_natural_language_install() {
-        assert!(looks_like_dingtalk_skill_install_intent(
-            "帮我安装 Agent Browser 技能"
-        ));
-        assert!(looks_like_dingtalk_skill_install_intent(
-            "please install agent browser skill"
-        ));
-    }
-
-    #[test]
-    fn test_looks_like_dingtalk_skill_install_intent_rejects_guidance_questions() {
-        assert!(!looks_like_dingtalk_skill_install_intent(
-            "Agent Browser 技能怎么安装？"
-        ));
-        assert!(!looks_like_dingtalk_skill_install_intent(
-            "安装说明在哪里？"
-        ));
-        assert!(!looks_like_dingtalk_skill_install_intent(
-            "Agent Browser 技能怎么用？"
-        ));
-    }
-
-    #[test]
     fn test_parse_dingtalk_skill_install_search_query_extracts_skill_name() {
         assert_eq!(
             parse_dingtalk_skill_install_search_query("帮我安装 Agent Browser 技能").as_deref(),
@@ -8165,29 +10280,119 @@ args = ["-c", "print('manual')"]
                 .as_deref(),
             Some("agent browser")
         );
+        assert_eq!(
+            parse_dingtalk_skill_install_search_query("Agent Browser 技能").as_deref(),
+            Some("Agent Browser")
+        );
+        assert_eq!(
+            parse_dingtalk_skill_install_search_query("agent browser skill").as_deref(),
+            Some("agent browser")
+        );
+        assert_eq!(
+            parse_dingtalk_skill_install_search_query("Browser Use").as_deref(),
+            Some("Browser Use")
+        );
         assert!(parse_dingtalk_skill_install_search_query("帮我看看 Agent Browser 技能").is_none());
+        assert!(parse_dingtalk_skill_install_search_query("帮我列出已经安装的技能").is_none());
     }
 
     #[test]
-    fn test_skillhub_search_url_uses_default_when_env_missing() {
+    fn test_infer_skillhub_slug_from_query_normalizes_words() {
+        assert_eq!(
+            infer_skillhub_slug_from_query("Agent Browser").as_deref(),
+            Some("agent-browser")
+        );
+        assert_eq!(
+            infer_skillhub_slug_from_query("  agent_browser  ").as_deref(),
+            Some("agent-browser")
+        );
+        assert!(infer_skillhub_slug_from_query("！！！").is_none());
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_reply_target_returns_none_without_webhook_group_or_user() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-missing".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: None,
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(resolve_dingtalk_reply_target(&route), None);
+    }
+
+    #[tokio::test]
+    async fn test_send_dingtalk_reply_returns_error_without_resolved_target() {
+        let channel = DingTalkChannel::new("key".to_string(), "secret".to_string(), 1);
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-missing".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: None,
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        let error = send_dingtalk_reply(&channel, &route, "hello")
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "No DingTalk reply target could be resolved");
+    }
+
+    #[tokio::test]
+    async fn test_configured_skillhub_search_url_uses_default_when_config_and_env_missing() {
         unsafe {
             std::env::remove_var("UHORSE_SKILLHUB_SEARCH_URL");
         }
-        assert_eq!(skillhub_search_url(), DEFAULT_SKILLHUB_SEARCH_URL);
+        let (_workspace, state) = create_skill_install_test_state(vec![]).await;
+        assert_eq!(
+            configured_skillhub_search_url(state.as_ref()),
+            DEFAULT_SKILLHUB_SEARCH_URL
+        );
     }
 
-    #[test]
-    fn test_build_skillhub_download_url_uses_official_template() {
+    #[tokio::test]
+    async fn test_configured_skillhub_search_url_prefers_config_over_env() {
+        unsafe {
+            std::env::set_var("UHORSE_SKILLHUB_SEARCH_URL", "https://env.example.com/api/v1/search");
+        }
+        let (_workspace, state) = create_skill_install_test_state_with_skillhub(
+            vec![],
+            Some("https://config.example.com/api/v1/search".to_string()),
+            None,
+        )
+        .await;
         assert_eq!(
-            build_skillhub_download_url("agent-browser"),
-            "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug=agent-browser"
+            configured_skillhub_search_url(state.as_ref()),
+            "https://config.example.com/api/v1/search"
+        );
+        unsafe {
+            std::env::remove_var("UHORSE_SKILLHUB_SEARCH_URL");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_skillhub_download_url_uses_configured_template() {
+        let (_workspace, state) = create_skill_install_test_state_with_skillhub(
+            vec![],
+            None,
+            Some("https://skillhub.example.com/api/v1/download?slug={slug}".to_string()),
+        )
+        .await;
+        assert_eq!(
+            build_skillhub_download_url(state.as_ref(), "agent-browser"),
+            "https://skillhub.example.com/api/v1/download?slug=agent-browser"
         );
     }
 
     #[test]
     fn test_is_allowed_skillhub_download_url_only_accepts_official_hosts() {
         assert!(is_allowed_skillhub_download_url(
-            "http://lb-3zbg86f6-0gwe3n7q8t4sv2za.clb.gz-tencentclb.com/api/v1/download?slug=agent-browser"
+            "https://api.skillhub.tencent.com/api/v1/download?slug=agent-browser"
         ));
         assert!(is_allowed_skillhub_download_url(
             "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/agent-browser.zip"
@@ -8200,14 +10405,15 @@ args = ["-c", "print('manual')"]
     #[tokio::test]
     async fn test_search_skillhub_skill_uses_search_api_result() {
         let (search_url, server_handle) = start_skillhub_search_server(
-            r#"{"results":[{"slug":"agent-browser","displayName":"Agent Browser","version":"1.2.3"}]}"#,
+            r#"{"code":0,"data":{"skills":[{"slug":"agent-browser","title":"Agent Browser","version":"1.2.3"}]},"message":"ok"}"#,
         )
         .await;
         unsafe {
             std::env::set_var("UHORSE_SKILLHUB_SEARCH_URL", &search_url);
         }
 
-        let result = search_skillhub_skill("Agent Browser").await.unwrap();
+        let (_workspace, state) = create_skill_install_test_state(vec![]).await;
+        let result = search_skillhub_skill(state.as_ref(), "Agent Browser").await.unwrap();
 
         unsafe {
             std::env::remove_var("UHORSE_SKILLHUB_SEARCH_URL");
@@ -8218,6 +10424,131 @@ args = ["-c", "print('manual')"]
         assert_eq!(entry.slug, "agent-browser");
         assert_eq!(entry.name, "Agent Browser");
         assert_eq!(entry.version.as_deref(), Some("1.2.3"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_dingtalk_skill_install_intent_fallbacks_to_inferred_slug_when_search_fails() {
+        let (_workspace, state) = create_skill_install_test_state_with_skillhub(
+            vec![],
+            Some("http://127.0.0.1:9/api/v1/search".to_string()),
+            None,
+        )
+        .await;
+
+        let intent = resolve_dingtalk_skill_install_intent(
+            state.as_ref(),
+            "帮我安装 Agent Browser 技能",
+        )
+        .await
+        .unwrap();
+
+        match intent {
+            Some(DingtalkSkillInstallIntent::NaturalLanguage(entry)) => {
+                assert_eq!(entry.slug, "agent-browser");
+                assert_eq!(entry.name, "Agent Browser");
+                assert!(entry.version.is_none());
+            }
+            other => panic!("unexpected intent: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_agent_browser_natural_language_install_flow_returns_chinese_hint() {
+        let (search_url, search_server_handle) = start_skillhub_search_server(
+            r#"{"code":0,"data":{"skills":[{"slug":"agent-browser","title":"Agent Browser","version":"1.2.3"}]},"message":"ok"}"#,
+        )
+        .await;
+        let (_workspace, state) = create_skill_install_test_state_with_skillhub(
+            vec![DingTalkSkillInstaller {
+                user_id: Some("ding-user-1".to_string()),
+                staff_id: None,
+                corp_id: Some("ding-corp-1".to_string()),
+            }],
+            Some(search_url),
+            None,
+        )
+        .await;
+        let skill_toml = r#"enabled = true
+ timeout = 5
+ executable = "python3"
+ args = ["-c", "print('browser')"]
+ "#;
+        let archive = build_test_skill_zip_archive(skill_toml);
+        let (download_url, archive_server_handle) = start_test_archive_server(archive).await;
+
+        let intent = resolve_dingtalk_skill_install_intent(
+            state.as_ref(),
+            "帮我安装 Agent Browser 技能",
+        )
+        .await
+        .unwrap();
+
+        let entry = match intent {
+            Some(DingtalkSkillInstallIntent::NaturalLanguage(entry)) => entry,
+            other => panic!("unexpected intent: {:?}", other),
+        };
+        assert_eq!(entry.slug, "agent-browser");
+        assert_eq!(entry.name, "Agent Browser");
+        assert_eq!(entry.version.as_deref(), Some("1.2.3"));
+
+        let result = install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: entry.slug.clone(),
+                version: entry.version.clone(),
+                download_url,
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        search_server_handle.abort();
+        archive_server_handle.abort();
+
+        assert_eq!(result.skill_name, "agent-browser");
+        assert!(state
+            .agent_runtime
+            .skills
+            .read()
+            .await
+            .get_any_entry("agent-browser")
+            .is_some());
+
+        let hint = build_skill_install_trigger_hint(&state, &result).await;
+        let reply = format!("Skill {} 安装成功。{}", result.skill_name, hint);
+        assert!(reply.contains("Skill agent-browser 安装成功"));
+        assert!(reply.contains("你现在可以直接用自然语言描述需求"));
+        assert!(reply.contains("例如：请打开目标网页，帮我完成点击、输入或截图，并把结果发给我"));
+    }
+
+    #[tokio::test]
+    async fn test_search_skillhub_skill_reports_decode_context() {
+        let (search_url, server_handle) = start_skillhub_search_server("not-json").await;
+        let (_workspace, state) = create_skill_install_test_state_with_skillhub(
+            vec![],
+            Some(search_url),
+            None,
+        )
+        .await;
+
+        let error = search_skillhub_skill(state.as_ref(), "Agent Browser")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        server_handle.abort();
+
+        assert!(error.contains("Skill 搜索响应解析失败"));
+        assert!(error.contains("query=Agent Browser"));
     }
 
     #[tokio::test]
@@ -8266,6 +10597,286 @@ args = ["-c", "print('authorized')"]
             .await
             .get_any_entry("ding-install-skill")
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_install_skill_from_request_returns_unpack_error_for_invalid_archive() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+        let (download_url, server_handle) = start_test_archive_server(b"not-an-archive".to_vec()).await;
+
+        let error = install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: "agent-browser".to_string(),
+                version: None,
+                download_url,
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        server_handle.abort();
+
+        assert!(error.contains("Skill 安装包格式非法"));
+    }
+
+    #[tokio::test]
+    async fn test_install_skill_from_request_accepts_zip_archive_without_root_dir() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+        let skill_toml = r#"enabled = true
+timeout = 5
+executable = "python3"
+args = ["-c", "print('zip')"]
+"#;
+        let archive = build_test_skill_zip_archive(skill_toml);
+        let (download_url, server_handle) = start_test_archive_server(archive).await;
+
+        let result = install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: "agent-browser".to_string(),
+                version: None,
+                download_url,
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await;
+
+        server_handle.abort();
+
+        let response = result.unwrap();
+        assert_eq!(response.skill_name, "agent-browser");
+        assert!(state
+            .agent_runtime
+            .skills
+            .read()
+            .await
+            .get_any_entry("agent-browser")
+            .is_some());
+    }
+
+    #[test]
+    fn test_extract_skill_usage_hint_prefers_first_meaningful_body_line() {
+        let skill_md = r#"---
+name: Agent Browser
+description: browser automation
+author: test
+version: 1.0.0
+parameters: []
+permissions: []
+---
+
+# Browser Automation with agent-browser
+
+- 打开网页并执行点击、输入、抓取页面内容
+- 适合自动化网页操作
+"#;
+
+        let hint = extract_skill_usage_hint(skill_md).unwrap();
+        assert_eq!(hint, "打开网页并执行点击、输入、抓取页面内容");
+    }
+
+    #[tokio::test]
+    async fn test_build_skill_install_trigger_hint_uses_manifest_description() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+        let skill_toml = r#"enabled = true
+ timeout = 5
+ executable = "python3"
+ args = ["-c", "print('zip')"]
+ "#;
+        let archive = build_test_skill_zip_archive(skill_toml);
+        let (download_url, server_handle) = start_test_archive_server(archive).await;
+
+        install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: "agent-browser".to_string(),
+                version: None,
+                download_url,
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        server_handle.abort();
+
+        let hint = build_skill_install_trigger_hint(
+            &state,
+            &SkillInstallResponse {
+                skill_name: "agent-browser".to_string(),
+                source_type: "skillhub".to_string(),
+                package: "agent-browser".to_string(),
+                version: None,
+                target_layer: "global".to_string(),
+                target_scope: None,
+            },
+        )
+        .await;
+        assert!(hint.contains("这个 Skill 主要用于：agent browser skill"));
+        assert!(hint.contains("你现在可以直接用自然语言描述需求"));
+        assert!(hint.contains("例如：请打开目标网页，帮我完成点击、输入或截图，并把结果发给我"));
+    }
+
+    #[tokio::test]
+    async fn test_build_skill_install_trigger_hint_prefers_llm_simplified_chinese_summary() {
+        let (_runtime, state) = create_test_runtime_with_skill(
+            "browser-use",
+            r#"enabled = true
+ timeout = 5
+ executable = "python3"
+ args = ["-c", "print('ok')"]
+ "#,
+            r#"{"description_zh":"用于自动化操作网页并提取页面信息","example_zh":"请打开目标网页，帮我填写表单并截图发给我"}"#,
+        )
+        .await;
+
+        let hint = build_skill_install_trigger_hint(
+            &state,
+            &SkillInstallResponse {
+                skill_name: "browser-use".to_string(),
+                source_type: "skillhub".to_string(),
+                package: "browser-use".to_string(),
+                version: None,
+                target_layer: "global".to_string(),
+                target_scope: None,
+            },
+        )
+        .await;
+        assert!(hint.contains("这个 Skill 主要用于：用于自动化操作网页并提取页面信息"));
+        assert!(hint.contains("例如：请打开目标网页，帮我填写表单并截图发给我"));
+    }
+
+    #[tokio::test]
+    async fn test_build_skill_install_trigger_hint_falls_back_to_chinese_example_when_llm_fails() {
+        let runtime = create_test_runtime_with_skill_only(
+            "browser-use",
+            r#"enabled = true
+ timeout = 5
+ executable = "python3"
+ args = ["-c", "print('ok')"]
+ "#,
+        )
+        .await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(FailingLlmClient)),
+            None,
+            runtime,
+        ));
+
+        let hint = build_skill_install_trigger_hint(
+            &state,
+            &SkillInstallResponse {
+                skill_name: "browser-use".to_string(),
+                source_type: "skillhub".to_string(),
+                package: "browser-use".to_string(),
+                version: None,
+                target_layer: "global".to_string(),
+                target_scope: None,
+            },
+        )
+        .await;
+        assert!(hint.contains("你现在可以直接用自然语言描述需求"));
+        assert!(hint.contains("例如：请打开目标网页，帮我完成点击、输入或截图，并把结果发给我"));
+    }
+
+    #[tokio::test]
+    async fn test_build_skill_install_trigger_hint_reads_installed_skill_md_body() {
+        let (_workspace, state) = create_skill_install_test_state(vec![DingTalkSkillInstaller {
+            user_id: Some("ding-user-1".to_string()),
+            staff_id: None,
+            corp_id: Some("ding-corp-1".to_string()),
+        }])
+        .await;
+        let skill_md = r#"---
+name: browser-use
+version: 1.0.0
+description: Automates browser interactions for web testing, form filling, screenshots, and data extraction.
+author: test
+parameters: []
+permissions: []
+---
+
+# Browser Automation with browser-use CLI
+
+The `browser-use` command provides fast, persistent browser automation.
+"#;
+        let skill_toml = r#"enabled = true
+ timeout = 5
+ executable = "python3"
+ args = ["-c", "print('zip')"]
+ "#;
+        let archive = build_test_skill_zip_archive_with_skill_md(skill_md, skill_toml);
+        let (download_url, server_handle) = start_test_archive_server(archive).await;
+
+        let result = install_skill_from_request(
+            &state,
+            SkillInstallActor {
+                channel: "dingtalk",
+                sender_user_id: Some("ding-user-1".to_string()),
+                sender_staff_id: None,
+                sender_corp_id: Some("ding-corp-1".to_string()),
+            },
+            SkillInstallRequest {
+                source_type: SkillInstallSourceType::Skillhub,
+                package: "browser-use".to_string(),
+                version: None,
+                download_url,
+                target_layer: SkillInstallTargetLayer::Global,
+                target_scope: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        server_handle.abort();
+
+        let hint = build_skill_install_trigger_hint(&state, &result).await;
+        assert!(hint.contains("例如：请打开目标网页，帮我完成点击、输入或截图，并把结果发给我"));
     }
 
     #[tokio::test]

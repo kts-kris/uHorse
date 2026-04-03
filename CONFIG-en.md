@@ -313,6 +313,7 @@ user_id = "your-admin-user-id"
 - Hub still exposes `GET/POST /api/v1/channels/dingtalk/webhook` for compatibility and auxiliary testing.
 - To mirror Node Desktop local notifications to DingTalk, the main path is to enable pairing, start binding from Node Desktop, and confirm it in DingTalk; `channels.dingtalk.notification_bindings` is kept only as a compatibility seed/fallback.
 - `[[channels.dingtalk.skill_installers]]` only restricts the DingTalk text install entrypoint; it does not restrict the HTTP `POST /api/v1/skills/install` API.
+- The default quick regression path now includes the Agent Browser Skill install smoke, and you can run it directly with `make skill-install-smoke`.
 - Allowlist matching supports `user_id` / `staff_id` and may optionally require `corp_id`.
 - DingTalk text is first planned by the LLM into a single safe command; file operations, shell commands, and controlled `BrowserCommand` flows are all part of the current mainline.
 - But `安装技能 <package> <download_url> [version]` / `install skill ...` goes through the dedicated Skill install thin entrypoint instead of general natural-language command planning.

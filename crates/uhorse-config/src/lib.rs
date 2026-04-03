@@ -291,6 +291,12 @@ pub struct DingTalkConfig {
     pub app_secret: String,
     /// Agent ID
     pub agent_id: u64,
+    /// SkillHub 搜索地址（可选）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skillhub_search_url: Option<String>,
+    /// SkillHub 下载地址模板（可选，使用 {slug} 占位）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skillhub_download_url_template: Option<String>,
     /// 节点通知绑定
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notification_bindings: Vec<DingTalkNotificationBinding>,
@@ -637,6 +643,8 @@ agent_id = 1
         .unwrap();
 
         let dingtalk = config.channels.dingtalk.unwrap();
+        assert!(dingtalk.skillhub_search_url.is_none());
+        assert!(dingtalk.skillhub_download_url_template.is_none());
         assert!(dingtalk.notification_bindings.is_empty());
         assert!(dingtalk.skill_installers.is_empty());
     }
@@ -661,6 +669,8 @@ user_id = "manager-1"
         .unwrap();
 
         let dingtalk = config.channels.dingtalk.unwrap();
+        assert!(dingtalk.skillhub_search_url.is_none());
+        assert!(dingtalk.skillhub_download_url_template.is_none());
         assert_eq!(
             dingtalk.notification_bindings,
             vec![DingTalkNotificationBinding {
@@ -682,6 +692,8 @@ enabled = ["dingtalk"]
 app_key = "key"
 app_secret = "secret"
 agent_id = 1
+skillhub_search_url = "https://skillhub.example.com/api/v1/search"
+skillhub_download_url_template = "https://skillhub.example.com/api/v1/download?slug={slug}"
 
 [[channels.dingtalk.skill_installers]]
 user_id = "user-1"
@@ -694,6 +706,14 @@ staff_id = "staff-1"
         .unwrap();
 
         let dingtalk = config.channels.dingtalk.unwrap();
+        assert_eq!(
+            dingtalk.skillhub_search_url.as_deref(),
+            Some("https://skillhub.example.com/api/v1/search")
+        );
+        assert_eq!(
+            dingtalk.skillhub_download_url_template.as_deref(),
+            Some("https://skillhub.example.com/api/v1/download?slug={slug}")
+        );
         assert_eq!(
             dingtalk.skill_installers,
             vec![

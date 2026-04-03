@@ -295,7 +295,9 @@ impl Orchestrator {
                             error: status.error,
                         });
                     }
-                    uhorse_protocol::TaskStatus::Failed => {
+                    uhorse_protocol::TaskStatus::Failed
+                    | uhorse_protocol::TaskStatus::Cancelled
+                    | uhorse_protocol::TaskStatus::Timeout => {
                         return Ok(TaskCompletion {
                             task_id: task_id.clone(),
                             node_id: status
@@ -352,5 +354,77 @@ impl std::fmt::Debug for Orchestrator {
             .field("task_scheduler", &"TaskScheduler")
             .field("node_manager", &"NodeManager")
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uhorse_protocol::{CommandResult, ExecutionError, FileCommand, UserId};
+
+    #[tokio::test]
+    async fn test_wait_for_task_treats_cancelled_as_terminal() {
+        let node_manager = Arc::new(NodeManager::new(8, 30));
+        let (scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
+        let scheduler = Arc::new(scheduler);
+        let orchestrator = Orchestrator::create(scheduler.clone(), node_manager);
+        let task_id = TaskId::from_string("task-orch-cancelled");
+
+        scheduler
+            .insert_completed_task_for_test(crate::task_scheduler::CompletedTask {
+                task_id: task_id.clone(),
+                command: Command::File(FileCommand::Exists {
+                    path: "README.md".to_string(),
+                }),
+                context: TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                ),
+                priority: Priority::Normal,
+                node_id: NodeId::from_string("node-1"),
+                started_at: Utc::now(),
+                completed_at: Utc::now(),
+                status: uhorse_protocol::TaskStatus::Cancelled,
+                result: CommandResult::failure(ExecutionError::execution_failed("Task cancelled")),
+            })
+            .await;
+
+        let result = orchestrator.wait_for_task(&task_id).await.unwrap();
+        assert!(!result.success);
+        assert_eq!(result.error.as_deref(), Some("Task cancelled"));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_task_treats_timeout_as_terminal() {
+        let node_manager = Arc::new(NodeManager::new(8, 30));
+        let (scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
+        let scheduler = Arc::new(scheduler);
+        let orchestrator = Orchestrator::create(scheduler.clone(), node_manager);
+        let task_id = TaskId::from_string("task-orch-timeout");
+
+        scheduler
+            .insert_completed_task_for_test(crate::task_scheduler::CompletedTask {
+                task_id: task_id.clone(),
+                command: Command::File(FileCommand::Exists {
+                    path: "README.md".to_string(),
+                }),
+                context: TaskContext::new(
+                    UserId::from_string("user-1"),
+                    uhorse_protocol::SessionId::from_string("session-1"),
+                    "dingtalk",
+                ),
+                priority: Priority::Normal,
+                node_id: NodeId::from_string("node-1"),
+                started_at: Utc::now(),
+                completed_at: Utc::now(),
+                status: uhorse_protocol::TaskStatus::Timeout,
+                result: CommandResult::failure(ExecutionError::timeout("Task timed out")),
+            })
+            .await;
+
+        let result = orchestrator.wait_for_task(&task_id).await.unwrap();
+        assert!(!result.success);
+        assert_eq!(result.error.as_deref(), Some("Task timed out"));
     }
 }

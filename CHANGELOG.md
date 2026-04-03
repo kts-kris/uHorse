@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-04-03
+
+### Added
+
+- 新增 `make skill-install-smoke`，用于单独运行 Agent Browser Skill 安装 smoke 回归
+- `uhorse-hub` 新增 `test_agent_browser_natural_language_install_flow_returns_chinese_hint`，覆盖“帮我安装 Agent Browser 技能”的自然语言安装、SkillHub 安装与中文提示
+
+### Changed
+
+- `make test-quick` 现在默认包含 Agent Browser Skill 安装自动化回归
+- README / INSTALL / TESTING / CHANNELS / CONFIG / scripts / RELEASE_NOTES 已统一升级到 `v4.5.0`，并补齐默认回归入口说明
+
 ## [4.4.0] - 2026-04-02
 
 ### Added
@@ -296,7 +308,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.4.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.0...HEAD
+[4.5.0]: https://github.com/kts-kris/uHorse/compare/v4.4.0...v4.5.0
 [4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0
 [4.1.3]: https://github.com/kts-kris/uHorse/compare/v4.1.2...v4.1.3

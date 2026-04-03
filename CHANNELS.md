@@ -1,6 +1,6 @@
 # uHorse 通道指南
 
-本文档只描述 **`v4.4.0` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
+本文档只描述 **`v4.5.0` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
 
 当前最重要、也是主推荐路径的是：
 
@@ -121,7 +121,7 @@ DingTalk inbound message
 
 ## 来源感知运行时
 
-在当前 `v4.4.0` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
+在当前 `v4.5.0` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
 
 这里的目标不是把 DingTalk 变成 `memory / agent / skill` 管理入口，而是让运行时能够区分资源来自哪里、应该按什么边界共享或隔离。
 
@@ -225,6 +225,15 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 ---
 
 ## 测试验证
+
+### 默认快速回归入口
+
+```bash
+make skill-install-smoke
+make test-quick
+```
+
+其中 `make skill-install-smoke` 会单独验证 Agent Browser Skill 的自然语言安装、SkillHub 安装与中文提示；`make test-quick` 已默认包含该回归。
 
 ### 启动 Hub 并观察日志
 

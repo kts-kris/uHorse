@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>uHorse v4.4.0 current formal release line</strong>
+  <strong>uHorse v4.5.0 current formal release line</strong>
 </p>
 
 <p align="center">
-  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the current repository HEAD is now closed as the formal `v4.4.0` release, with `uhorse-hub` and `uhorse-node-desktop` as the primary deliverables.</em>
+  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the current repository HEAD is now closed as the formal `v4.5.0` release, with `uhorse-hub` and `uhorse-node-desktop` as the primary deliverables.</em>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.4.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-released-green" alt="Status">
@@ -35,7 +35,7 @@
 
 ## Overview
 
-The current public release line is **v4.4.0 Hub-Node mainline**.
+The current public release line is **v4.5.0 Hub-Node mainline**.
 
 Core components and primary deliverables:
 
@@ -45,7 +45,7 @@ Core components and primary deliverables:
 - `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
 - `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
-The `v4.4.0` capabilities already visible and validated in the repository include:
+The `v4.5.0` capabilities already visible and validated in the repository include:
 
 - DingTalk natural-language requests can enter the Hub → Node pipeline and, in controlled cases, be planned into a `BrowserCommand`.
 - Hub locally validates browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets.
@@ -55,7 +55,7 @@ The `v4.4.0` capabilities already visible and validated in the repository includ
 - the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
 - Node Desktop is delivered as a `bin/ + web/` archive, a macOS `.pkg`, a Windows installer, matching smoke coverage, and GitHub release / nightly artifacts, not as a native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installer.
 
-These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.4.0` as a return to the old monolithic Agent platform.
+These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.5.0` as a return to the old monolithic Agent platform.
 
 ## Current Status
 
@@ -76,6 +76,7 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | Auth rejection path | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` covers token / registration `node_id` mismatch |
 | DingTalk Stream integration | ✅ | Stream mode is the recommended path; Node Desktop can establish runtime bindings through pairing, and `channels.dingtalk.notification_bindings` is now only a compatibility seed/fallback |
 | DingTalk browser planning path | ✅ | Hub now allows controlled `BrowserCommand` planning and dispatches browser work to nodes that declare `CommandType::Browser` |
+| Agent Browser Skill install regression | ✅ | `test_agent_browser_natural_language_install_flow_returns_chinese_hint` now covers natural-language install, SkillHub install, and Chinese reply hints |
 
 ## Quick Start
 
@@ -144,7 +145,21 @@ curl http://127.0.0.1:8765/metrics
 curl http://127.0.0.1:8765/api/nodes
 ```
 
-### 4. Enable auth and approvals
+### 4. Default quick regression entrypoints
+
+The recommended default quick regression entrypoints are:
+
+```bash
+make test-quick
+make skill-install-smoke
+```
+
+Where:
+
+- `make test-quick` now runs release build, real Hub-Node roundtrip, the Agent Browser Skill install regression, Node workspace check, and Hub Docker smoke by default.
+- `make skill-install-smoke` runs `test_agent_browser_natural_language_install_flow_returns_chinese_hint` directly to validate the “帮我安装 Agent Browser 技能” natural-language install path, SkillHub installation, and Chinese reply hint generation.
+
+### 5. Enable auth and approvals
 
 To match the current authenticated Hub-Node mainline, run Hub from unified config and set `[security].jwt_secret`:
 
@@ -265,15 +280,15 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 
 | Document | Description |
 |----------|-------------|
-| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.4.0` release facts, documentation sync notes, and explicit non-goals |
+| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.5.0` release facts, documentation sync notes, and explicit non-goals |
 | [INSTALL-en.md](INSTALL-en.md) | current Hub-Node install path plus the Node Desktop archive / smoke boundary |
 | [API-en.md](API-en.md) | current implemented Hub-Node API surface |
 | [LOCAL_SETUP.md](LOCAL_SETUP.md) | local dual-process setup, JWT bootstrap, approval, and reconnect regression |
 | [CONFIG-en.md](CONFIG-en.md) | unified config, legacy HubConfig, NodeConfig, and permission rules |
 | [CHANNELS-en.md](CHANNELS-en.md) | current channel status, DingTalk Stream, browser planning path, and notification mirroring |
 | [scripts/README.md](scripts/README.md) | mainline scripts, including Node Desktop package / smoke and CI / release aligned usage |
-| [TESTING.md](TESTING.md) | package tests, workspace tests, and manual regression order |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.4.0` release notes |
+| [TESTING.md](TESTING.md) | package tests, workspace tests, `make test-quick` / `make skill-install-smoke`, and manual regression order |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.5.0` release notes |
 | [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4 Hub-Node deployment guide |
 | [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4 architecture details |
 
