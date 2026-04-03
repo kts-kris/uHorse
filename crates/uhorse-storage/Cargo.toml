@@ -20,4 +20,4 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 futures = "0.3" # For .collect() on streams
-toml = "0.8" # For config parsing
+toml = "1.1" # For config parsing
