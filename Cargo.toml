@@ -131,7 +131,7 @@ sysinfo = "0.32"
 glob-match = "0.2"
 
 # Utilities
-derive_more = { version = "1.0", features = ["from", "display"] }
+derive_more = { version = "2.1", features = ["from", "display"] }
 strum = { version = "0.26", features = ["derive"] }
 open = "5"
 
