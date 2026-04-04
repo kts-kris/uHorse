@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tracing::{debug, error, info, warn};
-use uhorse_protocol::{HubToNode, MessageCodec, NodeCapabilities, NodeId, NodeToHub};
+use uhorse_protocol::{HubToNode, MessageCodec, MessageId, NodeCapabilities, NodeId, NodeToHub};
 
 /// 连接配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,7 +328,7 @@ impl HubConnection {
             .to_string();
 
         let register_msg = NodeToHub::Register {
-            message_id: uhorse_protocol::MessageId::new(),
+            message_id: MessageId::new(),
             node_id: node_id.clone(),
             name: node_name.to_string(),
             capabilities: capabilities.clone(),
@@ -344,18 +344,16 @@ impl HubConnection {
             timestamp: Utc::now(),
         };
 
+        *state.write().await = ConnectionState::Authenticating;
+
         Self::send_node_message(&mut ws_sender, &register_msg)
             .await
             .map_err(|e| {
                 NodeError::Connection(format!("Failed to send register message: {}", e))
             })?;
 
-        // 更新状态
-        *state.write().await = ConnectionState::Authenticated {
-            authenticated_at: Utc::now(),
-        };
-
         // 接收消息循环
+        let mut hub_registration_confirmed = false;
         while running.load(Ordering::SeqCst) {
             tokio::select! {
                 // 接收消息
@@ -364,6 +362,13 @@ impl HubConnection {
                         Some(Ok(WsMessage::Binary(data))) => {
                             if let Ok(hub_msg) = MessageCodec::decode_hub_to_node(&data) {
                                 debug!("Received message from Hub: {:?}", hub_msg.message_type());
+
+                                if !hub_registration_confirmed {
+                                    hub_registration_confirmed = true;
+                                    *state.write().await = ConnectionState::Authenticated {
+                                        authenticated_at: Utc::now(),
+                                    };
+                                }
 
                                 if inbound_tx.send(hub_msg).await.is_err() {
                                     warn!("Failed to forward message to inbound channel");
@@ -378,7 +383,15 @@ impl HubConnection {
                                 break;
                             }
                         }
-                        Some(Ok(WsMessage::Close(_))) => {
+                        Some(Ok(WsMessage::Close(frame))) => {
+                            if !hub_registration_confirmed {
+                                let reason = frame
+                                    .as_ref()
+                                    .map(|frame| frame.reason.to_string())
+                                    .filter(|reason| !reason.trim().is_empty())
+                                    .unwrap_or_else(|| "Hub rejected node registration before confirmation".to_string());
+                                return Err(NodeError::Connection(reason));
+                            }
                             info!("Hub closed connection");
                             break;
                         }
@@ -393,6 +406,11 @@ impl HubConnection {
                             break;
                         }
                         None => {
+                            if !hub_registration_confirmed {
+                                return Err(NodeError::Connection(
+                                    "Hub closed connection before registration confirmation".to_string(),
+                                ));
+                            }
                             info!("WebSocket stream ended");
                             break;
                         }
@@ -476,7 +494,160 @@ impl HubConnection {
     pub async fn is_connected(&self) -> bool {
         matches!(
             *self.state.read().await,
-            ConnectionState::Connected { .. } | ConnectionState::Authenticated { .. }
+            ConnectionState::Connected { .. }
+                | ConnectionState::Authenticating
+                | ConnectionState::Authenticated { .. }
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{accept_async, tungstenite::Message as WsMessage};
+
+    fn sample_capabilities() -> NodeCapabilities {
+        NodeCapabilities::default()
+    }
+
+    fn sample_connection_config(hub_url: String) -> ConnectionConfig {
+        ConnectionConfig {
+            hub_url,
+            reconnect_interval_secs: 1,
+            heartbeat_interval_secs: 30,
+            connect_timeout_secs: 5,
+            max_reconnect_attempts: 1,
+            auth_token: Some("test-token".to_string()),
+        }
+    }
+
+    async fn next_register_message(receiver: &mut futures::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>>) -> NodeToHub {
+        let message = receiver.next().await.expect("register frame").expect("valid ws frame");
+        match message {
+            WsMessage::Binary(data) => MessageCodec::decode_node_to_hub(&data).expect("valid register message"),
+            other => panic!("unexpected websocket message: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connection_stays_authenticating_until_hub_confirms_registration() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let hub_url = format!("ws://{}/ws", address);
+        let (register_seen_tx, register_seen_rx) = tokio::sync::oneshot::channel();
+        let (continue_tx, continue_rx) = tokio::sync::oneshot::channel();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws_stream = accept_async(stream).await.unwrap();
+            let (mut sender, mut receiver) = ws_stream.split();
+
+            let register = next_register_message(&mut receiver).await;
+            assert!(matches!(register, NodeToHub::Register { .. }));
+            register_seen_tx.send(()).unwrap();
+            continue_rx.await.unwrap();
+
+            let heartbeat = HubToNode::HeartbeatRequest {
+                message_id: MessageId::new(),
+                timestamp: Utc::now(),
+            };
+            let encoded = MessageCodec::encode_hub_to_node(&heartbeat).unwrap();
+            sender.send(WsMessage::Binary(encoded)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+        let state = Arc::new(RwLock::new(ConnectionState::Disconnected));
+        let heartbeat_snapshot = Arc::new(RwLock::new(None));
+        let (inbound_tx, mut inbound_rx) = mpsc::channel(8);
+        let (_outbound_tx, outbound_rx) = mpsc::channel(8);
+        let outbound_rx = Arc::new(tokio::sync::Mutex::new(outbound_rx));
+        let running = Arc::new(AtomicBool::new(true));
+
+        let task = tokio::spawn({
+            let state = Arc::clone(&state);
+            let heartbeat_snapshot = Arc::clone(&heartbeat_snapshot);
+            let outbound_rx = Arc::clone(&outbound_rx);
+            let running = Arc::clone(&running);
+            async move {
+                HubConnection::connect_and_run(
+                    &state,
+                    &sample_connection_config(hub_url),
+                    &NodeId::from_string("node-1"),
+                    "node-1",
+                    "/tmp",
+                    &sample_capabilities(),
+                    &heartbeat_snapshot,
+                    &inbound_tx,
+                    &outbound_rx,
+                    &running,
+                )
+                .await
+            }
+        });
+
+        register_seen_rx.await.unwrap();
+        assert_eq!(*state.read().await, ConnectionState::Authenticating);
+
+        continue_tx.send(()).unwrap();
+        let hub_msg = inbound_rx.recv().await.expect("heartbeat request");
+        assert!(matches!(hub_msg, HubToNode::HeartbeatRequest { .. }));
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(matches!(*state.read().await, ConnectionState::Authenticated { .. }));
+
+        running.store(false, Ordering::SeqCst);
+        task.await.unwrap().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_reports_failure_when_hub_closes_before_confirmation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let hub_url = format!("ws://{}/ws", address);
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws_stream = accept_async(stream).await.unwrap();
+            let (mut sender, mut receiver) = ws_stream.split();
+
+            let register = next_register_message(&mut receiver).await;
+            assert!(matches!(register, NodeToHub::Register { .. }));
+
+            sender
+                .send(WsMessage::Close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Policy,
+                    reason: "invalid token".into(),
+                })))
+                .await
+                .unwrap();
+        });
+
+        let state = Arc::new(RwLock::new(ConnectionState::Disconnected));
+        let heartbeat_snapshot = Arc::new(RwLock::new(None));
+        let (inbound_tx, _inbound_rx) = mpsc::channel(8);
+        let (_outbound_tx, outbound_rx) = mpsc::channel(8);
+        let outbound_rx = Arc::new(tokio::sync::Mutex::new(outbound_rx));
+        let running = Arc::new(AtomicBool::new(true));
+
+        let result = HubConnection::connect_and_run(
+            &state,
+            &sample_connection_config(hub_url),
+            &NodeId::from_string("node-1"),
+            "node-1",
+            "/tmp",
+            &sample_capabilities(),
+            &heartbeat_snapshot,
+            &inbound_tx,
+            &outbound_rx,
+            &running,
+        )
+        .await;
+
+        assert!(matches!(result, Err(NodeError::Connection(error)) if error.contains("invalid token")));
+        assert_eq!(*state.read().await, ConnectionState::Authenticating);
+
+        server.await.unwrap();
     }
 }

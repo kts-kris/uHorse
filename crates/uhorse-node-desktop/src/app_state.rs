@@ -1215,10 +1215,24 @@ fn describe_runtime_overview(
         );
     }
 
-    if connection_state.starts_with("authenticated") || connection_state.starts_with("connected") {
+    if connection_state.starts_with("authenticated") {
         return (
             "running".to_string(),
             "Node 运行中，Hub 连接正常。".to_string(),
+        );
+    }
+
+    if connection_state.starts_with("authenticating") {
+        return (
+            "connecting".to_string(),
+            "Node 运行中，正在等待 Hub 确认注册。".to_string(),
+        );
+    }
+
+    if connection_state.starts_with("connected") {
+        return (
+            "connecting".to_string(),
+            "Node 运行中，已连接 Hub，等待注册确认。".to_string(),
         );
     }
 
@@ -2085,6 +2099,48 @@ mod tests {
         assert_eq!(status.active_pairing_code, None);
         assert_eq!(status.overview_state, "idle");
         assert_eq!(status.overview_message, "Node 尚未启动。");
+    }
+
+    #[test]
+    fn test_describe_runtime_overview_requires_authenticated_for_healthy_hub_message() {
+        let (state, message) = describe_runtime_overview(
+            &DesktopLifecycleState::Running,
+            "connected",
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(state, "connecting");
+        assert_eq!(message, "Node 运行中，已连接 Hub，等待注册确认。");
+
+        let (state, message) = describe_runtime_overview(
+            &DesktopLifecycleState::Running,
+            "authenticating",
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(state, "connecting");
+        assert_eq!(message, "Node 运行中，正在等待 Hub 确认注册。");
+
+        let (state, message) = describe_runtime_overview(
+            &DesktopLifecycleState::Running,
+            "authenticated",
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(state, "running");
+        assert_eq!(message, "Node 运行中，Hub 连接正常。");
     }
 
     #[tokio::test]

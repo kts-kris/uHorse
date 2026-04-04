@@ -1,6 +1,6 @@
 # uHorse Makefile - Hub / Node 主线快捷命令
 
-.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke skill-install-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-package-macos desktop-package-windows desktop-smoke desktop-installer-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
+.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke skill-install-smoke baidu-browser-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-package-macos desktop-package-windows desktop-smoke desktop-installer-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
 
 .DEFAULT_GOAL := help
 
@@ -74,6 +74,10 @@ auth-smoke: ## 运行 JWT node_id 拒绝回归
 
 skill-install-smoke: ## 运行 Agent Browser Skill 安装自动化回归
 	@cargo test -p uhorse-hub test_agent_browser_natural_language_install_flow_returns_chinese_hint -- --nocapture
+
+baidu-browser-smoke: ## 运行“帮我访问百度”浏览器自动化回归
+	@cargo test -p uhorse-hub test_plan_dingtalk_command_maps_baidu_request_to_open_system -- --nocapture
+	@cargo test -p uhorse-hub test_submit_dingtalk_task_dispatches_baidu_open_system_to_browser_node -- --nocapture
 
 node-run: ## 启动 Node（需要已准备 node.toml）
 	@cargo run --release -p uhorse-node -- --config node.toml --log-level info

@@ -11,6 +11,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tracing::{debug, error, info, instrument, warn};
+use uuid::Uuid;
 use uhorse_core::{
     Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
     UHorseError,
@@ -29,6 +30,75 @@ struct AccessTokenResult {
     access_token: String,
     #[serde(rename = "expireIn")]
     expires_in: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct DingTalkApiResponseEnvelope {
+    #[serde(default)]
+    errcode: Option<i64>,
+    #[serde(default)]
+    errno: Option<i64>,
+    #[serde(default)]
+    errmsg: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    success: Option<bool>,
+    #[serde(default)]
+    code: Option<serde_json::Value>,
+    #[serde(default, rename = "requestId")]
+    request_id: Option<String>,
+}
+
+fn parse_dingtalk_business_error(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let envelope: DingTalkApiResponseEnvelope = serde_json::from_str(trimmed).ok()?;
+
+    if matches!(envelope.success, Some(false)) {
+        return Some(format_dingtalk_business_error(&envelope));
+    }
+
+    if let Some(errcode) = envelope.errcode.filter(|code| *code != 0) {
+        return Some(format_dingtalk_business_error(&envelope).replace("<code>", &errcode.to_string()));
+    }
+
+    if let Some(errno) = envelope.errno.filter(|code| *code != 0) {
+        return Some(format_dingtalk_business_error(&envelope).replace("<code>", &errno.to_string()));
+    }
+
+    if let Some(code) = envelope.code.as_ref().and_then(normalize_dingtalk_business_code) {
+        if code != 0 {
+            return Some(format_dingtalk_business_error(&envelope).replace("<code>", &code.to_string()));
+        }
+    }
+
+    None
+}
+
+fn normalize_dingtalk_business_code(value: &serde_json::Value) -> Option<i64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_i64(),
+        serde_json::Value::String(text) => text.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn format_dingtalk_business_error(envelope: &DingTalkApiResponseEnvelope) -> String {
+    let message = envelope
+        .errmsg
+        .as_deref()
+        .or(envelope.message.as_deref())
+        .unwrap_or("unknown DingTalk business error");
+    let request_suffix = envelope
+        .request_id
+        .as_deref()
+        .map(|request_id| format!(", requestId={request_id}"))
+        .unwrap_or_default();
+    format!("business error code=<code>, message={}{}", message, request_suffix)
 }
 
 /// 钉钉消息事件
@@ -88,6 +158,34 @@ pub struct DingTalkInboundMessage {
     pub session_webhook: Option<String>,
     pub session_webhook_expired_time: Option<i64>,
     pub robot_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DingTalkTransientClearOutcome {
+    Unsupported,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DingTalkAiCardHandle {
+    pub out_track_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DingTalkTransientMessageReceipt {
+    supported_clear: bool,
+}
+
+impl DingTalkTransientMessageReceipt {
+    pub fn unsupported() -> Self {
+        Self {
+            supported_clear: false,
+        }
+    }
+
+    pub fn supports_clear(&self) -> bool {
+        self.supported_clear
+    }
 }
 
 /// Stream 建连请求
@@ -202,6 +300,70 @@ struct MarkdownBody {
     text: String,
 }
 
+#[derive(Debug, Serialize)]
+struct DingTalkAiCardContent {
+    #[serde(rename = "cardParamMap")]
+    card_param_map: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct DingTalkAiCardCreateRequest {
+    #[serde(rename = "openSpaceId")]
+    open_space_id: String,
+    #[serde(rename = "cardTemplateId")]
+    card_template_id: String,
+    #[serde(rename = "outTrackId")]
+    out_track_id: String,
+    #[serde(rename = "cardData")]
+    card_data: DingTalkAiCardContent,
+    #[serde(rename = "imGroupOpenDeliverModel", skip_serializing_if = "Option::is_none")]
+    im_group_open_deliver_model: Option<DingTalkAiCardGroupDeliverModel>,
+    #[serde(rename = "imRobotOpenDeliverModel", skip_serializing_if = "Option::is_none")]
+    im_robot_open_deliver_model: Option<DingTalkAiCardRobotDeliverModel>,
+}
+
+#[derive(Debug, Serialize)]
+struct DingTalkAiCardGroupDeliverModel {
+    #[serde(rename = "robotCode")]
+    robot_code: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DingTalkAiCardRobotDeliverModel {
+    #[serde(rename = "spaceType")]
+    space_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DingTalkAiCardTarget {
+    ImGroup { conversation_id: String },
+    ImRobot { user_id: String },
+}
+
+fn build_im_group_open_space_id(conversation_id: &str) -> String {
+    format!("dtv1.card//im_group.{conversation_id}")
+}
+
+fn build_im_robot_open_space_id(user_id: &str) -> String {
+    format!("dtv1.card//im_robot.{user_id}")
+}
+
+#[derive(Debug, Serialize)]
+struct DingTalkAiCardUpdateRequest {
+    #[serde(rename = "outTrackId")]
+    out_track_id: String,
+    #[serde(rename = "cardData")]
+    card_data: DingTalkAiCardContent,
+    #[serde(rename = "cardUpdateOptions")]
+    card_update_options: DingTalkAiCardUpdateOptions,
+}
+
+#[derive(Debug, Serialize)]
+struct DingTalkAiCardUpdateOptions {
+    #[serde(rename = "updateCardDataByKey")]
+    update_card_data_by_key: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamAction {
     Continue,
@@ -214,6 +376,7 @@ pub struct DingTalkChannel {
     app_key: String,
     app_secret: String,
     agent_id: u64,
+    ai_card_template_id: Option<String>,
     client: Client,
     running: Arc<RwLock<bool>>,
     access_token: Arc<RwLock<Option<String>>>,
@@ -223,13 +386,19 @@ pub struct DingTalkChannel {
 
 impl DingTalkChannel {
     /// 创建新的钉钉通道
-    pub fn new(app_key: String, app_secret: String, agent_id: u64) -> Self {
+    pub fn new(
+        app_key: String,
+        app_secret: String,
+        agent_id: u64,
+        ai_card_template_id: Option<String>,
+    ) -> Self {
         let (incoming_tx, _) = broadcast::channel(128);
 
         Self {
             app_key,
             app_secret,
             agent_id,
+            ai_card_template_id,
             client: Client::new(),
             running: Arc::new(RwLock::new(false)),
             access_token: Arc::new(RwLock::new(None)),
@@ -786,11 +955,167 @@ impl DingTalkChannel {
         *self.running.read().await
     }
 
-    /// 通过 sessionWebhook 原路回复文本消息
-    pub async fn reply_via_session_webhook(
+    pub fn ai_card_template_id(&self) -> Option<&str> {
+        self.ai_card_template_id.as_deref()
+    }
+
+    pub async fn send_processing_ack_via_session_webhook_markdown(
         &self,
         session_webhook: &str,
-        text: &str,
+        markdown: &str,
+        at_user_ids: &[String],
+    ) -> Result<DingTalkTransientMessageReceipt, ChannelError> {
+        self.reply_via_session_webhook_markdown(session_webhook, "Wait", markdown, at_user_ids)
+            .await?;
+        Ok(DingTalkTransientMessageReceipt::unsupported())
+    }
+
+    pub async fn create_ai_card(
+        &self,
+        target: &DingTalkAiCardTarget,
+        robot_code: &str,
+        card_template_id: &str,
+        status: &str,
+        content: &str,
+    ) -> Result<DingTalkAiCardHandle, ChannelError> {
+        if robot_code.trim().is_empty() {
+            return Err(ChannelError::ConfigError(
+                "robot_code is required for DingTalk AI card".to_string(),
+            ));
+        }
+        if card_template_id.trim().is_empty() {
+            return Err(ChannelError::ConfigError(
+                "card_template_id is required for DingTalk AI card".to_string(),
+            ));
+        }
+
+        let (open_space_id, im_group_open_deliver_model, im_robot_open_deliver_model) = match target {
+            DingTalkAiCardTarget::ImGroup { conversation_id } => {
+                if conversation_id.trim().is_empty() {
+                    return Err(ChannelError::ConfigError(
+                        "conversation_id is required for DingTalk AI card".to_string(),
+                    ));
+                }
+                (
+                    build_im_group_open_space_id(conversation_id),
+                    Some(DingTalkAiCardGroupDeliverModel {
+                        robot_code: robot_code.to_string(),
+                    }),
+                    None,
+                )
+            }
+            DingTalkAiCardTarget::ImRobot { user_id } => {
+                if user_id.trim().is_empty() {
+                    return Err(ChannelError::ConfigError(
+                        "user_id is required for DingTalk AI card".to_string(),
+                    ));
+                }
+                (
+                    build_im_robot_open_space_id(user_id),
+                    None,
+                    Some(DingTalkAiCardRobotDeliverModel {
+                        space_type: "IM_ROBOT".to_string(),
+                    }),
+                )
+            }
+        };
+
+        let access_token = self.get_access_token().await?;
+        let url = "https://api.dingtalk.com/v1.0/card/instances/createAndDeliver";
+        let out_track_id = format!("uhorse-{}", Uuid::new_v4().simple());
+        let request = DingTalkAiCardCreateRequest {
+            open_space_id,
+            card_template_id: card_template_id.to_string(),
+            out_track_id: out_track_id.clone(),
+            card_data: DingTalkAiCardContent {
+                card_param_map: serde_json::json!({
+                    "status": status,
+                    "content": content,
+                }),
+            },
+            im_group_open_deliver_model,
+            im_robot_open_deliver_model,
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .header("x-acs-dingtalk-access-token", access_token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(ChannelError::SendFailed(format!("API error: {}", response_text)));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
+        }
+
+        Ok(DingTalkAiCardHandle { out_track_id })
+    }
+
+    pub async fn finalize_ai_card(
+        &self,
+        handle: &DingTalkAiCardHandle,
+        content: &str,
+    ) -> Result<(), ChannelError> {
+        let access_token = self.get_access_token().await?;
+        let url = "https://api.dingtalk.com/v1.0/card/instances";
+        let request = DingTalkAiCardUpdateRequest {
+            out_track_id: handle.out_track_id.clone(),
+            card_data: DingTalkAiCardContent {
+                card_param_map: serde_json::json!({
+                    "status": "done",
+                    "content": content,
+                }),
+            },
+            card_update_options: DingTalkAiCardUpdateOptions {
+                update_card_data_by_key: true,
+            },
+        };
+
+        let response = self
+            .client
+            .put(url)
+            .header("x-acs-dingtalk-access-token", access_token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(ChannelError::SendFailed(format!("API error: {}", response_text)));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
+        }
+
+        Ok(())
+    }
+
+    pub async fn clear_processing_ack(
+        &self,
+        receipt: Option<&DingTalkTransientMessageReceipt>,
+    ) -> Result<DingTalkTransientClearOutcome, ChannelError> {
+        match receipt {
+            Some(receipt) if receipt.supports_clear() => Ok(DingTalkTransientClearOutcome::Skipped),
+            Some(_) => Ok(DingTalkTransientClearOutcome::Unsupported),
+            None => Ok(DingTalkTransientClearOutcome::Skipped),
+        }
+    }
+
+    /// 通过 sessionWebhook 原路回复 Markdown 消息
+    pub async fn reply_via_session_webhook_markdown(
+        &self,
+        session_webhook: &str,
+        title: &str,
+        markdown: &str,
         at_user_ids: &[String],
     ) -> Result<(), ChannelError> {
         #[derive(Serialize)]
@@ -802,23 +1127,24 @@ impl DingTalkChannel {
         }
 
         #[derive(Serialize)]
-        struct SessionTextRequest {
+        struct SessionMarkdownRequest {
             at: SessionAtBody,
-            text: TextBody,
+            markdown: MarkdownBody,
             #[serde(rename = "msgtype")]
             msg_type: String,
         }
 
         let access_token = self.get_access_token().await?;
-        let request = SessionTextRequest {
+        let request = SessionMarkdownRequest {
             at: SessionAtBody {
                 at_user_ids: at_user_ids.to_vec(),
                 is_at_all: false,
             },
-            text: TextBody {
-                content: text.to_string(),
+            markdown: MarkdownBody {
+                title: title.to_string(),
+                text: markdown.to_string(),
             },
-            msg_type: "text".to_string(),
+            msg_type: "markdown".to_string(),
         };
 
         let response = self
@@ -830,13 +1156,18 @@ impl DingTalkChannel {
             .await
             .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            error!("DingTalk session webhook error: {}", error_text);
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            error!("DingTalk session webhook error: {}", response_text);
             return Err(ChannelError::SendFailed(format!(
                 "API error: {}",
-                error_text
+                response_text
             )));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            error!("DingTalk session webhook business error: {}", error);
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
         }
 
         Ok(())
@@ -869,13 +1200,18 @@ impl DingTalkChannel {
             .await
             .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            error!("DingTalk API error: {}", error_text);
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            error!("DingTalk API error: {}", response_text);
             return Err(ChannelError::SendFailed(format!(
                 "API error: {}",
-                error_text
+                response_text
             )));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            error!("DingTalk API business error: {}", error);
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
         }
 
         Ok(())
@@ -914,74 +1250,138 @@ impl DingTalkChannel {
             .await
             .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
             return Err(ChannelError::SendFailed(format!(
                 "API error: {}",
-                error_text
+                response_text
             )));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
         }
 
         Ok(())
     }
 
-    /// 发送群消息
+    /// 发送群文本消息
     pub async fn send_group_message(
         &self,
         conversation_id: &str,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
+        match message {
+            MessageContent::Text(text) => self.send_group_text_message(conversation_id, text).await,
+            _ => Err(ChannelError::SendFailed(
+                "Only text messages are supported for group messages".to_string(),
+            )),
+        }
+    }
+
+    pub async fn send_group_text_message(
+        &self,
+        conversation_id: &str,
+        text: &str,
+    ) -> Result<(), ChannelError> {
         let access_token = self.get_access_token().await?;
         let url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send";
 
-        match message {
-            MessageContent::Text(text) => {
-                #[derive(Serialize)]
-                struct GroupTextRequest {
-                    #[serde(rename = "conversationId")]
-                    conversation_id: String,
-                    msg: GroupMessageBody,
-                }
+        #[derive(Serialize)]
+        struct GroupTextRequest {
+            #[serde(rename = "conversationId")]
+            conversation_id: String,
+            msg: GroupTextBody,
+        }
 
-                #[derive(Serialize)]
-                struct GroupMessageBody {
-                    #[serde(rename = "msgtype")]
-                    msg_type: String,
-                    text: TextBody,
-                }
+        #[derive(Serialize)]
+        struct GroupTextBody {
+            #[serde(rename = "msgtype")]
+            msg_type: String,
+            text: TextBody,
+        }
 
-                let request = GroupTextRequest {
-                    conversation_id: conversation_id.to_string(),
-                    msg: GroupMessageBody {
-                        msg_type: "text".to_string(),
-                        text: TextBody {
-                            content: text.clone(),
-                        },
-                    },
-                };
+        let request = GroupTextRequest {
+            conversation_id: conversation_id.to_string(),
+            msg: GroupTextBody {
+                msg_type: "text".to_string(),
+                text: TextBody {
+                    content: text.to_string(),
+                },
+            },
+        };
 
-                let response = self
-                    .client
-                    .post(url)
-                    .header("x-acs-dingtalk-access-token", access_token.clone())
-                    .json(&request)
-                    .send()
-                    .await
-                    .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+        let response = self
+            .client
+            .post(url)
+            .header("x-acs-dingtalk-access-token", access_token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
 
-                if !response.status().is_success() {
-                    let error_text = response.text().await.unwrap_or_default();
-                    return Err(ChannelError::SendFailed(format!(
-                        "API error: {}",
-                        error_text
-                    )));
-                }
-            }
-            _ => {
-                return Err(ChannelError::SendFailed(
-                    "Only text messages are supported for group messages".to_string(),
-                ));
-            }
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(ChannelError::SendFailed(format!("API error: {}", response_text)));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
+        }
+
+        Ok(())
+    }
+
+    pub async fn send_group_markdown_message(
+        &self,
+        conversation_id: &str,
+        title: &str,
+        markdown: &str,
+    ) -> Result<(), ChannelError> {
+        let access_token = self.get_access_token().await?;
+        let url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send";
+
+        #[derive(Serialize)]
+        struct GroupMarkdownRequest {
+            #[serde(rename = "conversationId")]
+            conversation_id: String,
+            msg: GroupMarkdownBody,
+        }
+
+        #[derive(Serialize)]
+        struct GroupMarkdownBody {
+            #[serde(rename = "msgtype")]
+            msg_type: String,
+            markdown: MarkdownBody,
+        }
+
+        let request = GroupMarkdownRequest {
+            conversation_id: conversation_id.to_string(),
+            msg: GroupMarkdownBody {
+                msg_type: "markdown".to_string(),
+                markdown: MarkdownBody {
+                    title: title.to_string(),
+                    text: markdown.to_string(),
+                },
+            },
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .header("x-acs-dingtalk-access-token", access_token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(ChannelError::SendFailed(format!("API error: {}", response_text)));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
         }
 
         Ok(())
@@ -1095,7 +1495,7 @@ mod tests {
     #[test]
     fn test_dingtalk_channel_creation() {
         let channel =
-            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789);
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
 
         assert_eq!(channel.app_key(), "test_key");
         assert_eq!(channel.app_secret(), "test_secret");
@@ -1106,7 +1506,7 @@ mod tests {
     #[test]
     fn test_extract_text_content() {
         let channel =
-            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789);
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
 
         let event = DingTalkEvent {
             conversation_id: Some("conv_123".to_string()),
@@ -1151,5 +1551,121 @@ mod tests {
             event.text.as_ref().unwrap().content,
             Some("Hello World".to_string())
         );
+    }
+
+    #[test]
+    fn test_send_processing_ack_returns_receipt_without_message_id_when_platform_does_not_expose_handle() {
+        let receipt = DingTalkTransientMessageReceipt::unsupported();
+        assert!(!receipt.supports_clear());
+    }
+
+    #[test]
+    fn test_create_ai_card_requires_target_value_and_robot_code() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt
+            .block_on(channel.create_ai_card(
+                &DingTalkAiCardTarget::ImGroup {
+                    conversation_id: "".to_string(),
+                },
+                "",
+                "tpl",
+                "processing",
+                "hello",
+            ))
+            .unwrap_err();
+        assert!(err.to_string().contains("robot_code is required"));
+    }
+
+    #[test]
+    fn test_build_im_group_open_space_id_uses_dingtalk_required_shape() {
+        assert_eq!(
+            build_im_group_open_space_id("cidp4Gh123VCQ=="),
+            "dtv1.card//im_group.cidp4Gh123VCQ=="
+        );
+    }
+
+    #[test]
+    fn test_build_im_robot_open_space_id_uses_dingtalk_required_shape() {
+        assert_eq!(
+            build_im_robot_open_space_id("manager123"),
+            "dtv1.card//im_robot.manager123"
+        );
+    }
+
+    #[test]
+    fn test_create_ai_card_returns_handle_on_success_like_shape() {
+        let handle = DingTalkAiCardHandle {
+            out_track_id: "uhorse-test".to_string(),
+        };
+        assert_eq!(handle.out_track_id, "uhorse-test");
+    }
+
+    #[test]
+    fn test_finalize_ai_card_uses_handle_and_final_content() {
+        let handle = DingTalkAiCardHandle {
+            out_track_id: "uhorse-test".to_string(),
+        };
+        let request = DingTalkAiCardUpdateRequest {
+            out_track_id: handle.out_track_id.clone(),
+            card_data: DingTalkAiCardContent {
+                card_param_map: serde_json::json!({
+                    "status": "done",
+                    "content": "final",
+                }),
+            },
+            card_update_options: DingTalkAiCardUpdateOptions {
+                update_card_data_by_key: true,
+            },
+        };
+        let payload = serde_json::to_value(request).unwrap();
+        assert_eq!(payload["outTrackId"], "uhorse-test");
+        assert_eq!(payload["cardData"]["cardParamMap"]["content"], "final");
+    }
+
+    #[test]
+    fn test_parse_dingtalk_business_error_detects_errcode_payload() {
+        let error = parse_dingtalk_business_error(r#"{"errcode":40035,"errmsg":"invalid param"}"#)
+            .expect("should detect errcode business failure");
+        assert!(error.contains("40035"));
+        assert!(error.contains("invalid param"));
+    }
+
+    #[test]
+    fn test_parse_dingtalk_business_error_detects_success_false_payload() {
+        let error = parse_dingtalk_business_error(
+            r#"{"success":false,"message":"delivery failed","requestId":"req-1"}"#,
+        )
+        .expect("should detect success=false business failure");
+        assert!(error.contains("delivery failed"));
+        assert!(error.contains("req-1"));
+    }
+
+    #[test]
+    fn test_parse_dingtalk_business_error_ignores_success_payload() {
+        assert!(parse_dingtalk_business_error(r#"{"errcode":0,"errmsg":"ok"}"#).is_none());
+        assert!(parse_dingtalk_business_error(r#"{"success":true}"#).is_none());
+    }
+
+    #[test]
+    fn test_stream_update_ai_card_can_be_added_without_breaking_finalize() {
+        let payload = serde_json::json!({
+            "status": "processing",
+            "content": "working",
+        });
+        assert_eq!(payload["status"], "processing");
+        assert_eq!(payload["content"], "working");
+    }
+
+    #[tokio::test]
+    async fn test_clear_processing_ack_returns_unsupported_without_receipt_capability() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let outcome = channel
+            .clear_processing_ack(Some(&DingTalkTransientMessageReceipt::unsupported()))
+            .await
+            .unwrap();
+        assert_eq!(outcome, DingTalkTransientClearOutcome::Unsupported);
     }
 }

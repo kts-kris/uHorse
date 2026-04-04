@@ -378,6 +378,7 @@ async fn init_dingtalk_channel(
         dingtalk_config.app_key.clone(),
         dingtalk_config.app_secret.clone(),
         dingtalk_config.agent_id,
+        dingtalk_config.ai_card_template_id.clone(),
     );
 
     channel
@@ -422,6 +423,7 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
         app_key: "your-app-key".to_string(),
         app_secret: "your-app-secret".to_string(),
         agent_id: 123456789,
+        ai_card_template_id: None,
         skillhub_search_url: None,
         skillhub_download_url_template: None,
         notification_bindings: vec![DingTalkNotificationBinding {

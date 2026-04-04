@@ -291,6 +291,9 @@ pub struct DingTalkConfig {
     pub app_secret: String,
     /// Agent ID
     pub agent_id: u64,
+    /// AI Card 模板 ID（可选）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_card_template_id: Option<String>,
     /// SkillHub 搜索地址（可选）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skillhub_search_url: Option<String>,

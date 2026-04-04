@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-04-04
+
+### Fixed
+
+- DingTalk session-webhook replies no longer leak the `[Wait]` processing text into the final user-visible reply
+- The continuation planner now accepts the top-level `{"action":"execute_command", ...}` shape so command JSON is no longer echoed back to DingTalk users
+- Initial planning and continuation still share the same command JSON normalization path, so `execute_command` continues into task dispatch instead of being treated as final text
+
+### Changed
+
+- README / INSTALL / CHANNELS / RELEASE_NOTES are now aligned to `v4.5.1` and capture the DingTalk reply-regression fixes as the current release facts
+
 ## [4.5.0] - 2026-04-03
 
 ### Added
@@ -308,7 +320,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.1...HEAD
+[4.5.1]: https://github.com/kts-kris/uHorse/compare/v4.5.0...v4.5.1
 [4.5.0]: https://github.com/kts-kris/uHorse/compare/v4.4.0...v4.5.0
 [4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0

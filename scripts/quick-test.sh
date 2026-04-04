@@ -33,6 +33,11 @@ info "运行 Agent Browser Skill 安装自动化回归..."
 cargo test -p uhorse-hub test_agent_browser_natural_language_install_flow_returns_chinese_hint -- --nocapture >/tmp/uhorse-quick-skill-install.log 2>&1
 pass "Agent Browser Skill 安装回归通过"
 
+info "运行“帮我访问百度”浏览器自动化回归..."
+cargo test -p uhorse-hub test_plan_dingtalk_command_maps_baidu_request_to_open_system -- --nocapture >/tmp/uhorse-quick-baidu-plan.log 2>&1
+cargo test -p uhorse-hub test_submit_dingtalk_task_dispatches_baidu_open_system_to_browser_node -- --nocapture >/tmp/uhorse-quick-baidu-dispatch.log 2>&1
+pass "百度浏览器自动化回归通过"
+
 info "检查当前 workspace 是否可作为 Node 工作区..."
 cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-quick-node-check.log 2>&1
 pass "Node workspace 检查通过"
@@ -65,6 +70,8 @@ echo "快速测试完成。关键日志："
 echo "  /tmp/uhorse-quick-build.log"
 echo "  /tmp/uhorse-quick-roundtrip.log"
 echo "  /tmp/uhorse-quick-skill-install.log"
+echo "  /tmp/uhorse-quick-baidu-plan.log"
+echo "  /tmp/uhorse-quick-baidu-dispatch.log"
 echo "  /tmp/uhorse-quick-node-check.log"
 echo "  /tmp/uhorse-quick-docker.log"
 echo "  /tmp/uhorse-quick-compose.log"

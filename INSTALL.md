@@ -1,6 +1,6 @@
 # uHorse 安装指南
 
-本文档只描述 **当前仓库主线 `v4.5.0` Hub-Node 架构** 的真实安装路径。
+本文档只描述 **当前仓库主线 `v4.5.1` Hub-Node 架构** 的真实安装路径。
 
 当前最推荐、也最贴近已验证代码路径的安装方式是：
 
@@ -108,7 +108,7 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 
 如果你要交付本地桌面客户端，而不是只运行宿主 API，可以直接使用仓库内置脚本。
 
-`v4.5.0` 当前已经固定的交付边界是：**`bin + web` archive、安装器 smoke、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive、macOS `.pkg`、Windows installer 与对应 smoke 验证，但**仍不包含**原生 `.app/.dmg`、签名、公证、`.msi`、Linux 原生安装器。
+`v4.5.1` 当前已经固定的交付边界是：**`bin + web` archive、安装器 smoke、CI / release / nightly artifacts**。这表示当前仓库主线已经覆盖可分发 archive、macOS `.pkg`、Windows installer 与对应 smoke 验证，但**仍不包含**原生 `.app/.dmg`、签名、公证、`.msi`、Linux 原生安装器。
 
 可以直接使用仓库内置脚本：
 
@@ -223,9 +223,9 @@ make skill-install-smoke
 make test-quick
 ```
 
-### 5. 验证 Node Desktop `v4.5.0` 交付边界
+### 5. 验证 Node Desktop `v4.5.1` 交付边界
 
-如果你正在验收 `v4.5.0` 的 Node Desktop 交付件，请额外执行：
+如果你正在验收 `v4.5.1` 的 Node Desktop 交付件，请额外执行：
 
 ```bash
 ./scripts/package-node-desktop.sh

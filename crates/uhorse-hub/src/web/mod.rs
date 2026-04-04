@@ -15,6 +15,7 @@ use axum::{
 use chrono::Utc;
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::net::IpAddr;
@@ -30,7 +31,13 @@ use uhorse_agent::{
     AgentScopeConfig, LayeredMemoryStore, LayeredSkillEntry, LayeredSkillRegistry, MemoryStore,
     SessionKey, SessionNamespace, SessionState, SkillRegistry,
 };
-use uhorse_channel::{dingtalk::DingTalkEvent, DingTalkChannel, DingTalkInboundMessage};
+use uhorse_channel::{
+    dingtalk::{
+        DingTalkAiCardHandle, DingTalkAiCardTarget, DingTalkEvent,
+        DingTalkTransientClearOutcome, DingTalkTransientMessageReceipt,
+    },
+    DingTalkChannel, DingTalkInboundMessage,
+};
 use uhorse_config::{DingTalkSkillInstaller, HealthConfig, UHorseConfig};
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
 use uhorse_llm::{ChatMessage, LLMClient};
@@ -69,8 +76,17 @@ pub struct DingTalkReplyRoute {
     pub robot_code: Option<String>,
 }
 
-const DINGTALK_PROCESSING_ACK_TEXT: &str = "收到啦，正在处理，请稍等～";
+const DINGTALK_PROCESSING_ACK_TEXT: &str = "[Wait]";
 const BEARER_AUTH_PREFIX: &str = "Bearer ";
+
+#[derive(Debug, Clone)]
+enum DingTalkReplyHandle {
+    AiCard { handle: DingTalkAiCardHandle },
+    LegacyTransient {
+        receipt: Option<DingTalkTransientMessageReceipt>,
+    },
+    Noop,
+}
 const DEFAULT_SKILLHUB_SEARCH_URL: &str =
     "https://api.skillhub.tencent.com/api/skills";
 const SKILLHUB_PRIMARY_DOWNLOAD_URL_TEMPLATE: &str =
@@ -687,6 +703,8 @@ pub struct WebState {
     pub agent_runtime: Arc<WebAgentRuntime>,
     /// 任务回传路由
     pub dingtalk_routes: Arc<RwLock<HashMap<TaskId, DingTalkReplyRoute>>>,
+    /// 异步任务处理中提示句柄
+    dingtalk_reply_handles: Arc<RwLock<HashMap<TaskId, DingTalkReplyHandle>>>,
 }
 
 impl WebState {
@@ -832,6 +850,7 @@ impl WebState {
             pairing_manager,
             agent_runtime,
             dingtalk_routes: Arc::new(RwLock::new(HashMap::new())),
+            dingtalk_reply_handles: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -2983,6 +3002,17 @@ async fn process_dingtalk_task_serialized(
         return Ok(());
     }
 
+    let immediate_reply_handle = if should_send_dingtalk_immediate_ack(&step) {
+        if let Some(channel) = state.dingtalk_channel.as_ref() {
+            Some(create_dingtalk_reply_handle(channel, &route).await?)
+        } else {
+            warn!("Skip DingTalk processing ack because channel is unavailable");
+            None
+        }
+    } else {
+        None
+    };
+
     match step {
         PlannedTurnStep::Finalize { text: reply_text } => {
             state
@@ -3013,7 +3043,14 @@ async fn process_dingtalk_task_serialized(
             )
             .await;
             if let Some(channel) = state.dingtalk_channel.as_ref() {
-                send_dingtalk_reply(channel, &route, &reply_text).await?;
+                send_or_finalize_dingtalk_reply(
+                    channel,
+                    &route,
+                    &reply_text,
+                    immediate_reply_handle,
+                    None,
+                )
+                .await?;
             } else {
                 warn!("Skip DingTalk direct reply because channel is unavailable");
             }
@@ -3038,6 +3075,7 @@ async fn process_dingtalk_task_serialized(
                 inbound.sender_staff_id.as_deref(),
                 inbound.sender_corp_id.as_deref(),
                 &inbound.conversation_id,
+                immediate_reply_handle,
             )
             .await?;
             if let PlannedTurnStep::ExecuteSkill { skill_name, .. } = &step {
@@ -3193,7 +3231,9 @@ async fn process_dingtalk_task_serialized(
             }
 
             if let Some(channel) = state.dingtalk_channel.as_ref() {
-                send_dingtalk_reply(channel, &route, DINGTALK_PROCESSING_ACK_TEXT).await?;
+                let handle = create_dingtalk_reply_handle(channel, &route).await?;
+                let mut handles = state.dingtalk_reply_handles.write().await;
+                handles.insert(task_id.clone(), handle);
             } else {
                 warn!("Skip DingTalk processing ack because channel is unavailable");
             }
@@ -3219,6 +3259,7 @@ async fn execute_local_turn_step(
     sender_staff_id: Option<&str>,
     sender_corp_id: Option<&str>,
     conversation_id: &str,
+    reply_handle: Option<DingTalkReplyHandle>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let reply_text = match step {
         PlannedTurnStep::ExecuteSkill { skill_name, input } => {
@@ -3326,7 +3367,7 @@ async fn execute_local_turn_step(
     )
     .await;
     if let Some(channel) = state.dingtalk_channel.as_ref() {
-        send_dingtalk_reply(channel, route, &reply_text).await?;
+        send_or_finalize_dingtalk_reply(channel, route, &reply_text, reply_handle, None).await?;
     }
     Ok(reply_text)
 }
@@ -3440,6 +3481,24 @@ async fn parse_agent_decision(
                         workspace_path,
                     })
                 }
+                AgentDecision::DirectReply { .. } if should_force_dingtalk_command_planning(text) => {
+                    if let Some(default_workspace_root) = default_workspace_root.as_deref() {
+                        plan_dingtalk_command(
+                            state,
+                            text,
+                            default_workspace_root,
+                            online_workspace_roots,
+                            agent_id,
+                            session_key,
+                        )
+                        .await
+                    } else {
+                        Ok(AgentDecision::DirectReply {
+                            text: direct_reply_for_forced_planning_without_workspace(text)
+                                .unwrap_or_else(|| response.trim().to_string()),
+                        })
+                    }
+                }
                 other => Ok(other),
             };
         }
@@ -3455,6 +3514,34 @@ async fn parse_agent_decision(
     }
 
     if !trimmed.is_empty() {
+        if let Some(default_workspace_root) = default_workspace_root.as_deref() {
+            if let Ok(planned) = parse_planned_command(trimmed, default_workspace_root) {
+                return Ok(AgentDecision::ExecuteCommand {
+                    command: planned.command,
+                    workspace_path: planned.workspace_path,
+                });
+            }
+        }
+
+        if should_force_dingtalk_command_planning(text) {
+            if let Some(default_workspace_root) = default_workspace_root.as_deref() {
+                return plan_dingtalk_command(
+                    state,
+                    text,
+                    default_workspace_root,
+                    online_workspace_roots,
+                    agent_id,
+                    session_key,
+                )
+                .await;
+            }
+
+            return Ok(AgentDecision::DirectReply {
+                text: direct_reply_for_forced_planning_without_workspace(text)
+                    .unwrap_or_else(|| trimmed.to_string()),
+            });
+        }
+
         return Ok(AgentDecision::DirectReply {
             text: trimmed.to_string(),
         });
@@ -3593,6 +3680,37 @@ fn build_agent_decision_messages(
     messages
 }
 
+fn should_force_dingtalk_command_planning(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let keywords = [
+        "天气", "气温", "温度", "降雨", "下雨", "预报", "实时", "最新", "汇率", "股价",
+        "新闻", "热搜", "航班", "机票", "列车", "火车票", "高铁", "路况", "地图", "导航",
+        "搜一下", "查一下", "查询", "帮我查", "请查", "what's the weather", "weather",
+        "temperature", "forecast", "real-time", "realtime", "live", "news", "stock price",
+        "exchange rate", "flight", "train", "traffic", "map", "navigate",
+    ];
+
+    keywords
+        .iter()
+        .any(|keyword| trimmed.contains(keyword) || lower.contains(&keyword.to_ascii_lowercase()))
+}
+
+fn direct_reply_for_forced_planning_without_workspace(text: &str) -> Option<String> {
+    if !should_force_dingtalk_command_planning(text) {
+        return None;
+    }
+
+    Some(
+        "当前 Node Desktop 不在线，暂时无法执行实时查询。请先启动 Node Desktop，启动后我就可以继续帮你查询。"
+            .to_string(),
+    )
+}
+
 fn build_dingtalk_plan_messages(
     text: &str,
     workspace_root: &str,
@@ -3636,8 +3754,11 @@ fn parse_planned_command(
     response: &str,
     workspace_root: &str,
 ) -> Result<PlannedDingTalkCommand, Box<dyn std::error::Error + Send + Sync>> {
-    let mut planned: PlannedDingTalkCommand =
+    let value: Value =
         serde_json::from_str(response).map_err(|e| format!("LLM 返回了无效 JSON：{}", e))?;
+    let value = normalize_planned_command_payload(value);
+    let mut planned: PlannedDingTalkCommand = serde_json::from_value(value)
+        .map_err(|e| format!("LLM 返回了无法识别的命令 JSON：{}", e))?;
 
     if planned.workspace_path.is_none() {
         planned.workspace_path = Some(workspace_root.to_string());
@@ -3646,6 +3767,83 @@ fn parse_planned_command(
     let effective_workspace = planned.workspace_path.as_deref().unwrap_or(workspace_root);
     validate_planned_command(&planned.command, effective_workspace)?;
     Ok(planned)
+}
+
+fn normalize_planned_command_payload(value: Value) -> Value {
+    let value = normalize_action_tagged_execute_command_payload(value);
+    normalize_legacy_browser_actions_payload(value)
+}
+
+fn normalize_action_tagged_execute_command_payload(value: Value) -> Value {
+    let mut normalized = match value {
+        Value::Object(map) => map,
+        other => return other,
+    };
+
+    if normalized.get("type").is_some() {
+        return Value::Object(normalized);
+    }
+
+    if normalized.get("action").and_then(Value::as_str) != Some("execute_command") {
+        return Value::Object(normalized);
+    }
+
+    normalized.insert(
+        "type".to_string(),
+        Value::String("execute_command".to_string()),
+    );
+    Value::Object(normalized)
+}
+
+fn normalize_legacy_browser_actions_payload(value: Value) -> Value {
+    let Some(command) = value.get("command") else {
+        return value;
+    };
+
+    if command.get("type").and_then(Value::as_str) != Some("browser") {
+        return value;
+    }
+
+    if command.get("action").is_some() {
+        return value;
+    }
+
+    let Some(first_action) = command
+        .get("actions")
+        .and_then(Value::as_array)
+        .and_then(|actions| actions.first())
+        .cloned()
+    else {
+        return value;
+    };
+
+    let Some(action_name) = first_action.get("type").and_then(Value::as_str) else {
+        return value;
+    };
+
+    let mut normalized = match value {
+        Value::Object(map) => map,
+        other => return other,
+    };
+
+    let mut command_map = match normalized.remove("command") {
+        Some(Value::Object(map)) => map,
+        _ => return Value::Object(normalized),
+    };
+
+    command_map.remove("actions");
+    command_map.insert("action".to_string(), Value::String(action_name.to_string()));
+
+    if let Value::Object(action_fields) = first_action {
+        for (key, field_value) in action_fields {
+            if key != "type" {
+                command_map.insert(key, field_value);
+            }
+        }
+    }
+
+    normalized.insert("command".to_string(), Value::Object(command_map));
+    Value::Object(normalized)
 }
 
 fn validate_planned_command(
@@ -3846,11 +4044,11 @@ pub async fn reply_task_result(
             persist_task_result_memory(&state, completed_task, &reply_text).await;
         }
 
-        let Some(channel) = state.dingtalk_channel.as_ref() else {
+        let Some(_channel) = state.dingtalk_channel.as_ref() else {
             warn!("Skip DingTalk reply because channel is unavailable");
             return Ok(());
         };
-        send_dingtalk_reply(channel, route.as_ref().unwrap(), &reply_text).await?;
+        finalize_dingtalk_reply_handle(&state, &task_result.task_id, route.as_ref().unwrap(), &reply_text).await?;
         info!("Replied DingTalk task result for {}", task_result.task_id);
         return Ok(());
     };
@@ -3864,7 +4062,7 @@ pub async fn reply_task_result(
         .run_serialized(&lane_session_key, async move {
             let Some(completed_task) = state_for_actor.hub.get_completed_task(&task_result.task_id).await else {
                 let reply_text = build_task_result_reply_text(&state_for_actor, &task_result).await;
-                let Some(channel) = state_for_actor.dingtalk_channel.as_ref() else {
+                let Some(_channel) = state_for_actor.dingtalk_channel.as_ref() else {
                     warn!("Skip DingTalk reply because channel is unavailable");
                     state_for_actor
                         .hub
@@ -3873,7 +4071,7 @@ pub async fn reply_task_result(
                         .await;
                     return Ok(());
                 };
-                send_dingtalk_reply(channel, &binding.route, &reply_text).await?;
+                finalize_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route, &reply_text).await?;
                 state_for_actor
                     .hub
                     .session_runtime()
@@ -4024,8 +4222,8 @@ pub async fn reply_task_result(
                     )
                     .await;
                 persist_task_result_memory(&state_for_actor, &completed_task, &reply_text).await;
-                if let Some(channel) = state_for_actor.dingtalk_channel.as_ref() {
-                    send_dingtalk_reply(channel, &binding.route, &reply_text).await?;
+                if state_for_actor.dingtalk_channel.is_some() {
+                    finalize_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route, &reply_text).await?;
                 } else {
                     warn!("Skip DingTalk reply because channel is unavailable");
                 }
@@ -4055,8 +4253,8 @@ pub async fn reply_task_result(
                         .await;
                     persist_task_result_memory(&state_for_actor, &completed_task, &reply_text).await;
 
-                    if let Some(channel) = state_for_actor.dingtalk_channel.as_ref() {
-                        send_dingtalk_reply(channel, &binding.route, &reply_text).await?;
+                    if state_for_actor.dingtalk_channel.is_some() {
+                        finalize_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route, &reply_text).await?;
                     } else {
                         warn!("Skip DingTalk reply because channel is unavailable");
                     }
@@ -4135,8 +4333,7 @@ pub async fn reply_task_result(
                 | PlannedTurnStep::ListInstalledSkills
                 | PlannedTurnStep::QuerySkill { .. }
                 | PlannedTurnStep::InstallSkill { .. } => {
-                    let continuation_session_key = SessionKey::parse(&binding.session_key)
-                        .map_err(|error| format!("invalid session key in binding: {}", error))?;
+                    let continuation_session_key = parse_dingtalk_binding_session_key(&binding);
                     execute_local_turn_step(
                         &state_for_actor,
                         &binding.route,
@@ -4148,6 +4345,7 @@ pub async fn reply_task_result(
                         binding.route.sender_staff_id.as_deref(),
                         continuation_session_key.team_id.as_deref(),
                         &binding.route.conversation_id,
+                        None,
                     )
                     .await?;
                     state_for_actor
@@ -4251,32 +4449,192 @@ fn resolve_dingtalk_reply_target(route: &DingTalkReplyRoute) -> Option<DingTalkR
         .map(|user_id| DingTalkReplyTarget::DirectUser { user_id })
 }
 
+fn format_dingtalk_reply_text(reply_text: &str) -> String {
+    let mut formatted_lines = Vec::new();
+    let mut previous_blank = false;
+
+    for line in reply_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !previous_blank && !formatted_lines.is_empty() {
+                formatted_lines.push(String::new());
+                previous_blank = true;
+            }
+            continue;
+        }
+
+        let normalized = if trimmed == "```" {
+            None
+        } else if let Some(rest) = trimmed.strip_prefix("### ") {
+            Some(rest.trim().to_string())
+        } else if let Some(rest) = trimmed.strip_prefix("## ") {
+            Some(rest.trim().to_string())
+        } else if let Some(rest) = trimmed.strip_prefix("# ") {
+            Some(rest.trim().to_string())
+        } else {
+            Some(trimmed.to_string())
+        };
+
+        if let Some(normalized) = normalized {
+            formatted_lines.push(normalized);
+            previous_blank = false;
+        }
+    }
+
+    while formatted_lines.last().is_some_and(|line| line.is_empty()) {
+        formatted_lines.pop();
+    }
+
+    formatted_lines.join("\n")
+}
+
+fn should_send_dingtalk_immediate_ack(step: &PlannedTurnStep) -> bool {
+    matches!(
+        step,
+        PlannedTurnStep::ExecuteSkill { .. }
+            | PlannedTurnStep::ListInstalledSkills
+            | PlannedTurnStep::QuerySkill { .. }
+            | PlannedTurnStep::InstallSkill { .. }
+    )
+}
+
+fn resolve_dingtalk_ai_card_target(route: &DingTalkReplyRoute) -> Option<DingTalkAiCardTarget> {
+    if route.robot_code.is_none() {
+        return None;
+    }
+
+    let is_group = matches!(route.conversation_type.as_deref(), Some("2"));
+    if !is_group {
+        return None;
+    }
+
+    Some(DingTalkAiCardTarget::ImGroup {
+        conversation_id: route.conversation_id.clone(),
+    })
+}
+
+async fn create_dingtalk_reply_handle(
+    channel: &DingTalkChannel,
+    route: &DingTalkReplyRoute,
+) -> Result<DingTalkReplyHandle, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(target) = resolve_dingtalk_ai_card_target(route) {
+        if let Some(robot_code) = route.robot_code.as_deref() {
+            let Some(card_template_id) = channel.ai_card_template_id() else {
+                return Err("DingTalk AI card template id is not configured".into());
+            };
+            let reply_text = format_dingtalk_reply_text(DINGTALK_PROCESSING_ACK_TEXT);
+            let handle = channel
+                .create_ai_card(
+                    &target,
+                    robot_code,
+                    card_template_id,
+                    "processing",
+                    &reply_text,
+                )
+                .await?;
+            return Ok(DingTalkReplyHandle::AiCard { handle });
+        }
+    }
+
+    let receipt = match resolve_dingtalk_reply_target(route) {
+        Some(DingTalkReplyTarget::SessionWebhook { .. }) => {
+            return Ok(DingTalkReplyHandle::Noop);
+        }
+        Some(DingTalkReplyTarget::GroupConversation { .. }) => None,
+        Some(DingTalkReplyTarget::DirectUser { .. }) => None,
+        None => {
+            warn!(
+                conversation_id = %route.conversation_id,
+                conversation_type = ?route.conversation_type,
+                sender_user_id = ?route.sender_user_id,
+                sender_staff_id = ?route.sender_staff_id,
+                has_session_webhook = route.session_webhook.is_some(),
+                session_webhook_expired_time = ?route.session_webhook_expired_time,
+                robot_code = ?route.robot_code,
+                "Skip DingTalk processing ack because no reply target could be resolved"
+            );
+            return Err("No DingTalk reply target could be resolved".into());
+        }
+    };
+
+    Ok(DingTalkReplyHandle::LegacyTransient { receipt })
+}
+
+async fn finalize_dingtalk_reply_handle(
+    state: &Arc<WebState>,
+    task_id: &TaskId,
+    route: &DingTalkReplyRoute,
+    reply_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let handle = {
+        let mut handles = state.dingtalk_reply_handles.write().await;
+        handles.remove(task_id)
+    };
+
+    let Some(channel) = state.dingtalk_channel.as_ref() else {
+        return Ok(());
+    };
+
+    send_or_finalize_dingtalk_reply(channel, route, reply_text, handle, Some(task_id)).await
+}
+
+async fn send_or_finalize_dingtalk_reply(
+    channel: &DingTalkChannel,
+    route: &DingTalkReplyRoute,
+    reply_text: &str,
+    reply_handle: Option<DingTalkReplyHandle>,
+    task_id: Option<&TaskId>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match reply_handle {
+        Some(DingTalkReplyHandle::AiCard { handle }) => {
+            if let Err(error) = channel.finalize_ai_card(&handle, reply_text).await {
+                warn!(task_id = ?task_id, error = %error, "Finalize DingTalk AI card failed, fallback to markdown reply");
+                send_dingtalk_reply(channel, route, reply_text).await?;
+            }
+        }
+        Some(DingTalkReplyHandle::LegacyTransient { receipt }) => {
+            let outcome = channel.clear_processing_ack(receipt.as_ref()).await?;
+            if matches!(outcome, DingTalkTransientClearOutcome::Unsupported) {
+                info!(task_id = ?task_id, "DingTalk transient ack clear is unsupported; continue with final reply");
+            }
+            send_dingtalk_reply(channel, route, reply_text).await?;
+        }
+        Some(DingTalkReplyHandle::Noop) => {
+            if reply_text != DINGTALK_PROCESSING_ACK_TEXT {
+                send_dingtalk_reply(channel, route, reply_text).await?;
+            }
+        }
+        None => {
+            send_dingtalk_reply(channel, route, reply_text).await?;
+        }
+    }
+
+    Ok(())
+}
+
 async fn send_dingtalk_reply(
     channel: &DingTalkChannel,
     route: &DingTalkReplyRoute,
     reply_text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let reply_text = format_dingtalk_reply_text(reply_text);
+
     match resolve_dingtalk_reply_target(route) {
         Some(DingTalkReplyTarget::SessionWebhook {
             webhook,
             at_user_ids,
         }) => {
             channel
-                .reply_via_session_webhook(&webhook, reply_text, &at_user_ids)
+                .reply_via_session_webhook_markdown(&webhook, "uHorse", &reply_text, &at_user_ids)
                 .await?;
         }
         Some(DingTalkReplyTarget::GroupConversation { conversation_id }) => {
             channel
-                .send_group_message(
-                    &conversation_id,
-                    &MessageContent::Text(reply_text.to_string()),
-                )
+                .send_group_markdown_message(&conversation_id, "uHorse", &reply_text)
                 .await?;
         }
         Some(DingTalkReplyTarget::DirectUser { user_id }) => {
-            channel
-                .send_message(&user_id, &MessageContent::Text(reply_text.to_string()))
-                .await?;
+            channel.send_markdown(&user_id, "uHorse", &reply_text).await?;
         }
         None => {
             warn!(
@@ -4308,6 +4666,15 @@ async fn build_task_result_reply_text(state: &Arc<WebState>, task_result: &TaskR
     summarize_task_result_or_fallback(state, &completed_task).await
 }
 
+fn parse_dingtalk_binding_session_key(binding: &TaskContinuationBinding) -> SessionKey {
+    build_dingtalk_session_key(
+        &binding.route.conversation_id,
+        binding.route.sender_user_id.as_deref(),
+        binding.route.sender_staff_id.as_deref(),
+        None,
+    )
+}
+
 async fn continue_task_result(
     state: &Arc<WebState>,
     binding: &TaskContinuationBinding,
@@ -4317,8 +4684,7 @@ async fn continue_task_result(
         return Err("LLM client is not configured".into());
     };
 
-    let session_key = SessionKey::parse(&binding.session_key)
-        .map_err(|error| format!("invalid session key in binding: {}", error))?;
+    let session_key = parse_dingtalk_binding_session_key(binding);
     let compacted_summary = state
         .hub
         .session_runtime()
@@ -4358,9 +4724,23 @@ async fn parse_next_step_response(
         if let Ok(step) = serde_json::from_str::<AgentDecision>(&json_payload) {
             return Ok(planned_step_from_agent_decision(step));
         }
+
+        if let Ok(planned) = parse_planned_command(&json_payload, "") {
+            return Ok(PlannedTurnStep::SubmitTask {
+                command: planned.command,
+                workspace_path: planned.workspace_path,
+            });
+        }
     }
 
     if !trimmed.is_empty() {
+        if let Ok(planned) = parse_planned_command(trimmed, "") {
+            return Ok(PlannedTurnStep::SubmitTask {
+                command: planned.command,
+                workspace_path: planned.workspace_path,
+            });
+        }
+
         return Ok(PlannedTurnStep::Finalize {
             text: trimmed.to_string(),
         });
@@ -6358,6 +6738,7 @@ mod tests {
             app_key: "key".to_string(),
             app_secret: "secret".to_string(),
             agent_id: 1,
+            ai_card_template_id: None,
             skillhub_search_url,
             skillhub_download_url_template,
             notification_bindings: vec![],
@@ -6872,6 +7253,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_planned_command_normalizes_legacy_browser_actions_payload() {
+        let workspace = "/tmp/workspace";
+        let response = r#"{"type":"execute_command","command":{"type":"browser","actions":[{"type":"open_system","url":"https://www.baidu.com"}]},"workspace_path":"/tmp/workspace"}"#;
+
+        let planned = parse_planned_command(response, workspace).unwrap();
+
+        assert_eq!(planned.workspace_path.as_deref(), Some(workspace));
+        match planned.command {
+            Command::Browser(BrowserCommand::OpenSystem { url }) => {
+                assert_eq!(url, "https://www.baidu.com");
+            }
+            other => panic!("expected browser open_system command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_planned_command_accepts_action_execute_command_tag() {
+        let workspace = "/tmp/workspace";
+        let response = r#"{"action":"execute_command","command":{"type":"shell","command":"pwd"},"workspace_path":"/tmp/workspace"}"#;
+
+        let planned = parse_planned_command(response, workspace).unwrap();
+
+        assert_eq!(planned.workspace_path.as_deref(), Some(workspace));
+        assert!(matches!(planned.command, Command::Shell(_)));
+    }
+
     #[tokio::test]
     async fn test_decide_dingtalk_action_extracts_shell_execute_command_json_from_wrapped_text() {
         let runtime = create_test_runtime().await;
@@ -7186,6 +7594,43 @@ mod tests {
                 workspace_path,
             } => {
                 assert_eq!(url, "https://example.com/article");
+                assert_eq!(workspace_path.as_deref(), Some(workspace_root.as_str()));
+            }
+            other => panic!("unexpected decision: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_plan_dingtalk_command_maps_baidu_request_to_open_system() {
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"command":{"type":"browser","action":"open_system","url":"https://www.baidu.com"}}"#.to_string(),
+            })),
+        ));
+
+        let session_key = SessionKey::new("dingtalk", "user-1");
+        let decision = plan_dingtalk_command(
+            &state,
+            "帮我访问百度",
+            &workspace_root,
+            &[workspace_root.clone()],
+            "main",
+            &session_key,
+        )
+        .await
+        .unwrap();
+
+        match decision {
+            AgentDecision::ExecuteCommand {
+                command: Command::Browser(uhorse_protocol::BrowserCommand::OpenSystem { url }),
+                workspace_path,
+            } => {
+                assert_eq!(url, "https://www.baidu.com");
                 assert_eq!(workspace_path.as_deref(), Some(workspace_root.as_str()));
             }
             other => panic!("unexpected decision: {:?}", other),
@@ -7716,6 +8161,161 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn test_should_force_dingtalk_command_planning_detects_weather_queries() {
+        assert!(should_force_dingtalk_command_planning("今天北京天气如何？"));
+        assert!(should_force_dingtalk_command_planning("帮我查一下最新汇率"));
+        assert!(!should_force_dingtalk_command_planning("你好"));
+        assert!(!should_force_dingtalk_command_planning("Browser Use 技能怎么用"));
+    }
+
+    #[test]
+    fn test_direct_reply_for_forced_planning_without_workspace_returns_offline_hint() {
+        assert_eq!(
+            direct_reply_for_forced_planning_without_workspace("今天北京天气如何？").as_deref(),
+            Some("当前 Node Desktop 不在线，暂时无法执行实时查询。请先启动 Node Desktop，启动后我就可以继续帮你查询。")
+        );
+        assert_eq!(direct_reply_for_forced_planning_without_workspace("你好"), None);
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_replans_weather_query_when_llm_returns_plain_text() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let workspace = tempdir().unwrap();
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(SequenceLlmClient {
+                responses: std::sync::Mutex::new(vec![
+                    "我现在无法实时查询北京天气。".to_string(),
+                    r#"{"command":{"type":"browser","action":"open_system","url":"https://wttr.in/Beijing?format=3"}}"#.to_string(),
+                ]),
+            })),
+            None,
+            runtime,
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-weather-replan");
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router().register_node_sender(node_id.clone(), tx).await;
+        hub.handle_node_connection(
+            node_id,
+            "test-node".to_string(),
+            NodeCapabilities {
+                supported_commands: vec![CommandType::Browser],
+                ..NodeCapabilities::default()
+            },
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_path.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+        let session_key = SessionKey::new("dingtalk", "user-weather-replan");
+
+        let decision = decide_dingtalk_action(&state, "今天北京天气如何？", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::ExecuteCommand {
+                command: Command::Browser(BrowserCommand::OpenSystem { ref url }),
+                workspace_path: Some(ref resolved_workspace_path),
+            } if url == "https://wttr.in/Beijing?format=3" && resolved_workspace_path == &workspace_path
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_replans_weather_query_when_llm_returns_direct_reply_json() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let workspace = tempdir().unwrap();
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(SequenceLlmClient {
+                responses: std::sync::Mutex::new(vec![
+                    r#"{"type":"direct_reply","text":"我现在无法实时查询北京天气。"}"#.to_string(),
+                    r#"{"command":{"type":"browser","action":"open_system","url":"https://wttr.in/Beijing?format=3"}}"#.to_string(),
+                ]),
+            })),
+            None,
+            runtime,
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-weather-replan-json");
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router().register_node_sender(node_id.clone(), tx).await;
+        hub.handle_node_connection(
+            node_id,
+            "test-node".to_string(),
+            NodeCapabilities {
+                supported_commands: vec![CommandType::Browser],
+                ..NodeCapabilities::default()
+            },
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_path.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+        let session_key = SessionKey::new("dingtalk", "user-weather-replan-json");
+
+        let decision = decide_dingtalk_action(&state, "今天北京天气如何？", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::ExecuteCommand {
+                command: Command::Browser(BrowserCommand::OpenSystem { ref url }),
+                workspace_path: Some(ref resolved_workspace_path),
+            } if url == "https://wttr.in/Beijing?format=3" && resolved_workspace_path == &workspace_path
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_returns_offline_hint_for_weather_query_without_workspace() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"direct_reply","text":"我现在无法实时查询北京天气。"}"#.to_string(),
+            })),
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-weather-offline");
+
+        let decision = decide_dingtalk_action(&state, "今天北京天气如何？", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::DirectReply { text }
+                if text == "当前 Node Desktop 不在线，暂时无法执行实时查询。请先启动 Node Desktop，启动后我就可以继续帮你查询。"
+        ));
+    }
+
     #[tokio::test]
     async fn test_decide_dingtalk_action_parses_list_installed_skills_json() {
         let runtime = create_test_runtime().await;
@@ -7843,6 +8443,114 @@ mod tests {
                 command: Command::File(FileCommand::Exists { .. }),
                 workspace_path: Some(ref resolved_workspace_path),
             } if resolved_workspace_path == &workspace_path
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_extracts_action_execute_command_json_from_wrapped_text() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let workspace = tempdir().unwrap();
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        let response = format!(
+            "好的，继续执行：\n{{\"action\":\"execute_command\",\"command\":{{\"type\":\"file\",\"action\":\"exists\",\"path\":\"{}/Cargo.toml\"}},\"workspace_path\":\"{}\"}}",
+            workspace_path,
+            workspace_path
+        );
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient { response })),
+            None,
+            runtime,
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-action-json");
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router().register_node_sender(node_id.clone(), tx).await;
+        hub.handle_node_connection(
+            node_id,
+            "test-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_path.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+        let session_key = SessionKey::new("dingtalk", "user-action-command");
+
+        let decision = decide_dingtalk_action(&state, "列出当前目录", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::ExecuteCommand {
+                command: Command::File(FileCommand::Exists { .. }),
+                workspace_path: Some(ref resolved_workspace_path),
+            } if resolved_workspace_path == &workspace_path
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_decide_dingtalk_action_parses_legacy_browser_actions_json_without_leaking_reply() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let workspace = tempdir().unwrap();
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        let response = format!(
+            r#"{{"type":"execute_command","command":{{"type":"browser","actions":[{{"type":"open_system","url":"https://www.baidu.com"}}]}},"workspace_path":"{}"}}"#,
+            workspace_path
+        );
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient { response })),
+            None,
+            runtime,
+        ));
+        let node_id = uhorse_protocol::NodeId::from_string("node-browser-json");
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router().register_node_sender(node_id.clone(), tx).await;
+        hub.handle_node_connection(
+            node_id,
+            "test-node".to_string(),
+            NodeCapabilities {
+                supported_commands: vec![CommandType::Browser],
+                ..NodeCapabilities::default()
+            },
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_path.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+        let session_key = SessionKey::new("dingtalk", "user-browser-command");
+
+        let decision = decide_dingtalk_action(&state, "帮我访问百度", "main", &session_key)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            decision,
+            AgentDecision::ExecuteCommand {
+                command: Command::Browser(BrowserCommand::OpenSystem { ref url }),
+                workspace_path: Some(ref resolved_workspace_path),
+            } if url == "https://www.baidu.com" && resolved_workspace_path == &workspace_path
         ));
     }
 
@@ -9512,6 +10220,340 @@ mod tests {
 
         reply_task_result(state.clone(), task_result).await.unwrap();
         assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
+        assert!(!state.dingtalk_reply_handles.read().await.contains_key(&task_id));
+    }
+
+    #[tokio::test]
+    async fn test_submit_dingtalk_task_dispatches_weather_query_after_direct_reply_json_replan() {
+        let runtime = create_test_runtime().await;
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, _task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(SequenceLlmClient {
+                responses: std::sync::Mutex::new(vec![
+                    r#"{"type":"direct_reply","text":"我现在无法实时查询北京天气。"}"#.to_string(),
+                    format!(
+                        r#"{{"command":{{"type":"browser","action":"open_system","url":"https://wttr.in/Beijing?format=3"}},"workspace_path":"{}"}}"#,
+                        workspace_root
+                    ),
+                ]),
+            })),
+            None,
+            runtime,
+        ));
+
+        let browser_node_id = uhorse_protocol::NodeId::from_string("node-weather-browser");
+        let (browser_tx, mut browser_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(browser_node_id.clone(), browser_tx)
+            .await;
+        hub.handle_node_connection(
+            browser_node_id.clone(),
+            "browser-node".to_string(),
+            NodeCapabilities {
+                supported_commands: vec![CommandType::Browser],
+                ..NodeCapabilities::default()
+            },
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "weather-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("今天北京天气如何？".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-weather".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let assignment = tokio::time::timeout(std::time::Duration::from_secs(1), browser_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        match assignment {
+            HubToNode::TaskAssignment {
+                command, context, ..
+            } => {
+                match command {
+                    Command::Browser(BrowserCommand::OpenSystem { url }) => {
+                        assert_eq!(url, "https://wttr.in/Beijing?format=3");
+                    }
+                    other => panic!("unexpected command: {:?}", other),
+                }
+                assert_eq!(context.intent.as_deref(), Some("今天北京天气如何？"));
+                assert_eq!(context.session_id.as_str(), "dingtalk:actual-user:corp-1");
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reply_task_result_ignores_unsupported_transient_ack_clear() {
+        let runtime = create_test_runtime().await;
+        let (hub, _task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: r#"{"type":"execute_command","command":{"type":"file","action":"exists","path":"Cargo.toml"},"workspace_path":"/tmp"}"#.to_string(),
+            })),
+            None,
+            runtime,
+        ));
+        let task_id = TaskId::new();
+        state.dingtalk_reply_handles.write().await.insert(
+            task_id.clone(),
+            DingTalkReplyHandle::LegacyTransient {
+                receipt: Some(DingTalkTransientMessageReceipt::unsupported()),
+            },
+        );
+
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-1".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: None,
+            sender_staff_id: None,
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+        finalize_dingtalk_reply_handle(&state, &task_id, &route, "done")
+            .await
+            .unwrap();
+        assert!(!state.dingtalk_reply_handles.read().await.contains_key(&task_id));
+    }
+
+    #[tokio::test]
+    async fn test_create_dingtalk_reply_handle_returns_noop_for_session_webhook_route() {
+        let channel = DingTalkChannel::new("key".to_string(), "secret".to_string(), 1, None);
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-session".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: Some(chrono::Utc::now().timestamp_millis() + 60_000),
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        let handle = create_dingtalk_reply_handle(&channel, &route)
+            .await
+            .unwrap();
+
+        assert!(matches!(handle, DingTalkReplyHandle::Noop));
+    }
+
+    #[tokio::test]
+    async fn test_parse_next_step_response_parses_legacy_browser_actions_json_as_submit_task() {
+        let session_key = SessionKey::new("dingtalk", "user-next-step");
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(Arc::new(hub), None, None));
+        let response = r#"{"type":"execute_command","command":{"type":"browser","actions":[{"type":"open_system","url":"https://www.baidu.com"}]},"workspace_path":"/tmp/workspace"}"#;
+
+        let step = parse_next_step_response(
+            &state,
+            response,
+            "帮我访问百度",
+            "main",
+            &session_key,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            step,
+            PlannedTurnStep::SubmitTask {
+                command: Command::Browser(BrowserCommand::OpenSystem { ref url }),
+                workspace_path: Some(ref workspace_path),
+            } if url == "https://www.baidu.com" && workspace_path == "/tmp/workspace"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_parse_next_step_response_parses_action_execute_command_as_submit_task() {
+        let session_key = SessionKey::new("dingtalk", "user-next-step-action");
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let state = Arc::new(WebState::new(Arc::new(hub), None, None));
+        let response = r#"{"action":"execute_command","command":{"type":"browser","action":"open_system","url":"https://example.com/article"},"workspace_path":"/tmp/workspace"}"#;
+
+        let step = parse_next_step_response(
+            &state,
+            response,
+            "帮我看看文章",
+            "main",
+            &session_key,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            step,
+            PlannedTurnStep::SubmitTask {
+                command: Command::Browser(BrowserCommand::OpenSystem { ref url }),
+                workspace_path: Some(ref workspace_path),
+            } if url == "https://example.com/article" && workspace_path == "/tmp/workspace"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_submit_dingtalk_task_dispatches_baidu_open_system_to_browser_node() {
+        let runtime = create_test_runtime().await;
+        let workspace = tempdir().unwrap();
+        let workspace_root = workspace.path().to_string_lossy().to_string();
+        let (hub, _task_result_rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            Some(Arc::new(StubLlmClient {
+                response: format!(
+                    r#"{{"type":"execute_command","command":{{"type":"browser","action":"open_system","url":"https://www.baidu.com"}},"workspace_path":"{}"}}"#,
+                    workspace_root
+                ),
+            })),
+            None,
+            runtime,
+        ));
+
+        let file_only_node_id = uhorse_protocol::NodeId::from_string("node-file-only");
+        let (file_only_tx, mut file_only_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(file_only_node_id.clone(), file_only_tx)
+            .await;
+        hub.handle_node_connection(
+            file_only_node_id.clone(),
+            "file-only-node".to_string(),
+            NodeCapabilities::default(),
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let browser_node_id = uhorse_protocol::NodeId::from_string("node-browser-capable");
+        let (browser_tx, mut browser_rx) = tokio::sync::mpsc::channel(8);
+        hub.message_router()
+            .register_node_sender(browser_node_id.clone(), browser_tx)
+            .await;
+        hub.handle_node_connection(
+            browser_node_id.clone(),
+            "browser-node".to_string(),
+            NodeCapabilities {
+                supported_commands: vec![
+                    CommandType::File,
+                    CommandType::Shell,
+                    CommandType::Code,
+                    CommandType::Browser,
+                ],
+                ..NodeCapabilities::default()
+            },
+            WorkspaceInfo {
+                workspace_id: None,
+                name: "workspace".to_string(),
+                path: workspace_root.clone(),
+                read_only: false,
+                allowed_patterns: vec!["**/*".to_string()],
+                denied_patterns: vec![],
+            },
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("帮我访问百度".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-browser-baidu".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("actual-user".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        submit_dingtalk_task(&state, inbound).await.unwrap();
+
+        let assignment = tokio::time::timeout(std::time::Duration::from_secs(1), browser_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let task_id = match assignment {
+            HubToNode::TaskAssignment {
+                task_id,
+                command,
+                context,
+                ..
+            } => {
+                match command {
+                    Command::Browser(BrowserCommand::OpenSystem { url }) => {
+                        assert_eq!(url, "https://www.baidu.com");
+                    }
+                    other => panic!("unexpected command: {:?}", other),
+                }
+                assert_eq!(context.session_id.as_str(), "dingtalk:actual-user:corp-1");
+                task_id
+            }
+            other => panic!("unexpected message: {:?}", other),
+        };
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), file_only_rx.recv())
+                .await
+                .is_err()
+        );
+
+        let status = hub.get_task_status(&task_id).await.unwrap();
+        assert_eq!(status.status, TaskStatus::Running);
+        assert_eq!(status.node_id.as_ref(), Some(&browser_node_id));
     }
 
     #[test]
@@ -10324,9 +11366,69 @@ args = ["-c", "print('manual')"]
         assert_eq!(resolve_dingtalk_reply_target(&route), None);
     }
 
+    #[test]
+    fn test_resolve_dingtalk_ai_card_target_accepts_group_with_robot_code() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-group".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_ai_card_target(&route),
+            Some(DingTalkAiCardTarget::ImGroup {
+                conversation_id: "conv-group".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_ai_card_target_rejects_robot_chat_route() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-session".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: Some(chrono::Utc::now().timestamp_millis() + 60_000),
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(resolve_dingtalk_ai_card_target(&route), None);
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_ai_card_target_rejects_missing_robot_code_and_private_chat() {
+        let missing_robot_route = DingTalkReplyRoute {
+            conversation_id: "conv-group".to_string(),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: None,
+        };
+        let private_route = DingTalkReplyRoute {
+            conversation_id: "conv-direct".to_string(),
+            conversation_type: Some("1".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: None,
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(resolve_dingtalk_ai_card_target(&missing_robot_route), None);
+        assert_eq!(resolve_dingtalk_ai_card_target(&private_route), None);
+    }
+
     #[tokio::test]
     async fn test_send_dingtalk_reply_returns_error_without_resolved_target() {
-        let channel = DingTalkChannel::new("key".to_string(), "secret".to_string(), 1);
+        let channel = DingTalkChannel::new("key".to_string(), "secret".to_string(), 1, None);
         let route = DingTalkReplyRoute {
             conversation_id: "conv-missing".to_string(),
             conversation_type: Some("1".to_string()),
@@ -10341,6 +11443,60 @@ args = ["-c", "print('manual')"]
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), "No DingTalk reply target could be resolved");
+    }
+
+    #[test]
+    fn test_format_dingtalk_reply_text_collapses_extra_blank_lines() {
+        let formatted = format_dingtalk_reply_text("第一行\n\n\n第二行\n\n");
+        assert_eq!(formatted, "第一行\n\n第二行");
+    }
+
+    #[test]
+    fn test_format_dingtalk_reply_text_strips_code_fence_markers() {
+        let formatted = format_dingtalk_reply_text("```\nlet a = 1;\n```");
+        assert_eq!(formatted, "let a = 1;");
+    }
+
+    #[test]
+    fn test_format_dingtalk_reply_text_normalizes_markdown_headers() {
+        let formatted = format_dingtalk_reply_text("# 标题\n## 小节\n正文");
+        assert_eq!(formatted, "标题\n小节\n正文");
+    }
+
+    #[test]
+    fn test_send_dingtalk_reply_applies_dingtalk_text_formatting_before_send() {
+        let formatted = format_dingtalk_reply_text("# 标题\n\n```\n内容\n```");
+        assert_eq!(formatted, "标题\n\n内容");
+    }
+
+    #[test]
+    fn test_should_send_dingtalk_immediate_ack_for_local_skill_steps_only() {
+        assert!(!should_send_dingtalk_immediate_ack(&PlannedTurnStep::Finalize {
+            text: "done".to_string(),
+        }));
+        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::ExecuteSkill {
+            skill_name: "echo".to_string(),
+            input: "hello".to_string(),
+        }));
+        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::ListInstalledSkills));
+        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::QuerySkill {
+            skill_name: "echo".to_string(),
+        }));
+        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::InstallSkill {
+            query: "agent-browser".to_string(),
+        }));
+    }
+
+    #[test]
+    fn test_should_not_send_dingtalk_immediate_ack_for_submit_task_step() {
+        assert!(!should_send_dingtalk_immediate_ack(&PlannedTurnStep::SubmitTask {
+            command: Command::File(FileCommand::List {
+                path: ".".to_string(),
+                recursive: false,
+                pattern: None,
+            }),
+            workspace_path: Some("/tmp/workspace".to_string()),
+        }));
     }
 
     #[tokio::test]

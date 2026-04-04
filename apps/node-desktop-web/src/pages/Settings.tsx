@@ -27,6 +27,12 @@ import type {
   DesktopWorkspaceStatus,
 } from '../types/desktop';
 
+const buildPairingMessage = (pairingCode: string) => `绑定码 ${pairingCode}`;
+
+const copyTextToClipboard = async (text: string) => {
+  await navigator.clipboard.writeText(text);
+};
+
 const Settings: React.FC = () => {
   const [form] = Form.useForm<DesktopSettings>();
   const queryClient = useQueryClient();
@@ -85,7 +91,13 @@ const Settings: React.FC = () => {
   const startPairingMutation = useMutation({
     mutationFn: desktopApi.startAccountPairing,
     onSuccess: async (pairing) => {
-      message.success(`绑定码已生成：${pairing.pairing_code}`);
+      const pairingMessage = buildPairingMessage(pairing.pairing_code);
+      try {
+        await copyTextToClipboard(pairingMessage);
+        message.success(`绑定码已生成并复制：${pairingMessage}`);
+      } catch {
+        message.success(`绑定码已生成：${pairing.pairing_code}`);
+      }
       await queryClient.invalidateQueries({ queryKey: ['desktop-account-status'] });
     },
   });
@@ -453,17 +465,32 @@ const Settings: React.FC = () => {
                     </Tag>
                   </Descriptions.Item>
                   <Descriptions.Item label="绑定码">
-                    {activePairing?.pairing_code || '-'}
+                    {activePairing?.pairing_code ? (
+                      <Typography.Text code copyable>
+                        {activePairing.pairing_code}
+                      </Typography.Text>
+                    ) : (
+                      '-'
+                    )}
                   </Descriptions.Item>
                   <Descriptions.Item label="过期时间">
                     {formatUnixTimestamp(activePairing?.expires_at)}
                   </Descriptions.Item>
                   <Descriptions.Item label="说明">
                     {activePairing
-                      ? '在钉钉中向 Hub 机器人发送绑定码完成确认。'
+                      ? '在钉钉中向 Hub 机器人发送下面这条消息完成确认。'
                       : accountStatus?.bound_user_id
                         ? '当前节点已绑定钉钉账号，可接收镜像通知。'
                         : '尚未发起绑定。'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="发送消息">
+                    {activePairing?.pairing_code ? (
+                      <Typography.Text code copyable>
+                        {buildPairingMessage(activePairing.pairing_code)}
+                      </Typography.Text>
+                    ) : (
+                      '-'
+                    )}
                   </Descriptions.Item>
                 </Descriptions>
 

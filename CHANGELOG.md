@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-04-04
+
+### Fixed
+
+- DingTalk session webhook 路径不再把 `[Wait]` 处理中文案泄漏给最终用户回复
+- continuation planner 现在兼容 `{"action":"execute_command", ...}` 顶层标签，避免把命令 JSON 原样回给钉钉用户
+- 首轮规划与 continuation 继续统一复用命令 JSON 解析与归一化逻辑，`execute_command` 会继续进入任务派发而不是被当作最终文本
+
+### Changed
+
+- README / INSTALL / CHANNELS / RELEASE_NOTES 已统一升级到 `v4.5.1` 口径，收口当前钉钉回复回归修复后的发布事实
+
 ## [4.5.0] - 2026-04-03
 
 ### Added
@@ -308,7 +320,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.0...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.1...HEAD
+[4.5.1]: https://github.com/kts-kris/uHorse/compare/v4.5.0...v4.5.1
 [4.5.0]: https://github.com/kts-kris/uHorse/compare/v4.4.0...v4.5.0
 [4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/kts-kris/uHorse/compare/v4.1.3...v4.3.0

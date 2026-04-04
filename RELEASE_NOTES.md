@@ -1,20 +1,19 @@
-## uHorse 4.5.0 发布
+## uHorse 4.5.1 发布
 
-**发布日期**：2026-04-02
+**发布日期**：2026-04-04
 
 ### 本次发布重点
 
-`v4.5.0` 在上一轮已经完成实现并通过测试的在线安装 Skill 能力基础上，进一步把 **Agent Browser Skill 安装自动化回归**、**默认快速回归入口** 与 **中英文文档 / release 口径统一** 收口为正式发布事实。
+`v4.5.1` 聚焦修复钉钉真实联调里暴露的两类消息回归：**session webhook 泄漏 `[Wait]`**，以及 **continuation planner 返回命令 JSON 时被误当成最终文本直接回给用户**。
 
-本次版本重点不是扩大 Skill 平台边界，而是把 **默认回归入口**、**Agent Browser Skill 自然语言安装 smoke** 与 **README / INSTALL / TESTING / scripts / release 文档同步** 一次性收口到当前 Hub-Node 主线中。
+本次版本重点不是扩展新能力，而是把 **钉钉回复体验**、**continuation 命令兼容解析** 与 **中英文发布文档口径** 一次性收口到当前 Hub-Node 主线中。
 
 ### 主要变更
 
-- 新增 `make skill-install-smoke`，用于单独运行 Agent Browser Skill 安装 smoke 回归
-- `make test-quick` 现在默认包含 Agent Browser Skill 安装自动化回归
-- `uhorse-hub` 新增 `test_agent_browser_natural_language_install_flow_returns_chinese_hint`，覆盖“帮我安装 Agent Browser 技能”的自然语言安装、SkillHub 安装与中文提示
-- README / INSTALL / TESTING / CHANNELS / CONFIG / scripts / CHANGELOG 已同步更新到 `v4.5.0` 口径，并补齐默认回归入口说明
-- 在线安装、运行时 refresh、DingTalk 文本安装入口与 `[[channels.dingtalk.skill_installers]]` 白名单控制继续保留为当前主线事实
+- 修复 DingTalk session webhook 路径，最终回包不再向用户泄漏 `[Wait]`
+- 兼容 continuation planner 返回 `{"action":"execute_command", ...}` 顶层写法，避免命令 JSON 原样回显给钉钉用户
+- 首轮规划与 continuation 继续共用同一套命令 JSON 归一化逻辑，`execute_command` 会继续进入任务派发
+- README / INSTALL / CHANNELS / CHANGELOG / RELEASE_NOTES 已同步更新到 `v4.5.1` 口径
 
 ### 当前主交付物
 
@@ -27,7 +26,7 @@
 
 ### 不包含内容
 
-`v4.5.0` 明确 **不包含**：
+`v4.5.1` 明确 **不包含**：
 
 - DingTalk 文本入口的 Skill refresh 命令；当前 refresh 只开放 HTTP API
 - 对非 `skillhub` 来源的在线安装支持
@@ -40,8 +39,11 @@
 本次发布前已完成并确认通过的基线包括：
 
 ```bash
-cargo test -p uhorse-config
-cargo test -p uhorse-hub
+cargo test -p uhorse-hub test_parse_planned_command_accepts_action_execute_command_tag -- --nocapture
+cargo test -p uhorse-hub test_parse_next_step_response_parses_action_execute_command_as_submit_task -- --nocapture
+cargo test -p uhorse-hub test_decide_dingtalk_action_extracts_action_execute_command_json_from_wrapped_text -- --nocapture
+cargo test -p uhorse-hub test_send_or_finalize_dingtalk_reply_does_not_leak_wait_for_session_webhook_noop -- --nocapture
+cargo test -p uhorse-hub test_reply_task_result_ignores_unsupported_transient_ack_clear -- --nocapture
 ```
 
 ### 升级与获取方式
