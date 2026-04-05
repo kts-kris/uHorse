@@ -66,6 +66,10 @@ test-quick: ## 运行快速主线回归
 test-full: ## 运行完整主线回归
 	@./scripts/test.sh
 
+smoke-loop: agent-loop-smoke approval-loop-smoke ## 运行 loop 主线 smoke 组合
+
+smoke-observability: observability-smoke audit-smoke ## 运行 observability + audit smoke 组合
+
 roundtrip: ## 运行真实 Hub-Node roundtrip 回归
 	@cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 

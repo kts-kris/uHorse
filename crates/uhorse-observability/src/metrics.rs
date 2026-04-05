@@ -38,6 +38,12 @@ pub struct MetricsCollector {
     approval_resumes: AtomicU64,
     /// planner 重试次数
     planner_retries: AtomicU64,
+    /// mailbox 活跃会话数
+    mailbox_sessions: Arc<RwLock<u64>>,
+    /// 等待工具结果的 turn 数
+    waiting_for_tool_turns: Arc<RwLock<u64>>,
+    /// 等待审批的 turn 数
+    waiting_for_approval_turns: Arc<RwLock<u64>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,6 +61,9 @@ struct MetricsSnapshot {
     approval_waits: u64,
     approval_resumes: u64,
     planner_retries: u64,
+    mailbox_sessions: u64,
+    waiting_for_tool_turns: u64,
+    waiting_for_approval_turns: u64,
 }
 
 impl MetricsCollector {
@@ -73,6 +82,9 @@ impl MetricsCollector {
             approval_waits: AtomicU64::new(0),
             approval_resumes: AtomicU64::new(0),
             planner_retries: AtomicU64::new(0),
+            mailbox_sessions: Arc::new(RwLock::new(0)),
+            waiting_for_tool_turns: Arc::new(RwLock::new(0)),
+            waiting_for_approval_turns: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -193,6 +205,22 @@ impl MetricsCollector {
         self.planner_retries.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// 设置 session mailbox 状态。
+    pub async fn set_runtime_mailbox_state(
+        &self,
+        mailbox_sessions: u64,
+        waiting_for_tool_turns: u64,
+        waiting_for_approval_turns: u64,
+    ) {
+        gauge!("uhorse_runtime_mailbox_sessions").set(mailbox_sessions as f64);
+        gauge!("uhorse_runtime_waiting_for_tool_turns").set(waiting_for_tool_turns as f64);
+        gauge!("uhorse_runtime_waiting_for_approval_turns")
+            .set(waiting_for_approval_turns as f64);
+        *self.mailbox_sessions.write().await = mailbox_sessions;
+        *self.waiting_for_tool_turns.write().await = waiting_for_tool_turns;
+        *self.waiting_for_approval_turns.write().await = waiting_for_approval_turns;
+    }
+
     /// 增加 WebSocket 连接
     pub async fn inc_websocket_connections(&self) {
         let mut count = self.websocket_connections.write().await;
@@ -240,6 +268,9 @@ impl MetricsCollector {
             approval_waits: self.approval_waits.load(Ordering::Relaxed),
             approval_resumes: self.approval_resumes.load(Ordering::Relaxed),
             planner_retries: self.planner_retries.load(Ordering::Relaxed),
+            mailbox_sessions: *self.mailbox_sessions.read().await,
+            waiting_for_tool_turns: *self.waiting_for_tool_turns.read().await,
+            waiting_for_approval_turns: *self.waiting_for_approval_turns.read().await,
         }
     }
 }
@@ -305,7 +336,16 @@ uhorse_approval_waits_total {}\n\
 uhorse_approval_resumes_total {}\n\
 # HELP uhorse_planner_retries_total Total number of planner retries.\n\
 # TYPE uhorse_planner_retries_total counter\n\
-uhorse_planner_retries_total {}\n",
+uhorse_planner_retries_total {}\n\
+# HELP uhorse_runtime_mailbox_sessions Current number of session mailboxes tracked by runtime.\n\
+# TYPE uhorse_runtime_mailbox_sessions gauge\n\
+uhorse_runtime_mailbox_sessions {}\n\
+# HELP uhorse_runtime_waiting_for_tool_turns Current number of turns waiting for tool results.\n\
+# TYPE uhorse_runtime_waiting_for_tool_turns gauge\n\
+uhorse_runtime_waiting_for_tool_turns {}\n\
+# HELP uhorse_runtime_waiting_for_approval_turns Current number of turns waiting for approval.\n\
+# TYPE uhorse_runtime_waiting_for_approval_turns gauge\n\
+uhorse_runtime_waiting_for_approval_turns {}\n",
             snapshot.messages_received,
             snapshot.messages_sent,
             snapshot.tool_executions,
@@ -319,6 +359,9 @@ uhorse_planner_retries_total {}\n",
             snapshot.approval_waits,
             snapshot.approval_resumes,
             snapshot.planner_retries,
+            snapshot.mailbox_sessions,
+            snapshot.waiting_for_tool_turns,
+            snapshot.waiting_for_approval_turns,
         )
     }
 }
@@ -632,6 +675,7 @@ mod tests {
         collector.inc_continuations("task_result");
         collector.inc_approval_resumes("approved");
         collector.inc_planner_retries("continuation_error");
+        collector.set_runtime_mailbox_state(2, 1, 1).await;
 
         let output = MetricsExporter::new(collector).export_metrics().await;
 
@@ -645,6 +689,9 @@ mod tests {
         assert!(output.contains("uhorse_continuations_total 1"));
         assert!(output.contains("uhorse_approval_resumes_total 1"));
         assert!(output.contains("uhorse_planner_retries_total 1"));
+        assert!(output.contains("uhorse_runtime_mailbox_sessions 2"));
+        assert!(output.contains("uhorse_runtime_waiting_for_tool_turns 1"));
+        assert!(output.contains("uhorse_runtime_waiting_for_approval_turns 1"));
     }
 
     #[test]

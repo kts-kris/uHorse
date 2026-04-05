@@ -70,7 +70,7 @@ pub struct SessionTranscript {
 }
 
 /// Turn 执行状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnStatus {
     /// Turn 正在执行规划。
     Planning,
@@ -93,7 +93,7 @@ pub enum TurnStatus {
 }
 
 /// Tool call 执行状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolCallStatus {
     /// Tool call 已发起，等待完成。
     Running,
@@ -104,7 +104,7 @@ pub enum ToolCallStatus {
 }
 
 /// Session 内当前活跃 turn。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionTurnState {
     /// 当前 turn ID。
     pub turn_id: String,
@@ -131,7 +131,7 @@ pub struct SessionTurnState {
 }
 
 /// 最小 tool call 状态。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallState {
     /// Tool call ID。
     pub tool_call_id: String,
@@ -167,6 +167,21 @@ pub struct SessionRuntimeManager {
     task_bindings: RwLock<HashMap<TaskId, TaskContinuationBinding>>,
 }
 
+/// Session mailbox 的运行时快照。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMailboxSnapshot {
+    /// Session key。
+    pub session_key: String,
+    /// 当前 session 是否已分配串行 mailbox lane。
+    pub has_lane: bool,
+    /// 当前 session 关联的活跃 task binding 数量。
+    pub active_task_binding_count: usize,
+    /// 当前 transcript 事件数量。
+    pub transcript_event_count: usize,
+    /// 当前 turn 状态快照。
+    pub turn: Option<SessionTurnState>,
+}
+
 impl SessionRuntimeManager {
     /// 创建新的 session runtime 管理器。
     pub fn new() -> Self {
@@ -187,6 +202,7 @@ impl SessionRuntimeManager {
 
     /// 开始一个新的 turn。
     pub async fn start_turn(&self, session_key: &str, user_message: impl Into<String>) -> String {
+        self.lane_for(session_key).await;
         let turn_id = Uuid::new_v4().to_string();
         let user_message = user_message.into();
         let turn = SessionTurnState {
@@ -455,6 +471,62 @@ impl SessionRuntimeManager {
         transcript.events = retained;
     }
 
+    /// 获取单个 session mailbox 快照。
+    pub async fn mailbox_snapshot(&self, session_key: &str) -> SessionMailboxSnapshot {
+        let turns = self.turns.read().await;
+        let transcripts = self.transcripts.read().await;
+        let task_bindings = self.task_bindings.read().await;
+        let lanes = self.lanes.read().await;
+
+        SessionMailboxSnapshot {
+            session_key: session_key.to_string(),
+            has_lane: lanes.contains_key(session_key),
+            active_task_binding_count: task_bindings
+                .values()
+                .filter(|binding| binding.session_key == session_key)
+                .count(),
+            transcript_event_count: transcripts
+                .get(session_key)
+                .map(|transcript| transcript.events.len())
+                .unwrap_or(0),
+            turn: turns.get(session_key).cloned(),
+        }
+    }
+
+    /// 获取全部 session mailbox 快照。
+    pub async fn mailbox_snapshots(&self) -> Vec<SessionMailboxSnapshot> {
+        let turns = self.turns.read().await;
+        let transcripts = self.transcripts.read().await;
+        let task_bindings = self.task_bindings.read().await;
+        let lanes = self.lanes.read().await;
+
+        let mut session_keys: Vec<String> = turns
+            .keys()
+            .chain(transcripts.keys())
+            .chain(lanes.keys())
+            .cloned()
+            .collect();
+        session_keys.sort();
+        session_keys.dedup();
+
+        session_keys
+            .into_iter()
+            .map(|session_key| SessionMailboxSnapshot {
+                active_task_binding_count: task_bindings
+                    .values()
+                    .filter(|binding| binding.session_key == session_key)
+                    .count(),
+                transcript_event_count: transcripts
+                    .get(&session_key)
+                    .map(|transcript| transcript.events.len())
+                    .unwrap_or(0),
+                has_lane: lanes.contains_key(&session_key),
+                turn: turns.get(&session_key).cloned(),
+                session_key,
+            })
+            .collect()
+    }
+
     /// 按 session 串行执行一个异步任务。
     pub async fn run_serialized<Fut, T>(&self, session_key: &str, fut: Fut) -> T
     where
@@ -583,5 +655,46 @@ mod tests {
             resumed.tool_call.as_ref().map(|tool_call| tool_call.status.clone()),
             Some(ToolCallStatus::Completed)
         );
+    }
+
+    #[tokio::test]
+    async fn test_session_runtime_manager_reports_mailbox_snapshot() {
+        let manager = SessionRuntimeManager::new();
+        let turn_id = manager.start_turn("session-mailbox", "查看状态").await;
+        let tool_call_id = manager
+            .begin_tool_call("session-mailbox", "hub_task")
+            .await
+            .unwrap();
+        let task_id = TaskId::from_string("task-mailbox");
+        manager
+            .bind_task_to_turn(
+                task_id,
+                TaskContinuationBinding {
+                    session_key: "session-mailbox".to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: sample_route(),
+                },
+            )
+            .await;
+        manager
+            .append_transcript_event(
+                "session-mailbox",
+                TranscriptEventKind::AssistantStep,
+                "step",
+            )
+            .await;
+        manager.mark_waiting_for_approval("session-mailbox").await;
+
+        let snapshot = manager.mailbox_snapshot("session-mailbox").await;
+        assert!(snapshot.has_lane);
+        assert_eq!(snapshot.active_task_binding_count, 1);
+        assert_eq!(snapshot.transcript_event_count, 3);
+        assert_eq!(snapshot.turn.as_ref().map(|turn| turn.status.clone()), Some(TurnStatus::WaitingForApproval));
+
+        let snapshots = manager.mailbox_snapshots().await;
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].session_key, "session-mailbox");
     }
 }

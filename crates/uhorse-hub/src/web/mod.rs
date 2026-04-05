@@ -54,7 +54,7 @@ use uhorse_security::{ApprovalRequest, DevicePairingManager, PairingRequest, Pai
 
 use crate::{
     node_manager::workspace_matches_hint,
-    session_runtime::{TaskContinuationBinding, TranscriptEventKind},
+    session_runtime::{SessionMailboxSnapshot, TaskContinuationBinding, TranscriptEventKind, TurnStatus},
     task_scheduler::{CompletedTask, TaskResult},
     Hub, HubStats,
 };
@@ -659,6 +659,15 @@ struct SessionRuntimeDetail {
     memory_context_chain: Vec<String>,
     visibility_chain: Vec<String>,
     metadata: HashMap<String, String>,
+    runtime_mailbox: Option<SessionMailboxSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct HubRuntimeDiagnosticsResponse {
+    session_mailboxes: Vec<SessionMailboxSnapshot>,
+    waiting_for_tool_turns: usize,
+    waiting_for_approval_turns: usize,
+    active_task_bindings: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2428,6 +2437,7 @@ fn session_state_to_detail(session_state: &SessionState) -> SessionRuntimeDetail
         memory_context_chain,
         visibility_chain,
         metadata: session_state.metadata.clone(),
+        runtime_mailbox: None,
     }
 }
 
@@ -2507,6 +2517,11 @@ fn resolve_session_agent_count_key(
 async fn collect_runtime_sessions(state: &Arc<WebState>) -> Vec<SessionRuntimeDetail> {
     let mut sessions = HashMap::new();
     let mut scanned_scope_dirs = HashSet::new();
+    let mailbox_snapshots = state.hub.session_runtime().mailbox_snapshots().await;
+    let mailbox_map: HashMap<_, _> = mailbox_snapshots
+        .into_iter()
+        .map(|snapshot| (snapshot.session_key.clone(), snapshot))
+        .collect();
 
     for entry in state.agent_runtime.agents.list_all_entries() {
         let Some(scope) = entry.agent.scope().cloned() else {
@@ -2540,7 +2555,8 @@ async fn collect_runtime_sessions(state: &Arc<WebState>) -> Vec<SessionRuntimeDe
                 continue;
             };
 
-            let detail = session_state_to_detail(&session_state);
+            let mut detail = session_state_to_detail(&session_state);
+            detail.runtime_mailbox = mailbox_map.get(&detail.session_id).cloned();
             let should_replace = sessions
                 .get(&detail.session_id)
                 .map(|existing: &SessionRuntimeDetail| detail.last_active > existing.last_active)
@@ -2549,6 +2565,26 @@ async fn collect_runtime_sessions(state: &Arc<WebState>) -> Vec<SessionRuntimeDe
                 sessions.insert(detail.session_id.clone(), detail);
             }
         }
+    }
+
+    for (session_key, mailbox) in mailbox_map {
+        sessions.entry(session_key.clone()).or_insert_with(|| SessionRuntimeDetail {
+            session_id: session_key,
+            agent_id: None,
+            conversation_id: None,
+            sender_user_id: None,
+            sender_staff_id: None,
+            last_task_id: None,
+            message_count: 0,
+            created_at: String::new(),
+            last_active: String::new(),
+            namespace: None,
+            collaboration_workspace: None,
+            memory_context_chain: vec![],
+            visibility_chain: vec![],
+            metadata: HashMap::new(),
+            runtime_mailbox: Some(mailbox),
+        });
     }
 
     let mut values: Vec<_> = sessions.into_values().collect();
@@ -2781,6 +2817,7 @@ pub fn create_router_with_health_config(state: WebState, health_config: &HealthC
         .route("/api/tasks", get(list_tasks).post(submit_task_api))
         .route("/api/tasks/:task_id", get(get_task))
         .route("/api/tasks/:task_id/cancel", post(cancel_task))
+        .route("/api/runtime/diagnostics", get(get_runtime_diagnostics))
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/:request_id", get(get_approval))
         .route("/api/approvals/:request_id/approve", post(approve_approval))
@@ -6613,6 +6650,36 @@ async fn health_check(State(state): State<Arc<WebState>>) -> impl IntoResponse {
 }
 
 async fn metrics_handler(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    let mailbox_snapshots = state.hub.session_runtime().mailbox_snapshots().await;
+    let waiting_for_tool_turns = mailbox_snapshots
+        .iter()
+        .filter(|snapshot| {
+            snapshot
+                .turn
+                .as_ref()
+                .map(|turn| turn.status == TurnStatus::WaitingForTool)
+                .unwrap_or(false)
+        })
+        .count() as u64;
+    let waiting_for_approval_turns = mailbox_snapshots
+        .iter()
+        .filter(|snapshot| {
+            snapshot
+                .turn
+                .as_ref()
+                .map(|turn| turn.status == TurnStatus::WaitingForApproval)
+                .unwrap_or(false)
+        })
+        .count() as u64;
+    state
+        .metrics_collector
+        .set_runtime_mailbox_state(
+            mailbox_snapshots.len() as u64,
+            waiting_for_tool_turns,
+            waiting_for_approval_turns,
+        )
+        .await;
+
     let mut body = state.metrics_exporter.export_metrics().await;
     let stats = state.hub.get_stats().await;
     body.push_str(&format_hub_metrics(&stats));
@@ -6624,6 +6691,43 @@ async fn metrics_handler(State(state): State<Arc<WebState>>) -> impl IntoRespons
         )],
         body,
     )
+}
+
+async fn get_runtime_diagnostics(
+    State(state): State<Arc<WebState>>,
+) -> Json<ApiResponse<HubRuntimeDiagnosticsResponse>> {
+    let session_mailboxes = state.hub.session_runtime().mailbox_snapshots().await;
+    let waiting_for_tool_turns = session_mailboxes
+        .iter()
+        .filter(|snapshot| {
+            snapshot
+                .turn
+                .as_ref()
+                .map(|turn| turn.status == TurnStatus::WaitingForTool)
+                .unwrap_or(false)
+        })
+        .count();
+    let waiting_for_approval_turns = session_mailboxes
+        .iter()
+        .filter(|snapshot| {
+            snapshot
+                .turn
+                .as_ref()
+                .map(|turn| turn.status == TurnStatus::WaitingForApproval)
+                .unwrap_or(false)
+        })
+        .count();
+    let active_task_bindings = session_mailboxes
+        .iter()
+        .map(|snapshot| snapshot.active_task_binding_count)
+        .sum();
+
+    Json(ApiResponse::success(HubRuntimeDiagnosticsResponse {
+        session_mailboxes,
+        waiting_for_tool_turns,
+        waiting_for_approval_turns,
+        active_task_bindings,
+    }))
 }
 
 async fn track_api_metrics(
@@ -7340,6 +7444,9 @@ mod tests {
         assert!(body.contains("# TYPE uhorse_active_sessions gauge"));
         assert!(body.contains("uhorse_api_requests_total 0"));
         assert!(body.contains("uhorse_websocket_connections 0"));
+        assert!(body.contains("uhorse_runtime_mailbox_sessions 0"));
+        assert!(body.contains("uhorse_runtime_waiting_for_tool_turns 0"));
+        assert!(body.contains("uhorse_runtime_waiting_for_approval_turns 0"));
         assert!(body.contains("# HELP uhorse_hub_uptime_seconds"));
         assert!(body.contains("uhorse_hub_nodes_total 0"));
         assert!(body.contains("uhorse_hub_tasks_failed 0"));
@@ -12374,6 +12481,90 @@ The `browser-use` command provides fast, persistent browser automation.
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].user_message, "hello");
         assert_eq!(messages[0].assistant_message, "world");
+    }
+
+    #[tokio::test]
+    async fn test_runtime_diagnostics_and_session_detail_include_mailbox_state() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let hub = Arc::new(hub);
+        let state = Arc::new(WebState::new_with_runtime(
+            hub.clone(),
+            None,
+            None,
+            None,
+            runtime,
+        ));
+        let session_key = SessionKey::new("dingtalk", "user-mailbox");
+        let turn_id = hub
+            .session_runtime()
+            .start_turn(&session_key.as_str(), "执行任务")
+            .await;
+        let tool_call_id = hub
+            .session_runtime()
+            .begin_tool_call(&session_key.as_str(), "hub_task")
+            .await
+            .unwrap();
+        let task_id = TaskId::from_string("task-runtime-mailbox");
+        hub.session_runtime()
+            .bind_task_to_turn(
+                task_id,
+                TaskContinuationBinding {
+                    session_key: session_key.as_str().to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: DingTalkReplyRoute {
+                        conversation_id: "conv-mailbox".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("user-mailbox".to_string()),
+                        sender_staff_id: Some("staff-mailbox".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: None,
+                    },
+                },
+            )
+            .await;
+        hub.session_runtime()
+            .mark_waiting_for_approval(&session_key.as_str())
+            .await;
+
+        persist_session_state(
+            &state,
+            &session_key,
+            "main",
+            "conv-mailbox",
+            Some("user-mailbox"),
+            Some("staff-mailbox"),
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        let app = create_router((*state).clone());
+        let (diag_status, diag_body) = get_json(app.clone(), "/api/runtime/diagnostics").await;
+        assert_eq!(diag_status, StatusCode::OK);
+        assert_eq!(diag_body["success"], json!(true));
+        assert_eq!(diag_body["data"]["waiting_for_approval_turns"], json!(1));
+        assert_eq!(diag_body["data"]["active_task_bindings"], json!(1));
+        assert_eq!(diag_body["data"]["session_mailboxes"][0]["session_key"], json!(session_key.as_str()));
+
+        let (detail_status, detail_body) = get_json(
+            app,
+            &format!("/api/v1/sessions/{}", session_key.as_str()),
+        )
+        .await;
+        assert_eq!(detail_status, StatusCode::OK);
+        assert_eq!(
+            detail_body["data"]["runtime_mailbox"]["turn"]["status"],
+            json!("WaitingForApproval")
+        );
+        assert_eq!(
+            detail_body["data"]["runtime_mailbox"]["active_task_binding_count"],
+            json!(1)
+        );
     }
 
     #[tokio::test]

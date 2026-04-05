@@ -70,20 +70,11 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
-      - name: Run Agent Loop smoke
-        run: |
-          cargo test -p uhorse-hub test_reply_task_result_records_compaction_and_retries_once -- --nocapture
-          cargo test -p uhorse-hub test_approval_request_records_wait_metric_and_transcript -- --nocapture
-          cargo test -p uhorse-hub test_approve_approval_appends_transcript_event_for_bound_turn -- --nocapture
-          cargo test -p uhorse-observability test_metrics_exporter_returns_prometheus_payload -- --nocapture
-          cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture
+      - name: Run loop smoke
+        run: make smoke-loop
 
-      - name: Run audit smoke
-        run: |
-          cargo test -p uhorse-hub test_approval_decision_records_audit_events -- --nocapture
-          cargo test -p uhorse-node-runtime test_dangerous_git_command_records_audit_event -- --nocapture
-          cargo test -p uhorse-node-runtime test_checkpoint_and_restore_record_audit_events -- --nocapture
-          cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture
+      - name: Run observability smoke
+        run: make smoke-observability
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
