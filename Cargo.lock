@@ -5674,6 +5674,7 @@ dependencies = [
  "tokio-test",
  "tracing",
  "uhorse-core",
+ "uhorse-observability",
  "uuid",
 ]
 
@@ -5964,6 +5965,7 @@ dependencies = [
  "tracing-subscriber",
  "uhorse-core",
  "uhorse-node-runtime",
+ "uhorse-observability",
  "uhorse-protocol",
  "uuid",
 ]
@@ -5988,6 +5990,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uhorse-node-runtime",
+ "uhorse-observability",
  "uhorse-protocol",
 ]
 
@@ -6017,6 +6020,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "uhorse-core",
+ "uhorse-observability",
  "uhorse-protocol",
  "uuid",
 ]

@@ -10,7 +10,8 @@ use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info, warn};
 use uhorse_observability::{
-    init_full_observability, HealthService, MetricsCollector, MetricsExporter, OtelConfig,
+    init_full_observability, AuditLogger, HealthService, MetricsCollector, MetricsExporter,
+    OtelConfig,
 };
 use uhorse_security::{ApprovalManager, DevicePairingManager};
 
@@ -98,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化日志
     init_logging(&runtime_config.app_config, &args.log_level)?;
+    AuditLogger::with_in_memory_storage(10_000).install_global();
 
     info!("🚀 uHorse Hub v{} starting...", env!("CARGO_PKG_VERSION"));
 
@@ -122,11 +124,13 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_default();
     let notification_binding_manager =
         Arc::new(NotificationBindingManager::new(notification_bindings));
+    let metrics_collector = Arc::new(MetricsCollector::default());
     let (hub, mut task_result_rx) = Hub::new_with_components(
         runtime_config.hub_config.clone(),
         security_manager,
         dingtalk_channel.clone(),
         notification_binding_manager,
+        Some(Arc::clone(&metrics_collector)),
     );
     let hub = Arc::new(hub);
 
@@ -147,7 +151,6 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|error| anyhow::anyhow!(error.to_string()))?,
     );
     let health_service = Arc::new(HealthService::new(env!("CARGO_PKG_VERSION").to_string()));
-    let metrics_collector = Arc::new(MetricsCollector::default());
     let metrics_exporter = Arc::new(MetricsExporter::new(Arc::clone(&metrics_collector)));
     let pairing_manager = runtime_config.app_config.security.pairing_enabled.then(|| {
         Arc::new(

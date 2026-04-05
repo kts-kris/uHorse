@@ -107,19 +107,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// 初始化日志
 fn init_logging(level: &str) -> anyhow::Result<()> {
-    use tracing_subscriber::EnvFilter;
-
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
-
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
-
-    Ok(())
+    uhorse_observability::init_console_tracing("uhorse-node", level)
 }
 
 /// 加载配置

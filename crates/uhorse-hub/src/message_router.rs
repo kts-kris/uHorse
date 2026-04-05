@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uhorse_channel::DingTalkChannel;
 use uhorse_core::{Channel, MessageContent};
+use uhorse_observability::{log_audit_event, AuditCategory, AuditEvent, AuditLevel};
 use uhorse_protocol::{
     CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub,
     NotificationEventKind, TaskId,
@@ -18,6 +19,7 @@ use crate::error::{HubError, HubResult};
 use crate::node_manager::NodeManager;
 use crate::notification_binding::NotificationBindingManager;
 use crate::security_integration::SecurityManager;
+use crate::session_runtime::TranscriptEventKind;
 use crate::task_scheduler::TaskScheduler;
 use tokio::sync::mpsc;
 
@@ -81,6 +83,8 @@ impl MessageRouter {
         node_id: &NodeId,
         message: NodeToHub,
         security_manager: Option<&SecurityManager>,
+        session_runtime: Option<&crate::session_runtime::SessionRuntimeManager>,
+        metrics_collector: Option<&uhorse_observability::MetricsCollector>,
     ) -> HubResult<()> {
         match message {
             NodeToHub::Heartbeat { status, load, .. } => {
@@ -175,6 +179,24 @@ impl MessageRouter {
                     return Ok(());
                 }
 
+                if let Some(metrics_collector) = metrics_collector {
+                    metrics_collector.inc_approval_waits("node_approval_request");
+                }
+                if let Some(session_runtime) = session_runtime {
+                    if let Some(binding) = session_runtime.task_binding(&task_id).await {
+                        session_runtime
+                            .mark_waiting_for_approval(&binding.session_key)
+                            .await;
+                        session_runtime
+                            .append_transcript_event(
+                                &binding.session_key,
+                                TranscriptEventKind::ApprovalRequested,
+                                format!("request_id={}; reason={}", request_id, reason),
+                            )
+                            .await;
+                    }
+                }
+
                 let metadata = serde_json::json!({
                     "request_id": request_id,
                     "task_id": task_id.as_str(),
@@ -191,6 +213,23 @@ impl MessageRouter {
                     .operation_approver()
                     .request_approval(node_id, operation, ApprovalLevel::Single, metadata)
                     .await?;
+
+                let _ = log_audit_event(AuditEvent {
+                    timestamp: chrono::Utc::now().timestamp() as u64,
+                    level: AuditLevel::Warn,
+                    category: AuditCategory::Session,
+                    actor: Some(node_id.as_str().to_string()),
+                    action: "approval_wait_requested".to_string(),
+                    target: Some(task_id.as_str().to_string()),
+                    details: Some(serde_json::json!({
+                        "request_id": request_id,
+                        "approval_id": approval_id,
+                        "reason": reason,
+                        "operation": operation,
+                    })),
+                    session_id: Some(context.session_id.as_str().to_string()),
+                })
+                .await;
 
                 security_manager
                     .operation_approver()
@@ -396,7 +435,9 @@ impl MessageRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uhorse_protocol::{MessageId, NotificationEvent};
+    use crate::session_runtime::SessionRuntimeManager;
+    use uhorse_observability::MetricsCollector;
+    use uhorse_protocol::{Command, MessageId, NotificationEvent, SessionId, TaskContext, UserId};
 
     #[test]
     fn test_render_notification_message_includes_node_and_content() {
@@ -432,8 +473,105 @@ mod tests {
                     event,
                 },
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_approval_request_records_wait_metric_and_transcript() {
+        let node_manager = Arc::new(NodeManager::new(10, 30));
+        let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
+        let router = MessageRouter::new(
+            node_manager,
+            Arc::new(task_scheduler),
+            None,
+            Arc::new(NotificationBindingManager::default()),
+        );
+        let session_runtime = SessionRuntimeManager::new();
+        let metrics = MetricsCollector::new();
+        let node_id = NodeId::from_string("node-approval-test");
+        let task_id = TaskId::from_string("task-approval-test");
+        let turn_id = session_runtime.start_turn("session-1", "执行危险命令").await;
+        let tool_call_id = session_runtime
+            .begin_tool_call("session-1", "hub_task")
+            .await
+            .unwrap();
+        session_runtime
+            .bind_task_to_turn(
+                task_id.clone(),
+                crate::session_runtime::TaskContinuationBinding {
+                    session_key: "session-1".to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: crate::web::DingTalkReplyRoute {
+                        conversation_id: "conv-1".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("user-1".to_string()),
+                        sender_staff_id: Some("staff-1".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: None,
+                    },
+                },
+            )
+            .await;
+
+        let security_manager = crate::security_integration::SecurityManager::new(
+            "jwt-secret",
+            Arc::new(uhorse_security::ApprovalManager::new()),
+        )
+        .unwrap();
+
+        router
+            .route_node_message(
+                &node_id,
+                NodeToHub::ApprovalRequest {
+                    message_id: MessageId::new(),
+                    request_id: "request-1".to_string(),
+                    task_id: task_id.clone(),
+                    command: Command::Shell(uhorse_protocol::ShellCommand {
+                        command: "rm".to_string(),
+                        args: vec!["important".to_string()],
+                        cwd: None,
+                        env: std::collections::HashMap::new(),
+                        timeout: std::time::Duration::from_secs(30),
+                        capture_stderr: true,
+                    }),
+                    context: TaskContext::new(
+                        UserId::from_string("user-1"),
+                        SessionId::from_string("session-1"),
+                        "dingtalk",
+                    ),
+                    reason: "requires approval".to_string(),
+                    timestamp: chrono::Utc::now(),
+                    expires_at: chrono::Utc::now() + chrono::Duration::minutes(10),
+                },
+                Some(&security_manager),
+                Some(&session_runtime),
+                Some(&metrics),
+            )
+            .await
+            .unwrap();
+
+        let exported = uhorse_observability::MetricsExporter::new(Arc::new(metrics))
+            .export_metrics()
+            .await;
+        assert!(exported.contains("uhorse_approval_waits_total 1"));
+
+        let transcript = session_runtime.transcript("session-1").await.unwrap();
+        assert!(transcript.events.iter().any(|event| {
+            event.kind == TranscriptEventKind::ApprovalRequested
+                && event.content.contains("request_id=request-1")
+        }));
+
+        let turn = session_runtime.turn_state("session-1").await.unwrap();
+        assert_eq!(
+            turn.status,
+            crate::session_runtime::TurnStatus::WaitingForApproval
+        );
     }
 }

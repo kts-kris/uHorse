@@ -25,8 +25,18 @@ pub enum TranscriptEventKind {
     ToolCallPlanned,
     /// Tool 调用已派发到 backend task。
     ToolCallDispatched,
+    /// Tool 调用进入审批等待。
+    ApprovalRequested,
     /// Tool 结果已回流为 observation。
     ToolResultObserved,
+    /// 审批已通过。
+    ApprovalApproved,
+    /// 审批已拒绝。
+    ApprovalRejected,
+    /// Turn 已从等待态恢复继续执行。
+    TurnResumed,
+    /// Planner 发生重试。
+    PlannerRetry,
     /// Assistant 最终回复已生成。
     AssistantFinal,
     /// Turn 失败。
@@ -60,12 +70,20 @@ pub struct SessionTranscript {
 }
 
 /// Turn 执行状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TurnStatus {
-    /// Turn 已创建，正在执行规划或直答。
-    Running,
+    /// Turn 正在执行规划。
+    Planning,
+    /// Turn 已决定要派发 action，正在进入派发阶段。
+    Dispatching,
     /// Turn 已派发 tool，等待结果回流。
     WaitingForTool,
+    /// Turn 已进入审批等待。
+    WaitingForApproval,
+    /// Turn 已进入用户澄清等待。
+    WaitingForUser,
+    /// Turn 已从等待态恢复，正在继续执行。
+    Resuming,
     /// Turn 已完成。
     Completed,
     /// Turn 已取消。
@@ -75,7 +93,7 @@ pub enum TurnStatus {
 }
 
 /// Tool call 执行状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolCallStatus {
     /// Tool call 已发起，等待完成。
     Running,
@@ -86,7 +104,7 @@ pub enum ToolCallStatus {
 }
 
 /// Session 内当前活跃 turn。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionTurnState {
     /// 当前 turn ID。
     pub turn_id: String,
@@ -113,7 +131,7 @@ pub struct SessionTurnState {
 }
 
 /// 最小 tool call 状态。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallState {
     /// Tool call ID。
     pub tool_call_id: String,
@@ -149,6 +167,21 @@ pub struct SessionRuntimeManager {
     task_bindings: RwLock<HashMap<TaskId, TaskContinuationBinding>>,
 }
 
+/// Session mailbox 的运行时快照。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMailboxSnapshot {
+    /// Session key。
+    pub session_key: String,
+    /// 当前 session 是否已分配串行 mailbox lane。
+    pub has_lane: bool,
+    /// 当前 session 关联的活跃 task binding 数量。
+    pub active_task_binding_count: usize,
+    /// 当前 transcript 事件数量。
+    pub transcript_event_count: usize,
+    /// 当前 turn 状态快照。
+    pub turn: Option<SessionTurnState>,
+}
+
 impl SessionRuntimeManager {
     /// 创建新的 session runtime 管理器。
     pub fn new() -> Self {
@@ -169,12 +202,13 @@ impl SessionRuntimeManager {
 
     /// 开始一个新的 turn。
     pub async fn start_turn(&self, session_key: &str, user_message: impl Into<String>) -> String {
+        self.lane_for(session_key).await;
         let turn_id = Uuid::new_v4().to_string();
         let user_message = user_message.into();
         let turn = SessionTurnState {
             turn_id: turn_id.clone(),
             user_message: user_message.clone(),
-            status: TurnStatus::Running,
+            status: TurnStatus::Planning,
             step_count: 0,
             max_steps: 4,
             cancel_requested: false,
@@ -212,7 +246,7 @@ impl SessionRuntimeManager {
         let mut turns = self.turns.write().await;
         let turn = turns.get_mut(session_key)?;
         let tool_call_id = Uuid::new_v4().to_string();
-        turn.status = TurnStatus::WaitingForTool;
+        turn.status = TurnStatus::Dispatching;
         turn.tool_call = Some(ToolCallState {
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.into(),
@@ -257,6 +291,7 @@ impl SessionRuntimeManager {
         self.task_bindings.write().await.insert(task_id.clone(), binding);
 
         if let Some(turn) = self.turns.write().await.get_mut(&session_key) {
+            turn.status = TurnStatus::WaitingForTool;
             if let Some(tool_call) = turn.tool_call.as_mut() {
                 if tool_call.tool_call_id == tool_call_id {
                     tool_call.task_id = Some(task_id.clone());
@@ -338,9 +373,42 @@ impl SessionRuntimeManager {
         self.turns.read().await.get(session_key).cloned()
     }
 
+    /// 将当前 turn 标记为恢复继续执行。
+    pub async fn mark_turn_resuming(
+        &self,
+        session_key: &str,
+        task_id: Option<&TaskId>,
+    ) -> Option<SessionTurnState> {
+        let mut turns = self.turns.write().await;
+        let turn = turns.get_mut(session_key)?;
+        if let Some(tool_call) = turn.tool_call.as_mut() {
+            if task_id.is_none() || tool_call.task_id.as_ref() == task_id {
+                tool_call.status = ToolCallStatus::Completed;
+            }
+        }
+        turn.status = TurnStatus::Resuming;
+        Some(turn.clone())
+    }
+
     /// 获取指定 task 对应的 continuation 绑定。
     pub async fn find_task_binding(&self, task_id: &TaskId) -> Option<TaskContinuationBinding> {
         self.task_bindings.read().await.get(task_id).cloned()
+    }
+
+    /// 将当前 turn 标记为等待审批。
+    pub async fn mark_waiting_for_approval(&self, session_key: &str) -> Option<SessionTurnState> {
+        let mut turns = self.turns.write().await;
+        let turn = turns.get_mut(session_key)?;
+        turn.status = TurnStatus::WaitingForApproval;
+        Some(turn.clone())
+    }
+
+    /// 将当前 turn 标记为等待用户澄清。
+    pub async fn mark_waiting_for_user(&self, session_key: &str) -> Option<SessionTurnState> {
+        let mut turns = self.turns.write().await;
+        let turn = turns.get_mut(session_key)?;
+        turn.status = TurnStatus::WaitingForUser;
+        Some(turn.clone())
     }
 
     /// 记录 planner 重试次数。
@@ -401,6 +469,62 @@ impl SessionRuntimeManager {
             event.seq = seq as u64 + 1;
         }
         transcript.events = retained;
+    }
+
+    /// 获取单个 session mailbox 快照。
+    pub async fn mailbox_snapshot(&self, session_key: &str) -> SessionMailboxSnapshot {
+        let turns = self.turns.read().await;
+        let transcripts = self.transcripts.read().await;
+        let task_bindings = self.task_bindings.read().await;
+        let lanes = self.lanes.read().await;
+
+        SessionMailboxSnapshot {
+            session_key: session_key.to_string(),
+            has_lane: lanes.contains_key(session_key),
+            active_task_binding_count: task_bindings
+                .values()
+                .filter(|binding| binding.session_key == session_key)
+                .count(),
+            transcript_event_count: transcripts
+                .get(session_key)
+                .map(|transcript| transcript.events.len())
+                .unwrap_or(0),
+            turn: turns.get(session_key).cloned(),
+        }
+    }
+
+    /// 获取全部 session mailbox 快照。
+    pub async fn mailbox_snapshots(&self) -> Vec<SessionMailboxSnapshot> {
+        let turns = self.turns.read().await;
+        let transcripts = self.transcripts.read().await;
+        let task_bindings = self.task_bindings.read().await;
+        let lanes = self.lanes.read().await;
+
+        let mut session_keys: Vec<String> = turns
+            .keys()
+            .chain(transcripts.keys())
+            .chain(lanes.keys())
+            .cloned()
+            .collect();
+        session_keys.sort();
+        session_keys.dedup();
+
+        session_keys
+            .into_iter()
+            .map(|session_key| SessionMailboxSnapshot {
+                active_task_binding_count: task_bindings
+                    .values()
+                    .filter(|binding| binding.session_key == session_key)
+                    .count(),
+                transcript_event_count: transcripts
+                    .get(&session_key)
+                    .map(|transcript| transcript.events.len())
+                    .unwrap_or(0),
+                has_lane: lanes.contains_key(&session_key),
+                turn: turns.get(&session_key).cloned(),
+                session_key,
+            })
+            .collect()
     }
 
     /// 按 session 串行执行一个异步任务。
@@ -518,5 +642,59 @@ mod tests {
         let binding = manager.task_binding(&task_id).await.unwrap();
         assert_eq!(binding.session_key, "session-1");
         assert_eq!(binding.turn_id, turn_id);
+
+        let waiting = manager.mark_waiting_for_approval("session-1").await.unwrap();
+        assert_eq!(waiting.status, TurnStatus::WaitingForApproval);
+
+        let resumed = manager
+            .mark_turn_resuming("session-1", Some(&task_id))
+            .await
+            .unwrap();
+        assert_eq!(resumed.status, TurnStatus::Resuming);
+        assert_eq!(
+            resumed.tool_call.as_ref().map(|tool_call| tool_call.status.clone()),
+            Some(ToolCallStatus::Completed)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_session_runtime_manager_reports_mailbox_snapshot() {
+        let manager = SessionRuntimeManager::new();
+        let turn_id = manager.start_turn("session-mailbox", "查看状态").await;
+        let tool_call_id = manager
+            .begin_tool_call("session-mailbox", "hub_task")
+            .await
+            .unwrap();
+        let task_id = TaskId::from_string("task-mailbox");
+        manager
+            .bind_task_to_turn(
+                task_id,
+                TaskContinuationBinding {
+                    session_key: "session-mailbox".to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: sample_route(),
+                },
+            )
+            .await;
+        manager
+            .append_transcript_event(
+                "session-mailbox",
+                TranscriptEventKind::AssistantStep,
+                "step",
+            )
+            .await;
+        manager.mark_waiting_for_approval("session-mailbox").await;
+
+        let snapshot = manager.mailbox_snapshot("session-mailbox").await;
+        assert!(snapshot.has_lane);
+        assert_eq!(snapshot.active_task_binding_count, 1);
+        assert_eq!(snapshot.transcript_event_count, 3);
+        assert_eq!(snapshot.turn.as_ref().map(|turn| turn.status.clone()), Some(TurnStatus::WaitingForApproval));
+
+        let snapshots = manager.mailbox_snapshots().await;
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].session_key, "session-mailbox");
     }
 }

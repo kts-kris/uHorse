@@ -41,6 +41,9 @@
 - `uhorse-hub` / `uhorse-node` release 编译
 - 真实 `test_local_hub_node_roundtrip_file_exists`
 - `test_agent_browser_natural_language_install_flow_returns_chinese_hint`
+- Agent Loop continuation smoke
+- approval wait / resume smoke
+- observability smoke
 - `uhorse-node check --workspace .`
 - Hub Docker 构建
 - Docker 内 `GET /api/health` 与 `GET /api/nodes` smoke
@@ -65,6 +68,9 @@ make skill-install-smoke
 - `uhorse-hub` 包级测试
 - roundtrip 回归
 - JWT `node_id` 不匹配拒绝回归
+- Agent Loop continuation smoke
+- approval wait / resume smoke
+- observability smoke
 - Node workspace 检查
 - Hub Docker smoke
 
@@ -194,6 +200,64 @@ make skill-install-smoke
 - “帮我安装 Agent Browser 技能”自然语言安装
 - SkillHub 搜索与安装
 - 安装成功后的中文提示文案
+
+### `agent-loop-smoke`
+
+单独运行 Agent Loop continuation 主线 smoke。
+
+```bash
+make agent-loop-smoke
+```
+
+覆盖内容：
+
+- `test_reply_task_result_records_compaction_and_retries_once`
+- `test_project_transcript_messages_includes_intermediate_events`
+- continuation / planner retry / transcript 中间事件
+
+### `approval-loop-smoke`
+
+单独运行 approval wait / resume 主线 smoke。
+
+```bash
+make approval-loop-smoke
+```
+
+覆盖内容：
+
+- `test_approval_request_records_wait_metric_and_transcript`
+- `test_approve_approval_appends_transcript_event_for_bound_turn`
+- approval wait / resume transcript 与 metrics
+
+### `observability-smoke`
+
+单独运行 loop / approval 指标导出与 restore 审计 smoke。
+
+```bash
+make observability-smoke
+```
+
+覆盖内容：
+
+- `test_metrics_exporter_returns_prometheus_payload`
+- `test_restore_lifecycle_records_audit_events`
+- loop / continuation / approval / planner retry 指标导出
+- backup restore start / complete / fail / rollback 审计回归
+
+### `audit-smoke`
+
+单独运行 approval / dangerous command / restore 审计 smoke。
+
+```bash
+make audit-smoke
+```
+
+覆盖内容：
+
+- `test_approval_decision_records_audit_events`
+- `test_dangerous_git_command_records_audit_event`
+- `test_checkpoint_and_restore_record_audit_events`
+- `test_restore_lifecycle_records_audit_events`
 
 ## 推荐搭配
 

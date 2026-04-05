@@ -71,23 +71,13 @@ enum Commands {
     },
 }
 
-fn init_logging() {
-    use tracing_subscriber::EnvFilter;
-
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
+fn init_logging() -> anyhow::Result<()> {
+    uhorse_observability::init_console_tracing("uhorse-node-desktop", "info")
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_logging();
+    init_logging()?;
 
     let args = Args::parse();
     match args.command.unwrap_or(Commands::Doctor) {

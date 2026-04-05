@@ -38,6 +38,14 @@ cargo test -p uhorse-hub test_plan_dingtalk_command_maps_baidu_request_to_open_s
 cargo test -p uhorse-hub test_submit_dingtalk_task_dispatches_baidu_open_system_to_browser_node -- --nocapture >/tmp/uhorse-quick-baidu-dispatch.log 2>&1
 pass "百度浏览器自动化回归通过"
 
+info "运行 loop smoke 组合..."
+make smoke-loop >/tmp/uhorse-quick-loop-smoke.log 2>&1
+pass "loop smoke 组合通过"
+
+info "运行 observability smoke 组合..."
+make smoke-observability >/tmp/uhorse-quick-observability-smoke.log 2>&1
+pass "observability smoke 组合通过"
+
 info "检查当前 workspace 是否可作为 Node 工作区..."
 cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-quick-node-check.log 2>&1
 pass "Node workspace 检查通过"
@@ -72,6 +80,10 @@ echo "  /tmp/uhorse-quick-roundtrip.log"
 echo "  /tmp/uhorse-quick-skill-install.log"
 echo "  /tmp/uhorse-quick-baidu-plan.log"
 echo "  /tmp/uhorse-quick-baidu-dispatch.log"
+echo "  /tmp/uhorse-quick-agent-loop.log"
+echo "  /tmp/uhorse-quick-approval-wait.log"
+echo "  /tmp/uhorse-quick-approval-resume.log"
+echo "  /tmp/uhorse-quick-observability.log"
 echo "  /tmp/uhorse-quick-node-check.log"
 echo "  /tmp/uhorse-quick-docker.log"
 echo "  /tmp/uhorse-quick-compose.log"

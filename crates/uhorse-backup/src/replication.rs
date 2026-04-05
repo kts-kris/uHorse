@@ -169,8 +169,12 @@ impl ReplicationManager {
         tasks.push(task.clone());
 
         info!(
-            "Created replication task: {} -> {}",
-            task.source_backup_id, task.target_id
+            "Created replication task: {} -> {} (parallel_transfers={}, max_retries={}, timeout_secs={})",
+            task.source_backup_id,
+            task.target_id,
+            self.config.parallel_transfers,
+            self.config.max_retries,
+            self.config.timeout_secs
         );
 
         task

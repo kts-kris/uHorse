@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use uhorse_observability::{log_audit_event, AuditCategory, AuditEvent, AuditLevel};
 
 /// 工作区版本管理器
 #[derive(Debug, Clone)]
@@ -69,7 +70,22 @@ impl VersionManager {
         }
 
         self.git(["commit", "-m", &message])?;
-        self.current_checkpoint()
+        let checkpoint = self.current_checkpoint()?;
+        let _ = futures::executor::block_on(log_audit_event(AuditEvent {
+            timestamp: Utc::now().timestamp() as u64,
+            level: AuditLevel::Info,
+            category: AuditCategory::Tool,
+            actor: None,
+            action: "checkpoint_created".to_string(),
+            target: Some(checkpoint.revision.clone()),
+            details: Some(serde_json::json!({
+                "message": checkpoint.message,
+                "workspace": self.workspace.root().display().to_string(),
+                "include_untracked": include_untracked,
+            })),
+            session_id: None,
+        }));
+        Ok(checkpoint)
     }
 
     /// 获取最近一次检查点
@@ -115,6 +131,20 @@ impl VersionManager {
         let before = self.status()?;
         self.git(["reset", "--soft", revision])?;
         let after = self.status()?;
+        let _ = futures::executor::block_on(log_audit_event(AuditEvent {
+            timestamp: Utc::now().timestamp() as u64,
+            level: AuditLevel::Warn,
+            category: AuditCategory::Tool,
+            actor: None,
+            action: "workspace_restored".to_string(),
+            target: Some(revision.to_string()),
+            details: Some(serde_json::json!({
+                "workspace": self.workspace.root().display().to_string(),
+                "dirty_before": before.dirty,
+                "dirty_after": after.dirty,
+            })),
+            session_id: None,
+        }));
         Ok(RestoreResult {
             revision: revision.to_string(),
             restored_at: Utc::now(),
@@ -372,6 +402,7 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+    use uhorse_observability::AuditLogger;
 
     fn init_git_repo() -> (TempDir, Arc<Workspace>, VersionManager) {
         let temp = TempDir::new().unwrap();
@@ -446,6 +477,74 @@ mod tests {
 
         let status = manager.status().unwrap();
         assert!(!status.dirty);
+    }
+
+    #[tokio::test]
+    async fn test_checkpoint_and_restore_record_audit_events() {
+        let logger = AuditLogger::with_in_memory_storage(256).install_global();
+        logger.clear_recorded_events().await;
+
+        let (temp, _workspace, manager) = init_git_repo();
+        fs::write(temp.path().join("notes.txt"), "draft\n").unwrap();
+
+        let initial = manager.current_checkpoint().unwrap();
+        let checkpoint = manager
+            .create_checkpoint("checkpoint: 保存 notes", true)
+            .unwrap();
+        let restored = manager.restore(&initial.revision).unwrap();
+
+        let events = logger.recorded_events().await;
+        let checkpoint_event = events
+            .iter()
+            .find(|event| event.action == "checkpoint_created")
+            .expect("missing checkpoint_created audit event");
+        assert_eq!(checkpoint_event.level, AuditLevel::Info);
+        assert_eq!(checkpoint_event.category, AuditCategory::Tool);
+        assert_eq!(
+            checkpoint_event.target.as_deref(),
+            Some(checkpoint.revision.as_str())
+        );
+        assert_eq!(
+            checkpoint_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.as_str()),
+            Some("checkpoint: 保存 notes")
+        );
+        assert_eq!(
+            checkpoint_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("include_untracked"))
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let restore_event = events
+            .iter()
+            .find(|event| event.action == "workspace_restored")
+            .expect("missing workspace_restored audit event");
+        assert_eq!(restore_event.level, AuditLevel::Warn);
+        assert_eq!(restore_event.category, AuditCategory::Tool);
+        assert_eq!(restore_event.target.as_deref(), Some(initial.revision.as_str()));
+        assert_eq!(restored.revision, initial.revision);
+        assert_eq!(
+            restore_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("dirty_before"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            restore_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("dirty_after"))
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]

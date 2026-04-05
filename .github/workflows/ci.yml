@@ -70,6 +70,12 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Run loop smoke
+        run: make smoke-loop
+
+      - name: Run observability smoke
+        run: make smoke-observability
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -120,7 +126,6 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --workspace -- -D clippy::all -A clippy::missing_docs_in_private_items -W warnings
-        continue-on-error: true
 
   # ==================== 文档检查 ====================
   docs:
@@ -168,4 +173,3 @@ jobs:
 
       - name: Run security audit
         run: cargo audit
-        continue-on-error: true
