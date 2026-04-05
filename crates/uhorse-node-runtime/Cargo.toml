@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 uhorse-protocol = { path = "../uhorse-protocol" }
 uhorse-core = { path = "../uhorse-core" }
+uhorse-observability = { path = "../uhorse-observability" }
 
 # Async runtime
 tokio = { workspace = true }

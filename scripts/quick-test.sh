@@ -38,6 +38,26 @@ cargo test -p uhorse-hub test_plan_dingtalk_command_maps_baidu_request_to_open_s
 cargo test -p uhorse-hub test_submit_dingtalk_task_dispatches_baidu_open_system_to_browser_node -- --nocapture >/tmp/uhorse-quick-baidu-dispatch.log 2>&1
 pass "百度浏览器自动化回归通过"
 
+info "运行 Agent Loop continuation smoke..."
+cargo test -p uhorse-hub test_reply_task_result_records_compaction_and_retries_once -- --nocapture >/tmp/uhorse-quick-agent-loop.log 2>&1
+pass "Agent Loop continuation smoke 通过"
+
+info "运行 approval wait / resume smoke..."
+cargo test -p uhorse-hub test_approval_request_records_wait_metric_and_transcript -- --nocapture >/tmp/uhorse-quick-approval-wait.log 2>&1
+cargo test -p uhorse-hub test_approve_approval_appends_transcript_event_for_bound_turn -- --nocapture >/tmp/uhorse-quick-approval-resume.log 2>&1
+pass "approval wait / resume smoke 通过"
+
+info "运行 observability smoke..."
+cargo test -p uhorse-observability test_metrics_exporter_returns_prometheus_payload -- --nocapture >/tmp/uhorse-quick-observability.log 2>&1
+cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture >/tmp/uhorse-quick-restore-audit.log 2>&1
+pass "observability smoke 通过"
+
+info "运行 audit smoke..."
+cargo test -p uhorse-hub test_approval_decision_records_audit_events -- --nocapture >/tmp/uhorse-quick-approval-audit.log 2>&1
+cargo test -p uhorse-node-runtime test_dangerous_git_command_records_audit_event -- --nocapture >/tmp/uhorse-quick-dangerous-command-audit.log 2>&1
+cargo test -p uhorse-node-runtime test_checkpoint_and_restore_record_audit_events -- --nocapture >/tmp/uhorse-quick-versioning-audit.log 2>&1
+pass "audit smoke 通过"
+
 info "检查当前 workspace 是否可作为 Node 工作区..."
 cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-quick-node-check.log 2>&1
 pass "Node workspace 检查通过"
@@ -72,6 +92,10 @@ echo "  /tmp/uhorse-quick-roundtrip.log"
 echo "  /tmp/uhorse-quick-skill-install.log"
 echo "  /tmp/uhorse-quick-baidu-plan.log"
 echo "  /tmp/uhorse-quick-baidu-dispatch.log"
+echo "  /tmp/uhorse-quick-agent-loop.log"
+echo "  /tmp/uhorse-quick-approval-wait.log"
+echo "  /tmp/uhorse-quick-approval-resume.log"
+echo "  /tmp/uhorse-quick-observability.log"
 echo "  /tmp/uhorse-quick-node-check.log"
 echo "  /tmp/uhorse-quick-docker.log"
 echo "  /tmp/uhorse-quick-compose.log"

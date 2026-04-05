@@ -25,8 +25,18 @@ pub enum TranscriptEventKind {
     ToolCallPlanned,
     /// Tool 调用已派发到 backend task。
     ToolCallDispatched,
+    /// Tool 调用进入审批等待。
+    ApprovalRequested,
     /// Tool 结果已回流为 observation。
     ToolResultObserved,
+    /// 审批已通过。
+    ApprovalApproved,
+    /// 审批已拒绝。
+    ApprovalRejected,
+    /// Turn 已从等待态恢复继续执行。
+    TurnResumed,
+    /// Planner 发生重试。
+    PlannerRetry,
     /// Assistant 最终回复已生成。
     AssistantFinal,
     /// Turn 失败。
@@ -66,6 +76,8 @@ pub enum TurnStatus {
     Running,
     /// Turn 已派发 tool，等待结果回流。
     WaitingForTool,
+    /// Turn 已从等待态恢复，正在继续执行。
+    Resuming,
     /// Turn 已完成。
     Completed,
     /// Turn 已取消。
@@ -338,6 +350,23 @@ impl SessionRuntimeManager {
         self.turns.read().await.get(session_key).cloned()
     }
 
+    /// 将当前 turn 标记为恢复继续执行。
+    pub async fn mark_turn_resuming(
+        &self,
+        session_key: &str,
+        task_id: Option<&TaskId>,
+    ) -> Option<SessionTurnState> {
+        let mut turns = self.turns.write().await;
+        let turn = turns.get_mut(session_key)?;
+        if let Some(tool_call) = turn.tool_call.as_mut() {
+            if task_id.is_none() || tool_call.task_id.as_ref() == task_id {
+                tool_call.status = ToolCallStatus::Completed;
+            }
+        }
+        turn.status = TurnStatus::Resuming;
+        Some(turn.clone())
+    }
+
     /// 获取指定 task 对应的 continuation 绑定。
     pub async fn find_task_binding(&self, task_id: &TaskId) -> Option<TaskContinuationBinding> {
         self.task_bindings.read().await.get(task_id).cloned()
@@ -518,5 +547,15 @@ mod tests {
         let binding = manager.task_binding(&task_id).await.unwrap();
         assert_eq!(binding.session_key, "session-1");
         assert_eq!(binding.turn_id, turn_id);
+
+        let resumed = manager
+            .mark_turn_resuming("session-1", Some(&task_id))
+            .await
+            .unwrap();
+        assert_eq!(resumed.status, TurnStatus::Resuming);
+        assert_eq!(
+            resumed.tool_call.as_ref().map(|tool_call| tool_call.status.clone()),
+            Some(ToolCallStatus::Completed)
+        );
     }
 }

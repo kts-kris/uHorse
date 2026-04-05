@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
+use uhorse_observability::{log_audit_event, AuditCategory, AuditEvent, AuditLevel};
 use uhorse_protocol::{CodeCommand, Command, ShellCommand, TaskContext, TaskId};
 
 /// 默认拒绝的危险 git 命令片段
@@ -625,6 +626,18 @@ impl PermissionManager {
 
         for pattern in DANGEROUS_GIT_PATTERNS {
             if normalized.contains(pattern) {
+                let _ = futures::executor::block_on(log_audit_event(AuditEvent {
+                    timestamp: Utc::now().timestamp() as u64,
+                    level: AuditLevel::Warn,
+                    category: AuditCategory::Tool,
+                    actor: None,
+                    action: "dangerous_command_denied".to_string(),
+                    target: Some(normalized.clone()),
+                    details: Some(serde_json::json!({
+                        "pattern": pattern,
+                    })),
+                    session_id: None,
+                }));
                 return Some(format!("Dangerous git command is denied: {}", pattern));
             }
         }
@@ -775,6 +788,7 @@ impl PermissionManager {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use uhorse_observability::AuditLogger;
     use uhorse_protocol::{CodeLanguage, FileCommand};
 
     fn create_test_context() -> TaskContext {
@@ -868,6 +882,44 @@ mod tests {
             }
             other => panic!("unexpected result: {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_dangerous_git_command_records_audit_event() {
+        let logger = AuditLogger::with_in_memory_storage(256).install_global();
+        logger.clear_recorded_events().await;
+
+        let temp = TempDir::new().unwrap();
+        let workspace = Arc::new(Workspace::new(temp.path()).unwrap());
+        let manager = PermissionManager::new(workspace, true);
+        manager.load_default_rules().await;
+
+        let result = manager
+            .check(
+                &Command::Shell(
+                    ShellCommand::new("git")
+                        .with_args(vec!["reset".to_string(), "--hard".to_string()]),
+                ),
+                &create_test_context(),
+            )
+            .await;
+        assert!(matches!(result, PermissionResult::Denied(_)));
+
+        let events = logger.recorded_events().await;
+        let event = events
+            .iter()
+            .find(|event| event.action == "dangerous_command_denied")
+            .expect("missing dangerous_command_denied audit event");
+        assert_eq!(event.level, AuditLevel::Warn);
+        assert_eq!(event.category, AuditCategory::Tool);
+        assert!(event.target.as_deref().unwrap_or_default().contains("git reset --hard"));
+        assert_eq!(
+            event.details
+                .as_ref()
+                .and_then(|value| value.get("pattern"))
+                .and_then(|value| value.as_str()),
+            Some("git reset --hard")
+        );
     }
 
     #[tokio::test]

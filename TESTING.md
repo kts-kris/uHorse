@@ -32,6 +32,10 @@ cargo test --workspace
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 cargo test -p uhorse-hub test_local_hub_rejects_node_with_mismatched_auth_token -- --nocapture
 make skill-install-smoke
+make agent-loop-smoke
+make approval-loop-smoke
+make observability-smoke
+make audit-smoke
 make test-quick
 ```
 
@@ -148,6 +152,73 @@ cargo test -p uhorse-hub security_test -- --nocapture
 - 审批请求创建 / 批准 / 拒绝
 - Node 发起审批请求后，Hub 是否创建对应审批项
 - 未启用 `SecurityManager` 时的错误路径
+
+### 5. Agent Loop continuation smoke
+
+```bash
+make agent-loop-smoke
+# 或
+cargo test -p uhorse-hub test_reply_task_result_records_compaction_and_retries_once -- --nocapture
+cargo test -p uhorse-hub test_project_transcript_messages_includes_intermediate_events -- --nocapture
+```
+
+这组回归验证：
+
+- planner → dispatch → task result continuation 主链路
+- continuation compaction 与 planner retry 记录
+- transcript 是否包含中间 loop 事件
+
+### 6. approval wait / resume smoke
+
+```bash
+make approval-loop-smoke
+# 或
+cargo test -p uhorse-hub test_approval_request_records_wait_metric_and_transcript -- --nocapture
+cargo test -p uhorse-hub test_approve_approval_appends_transcript_event_for_bound_turn -- --nocapture
+```
+
+这组回归验证：
+
+- Node 发起 `ApprovalRequest` 时是否记录 approval wait transcript / metrics
+- approval approve 后是否为已绑定 turn 追加 transcript 事件
+- approval wait / resume 是否进入统一 loop 观测模型
+
+### 7. observability smoke
+
+```bash
+make observability-smoke
+# 或
+cargo test -p uhorse-observability test_metrics_exporter_returns_prometheus_payload -- --nocapture
+cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture
+```
+
+这组回归验证：
+
+- loop steps
+- continuations
+- approval waits / resumes
+- planner retries
+- backup restore start / complete / fail / rollback 审计事件
+
+这些指标与审计事件是否能通过默认 smoke 入口稳定回归
+
+### 8. audit smoke
+
+```bash
+make audit-smoke
+# 或
+cargo test -p uhorse-hub test_approval_decision_records_audit_events -- --nocapture
+cargo test -p uhorse-node-runtime test_dangerous_git_command_records_audit_event -- --nocapture
+cargo test -p uhorse-node-runtime test_checkpoint_and_restore_record_audit_events -- --nocapture
+cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture
+```
+
+这组回归验证：
+
+- approval approve / reject 审计事件
+- dangerous git deny 审计事件
+- workspace checkpoint / restore 审计事件
+- backup restore lifecycle 审计事件
 
 ---
 

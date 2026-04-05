@@ -44,6 +44,26 @@ info "运行 JWT node_id 拒绝回归..."
 cargo test -p uhorse-hub test_local_hub_rejects_node_with_mismatched_auth_token -- --nocapture >/tmp/uhorse-test-auth.log 2>&1
 pass "JWT 拒绝回归通过"
 
+info "运行 Agent Loop continuation smoke..."
+cargo test -p uhorse-hub test_reply_task_result_records_compaction_and_retries_once -- --nocapture >/tmp/uhorse-test-agent-loop.log 2>&1
+pass "Agent Loop continuation smoke 通过"
+
+info "运行 approval wait / resume smoke..."
+cargo test -p uhorse-hub test_approval_request_records_wait_metric_and_transcript -- --nocapture >/tmp/uhorse-test-approval-wait.log 2>&1
+cargo test -p uhorse-hub test_approve_approval_appends_transcript_event_for_bound_turn -- --nocapture >/tmp/uhorse-test-approval-resume.log 2>&1
+pass "approval wait / resume smoke 通过"
+
+info "运行 observability smoke..."
+cargo test -p uhorse-observability test_metrics_exporter_returns_prometheus_payload -- --nocapture >/tmp/uhorse-test-observability.log 2>&1
+cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture >/tmp/uhorse-test-restore-audit.log 2>&1
+pass "observability smoke 通过"
+
+info "运行 audit smoke..."
+cargo test -p uhorse-hub test_approval_decision_records_audit_events -- --nocapture >/tmp/uhorse-test-approval-audit.log 2>&1
+cargo test -p uhorse-node-runtime test_dangerous_git_command_records_audit_event -- --nocapture >/tmp/uhorse-test-dangerous-command-audit.log 2>&1
+cargo test -p uhorse-node-runtime test_checkpoint_and_restore_record_audit_events -- --nocapture >/tmp/uhorse-test-versioning-audit.log 2>&1
+pass "audit smoke 通过"
+
 info "检查当前 workspace 是否可作为 Node 工作区..."
 cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-test-node-check.log 2>&1
 pass "Node workspace 检查通过"
@@ -81,6 +101,10 @@ echo "  /tmp/uhorse-test-node-runtime.log"
 echo "  /tmp/uhorse-test-hub.log"
 echo "  /tmp/uhorse-test-roundtrip.log"
 echo "  /tmp/uhorse-test-auth.log"
+echo "  /tmp/uhorse-test-agent-loop.log"
+echo "  /tmp/uhorse-test-approval-wait.log"
+echo "  /tmp/uhorse-test-approval-resume.log"
+echo "  /tmp/uhorse-test-observability.log"
 echo "  /tmp/uhorse-test-node-check.log"
 echo "  /tmp/uhorse-test-docker.log"
 echo "  /tmp/uhorse-test-compose.log"

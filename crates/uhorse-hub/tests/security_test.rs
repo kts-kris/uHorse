@@ -293,6 +293,8 @@ async fn test_message_router_creates_hub_approval_from_node_request() {
                 expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
             },
             Some(&security_manager),
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -330,6 +332,8 @@ async fn test_message_router_rejects_approval_request_without_security_manager()
                 timestamp: chrono::Utc::now(),
                 expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
             },
+            None,
+            None,
             None,
         )
         .await;

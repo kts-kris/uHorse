@@ -12,6 +12,7 @@ use crate::task_scheduler::{CompletedTask, SchedulerStats, TaskScheduler, TaskSt
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uhorse_observability::MetricsCollector;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
@@ -93,6 +94,8 @@ pub struct Hub {
     session_runtime: Arc<SessionRuntimeManager>,
     /// 安全管理器
     security_manager: Option<Arc<SecurityManager>>,
+    /// 指标采集器
+    metrics_collector: Option<Arc<MetricsCollector>>,
     /// 关闭信号
     shutdown_tx: broadcast::Sender<()>,
 }
@@ -105,6 +108,7 @@ impl Hub {
             None,
             None,
             Arc::new(NotificationBindingManager::default()),
+            None,
         )
     }
 
@@ -118,6 +122,7 @@ impl Hub {
             security_manager,
             None,
             Arc::new(NotificationBindingManager::default()),
+            None,
         )
     }
 
@@ -127,6 +132,7 @@ impl Hub {
         security_manager: Option<Arc<SecurityManager>>,
         dingtalk_channel: Option<Arc<DingTalkChannel>>,
         notification_bindings: Arc<NotificationBindingManager>,
+        metrics_collector: Option<Arc<MetricsCollector>>,
     ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
         let node_manager = Arc::new(NodeManager::new(
             config.max_nodes,
@@ -160,6 +166,7 @@ impl Hub {
                 notification_bindings,
                 session_runtime,
                 security_manager,
+                metrics_collector,
                 shutdown_tx,
             },
             task_result_rx,
@@ -254,7 +261,13 @@ impl Hub {
         );
 
         self.message_router
-            .route_node_message(node_id, message, self.security_manager.as_deref())
+            .route_node_message(
+                node_id,
+                message,
+                self.security_manager.as_deref(),
+                Some(self.session_runtime.as_ref()),
+                self.metrics_collector.as_deref(),
+            )
             .await?;
 
         if should_dispatch {
@@ -385,6 +398,11 @@ impl Hub {
     pub fn security_manager(&self) -> Option<Arc<SecurityManager>> {
         self.security_manager.clone()
     }
+
+    /// 获取指标采集器。
+    pub fn metrics_collector(&self) -> Option<Arc<MetricsCollector>> {
+        self.metrics_collector.clone()
+    }
 }
 
 #[cfg(test)]
@@ -392,11 +410,13 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::session_runtime::TranscriptEventKind;
     use tokio::sync::mpsc;
     use tokio::time::timeout;
+    use uhorse_observability::{MetricsCollector, MetricsExporter};
     use uhorse_protocol::{
         Command, FileCommand, MessageId, NotificationEvent, NotificationEventKind, SessionId,
-        TaskStatus, UserId,
+        ShellCommand, TaskContext, TaskStatus, UserId,
     };
 
     #[test]
@@ -481,5 +501,88 @@ mod tests {
         assert!(timeout(Duration::from_millis(200), rx.recv())
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn test_hub_node_message_records_approval_wait_metric_and_transcript() {
+        let security_manager = Arc::new(
+            SecurityManager::new("jwt-secret", Arc::new(uhorse_security::ApprovalManager::new()))
+                .unwrap(),
+        );
+        let metrics = Arc::new(MetricsCollector::default());
+        let (hub, _rx) = Hub::new_with_components(
+            HubConfig::default(),
+            Some(security_manager),
+            None,
+            Arc::new(NotificationBindingManager::default()),
+            Some(Arc::clone(&metrics)),
+        );
+        let hub = Arc::new(hub);
+        let task_id = TaskId::from_string("task-approval-hub");
+        let turn_id = hub
+            .session_runtime()
+            .start_turn("session-hub", "执行需要审批的命令")
+            .await;
+        let tool_call_id = hub
+            .session_runtime()
+            .begin_tool_call("session-hub", "hub_task")
+            .await
+            .unwrap();
+        hub.session_runtime()
+            .bind_task_to_turn(
+                task_id.clone(),
+                crate::session_runtime::TaskContinuationBinding {
+                    session_key: "session-hub".to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: crate::web::DingTalkReplyRoute {
+                        conversation_id: "conv-1".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("user-1".to_string()),
+                        sender_staff_id: Some("staff-1".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: None,
+                    },
+                },
+            )
+            .await;
+
+        hub.handle_node_message(
+            &NodeId::from_string("node-approval-hub"),
+            NodeToHub::ApprovalRequest {
+                message_id: MessageId::new(),
+                request_id: "request-hub-1".to_string(),
+                task_id: task_id.clone(),
+                command: Command::Shell(ShellCommand {
+                    command: "rm".to_string(),
+                    args: vec!["important".to_string()],
+                    cwd: None,
+                    env: std::collections::HashMap::new(),
+                    timeout: std::time::Duration::from_secs(30),
+                    capture_stderr: true,
+                }),
+                context: TaskContext::new(
+                    UserId::from_string("user-1"),
+                    SessionId::from_string("session-hub"),
+                    "dingtalk",
+                ),
+                reason: "requires approval".to_string(),
+                timestamp: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::Duration::minutes(10),
+            },
+        )
+        .await
+        .unwrap();
+
+        let exported = MetricsExporter::new(metrics).export_metrics().await;
+        assert!(exported.contains("uhorse_approval_waits_total 1"));
+
+        let transcript = hub.session_runtime().transcript("session-hub").await.unwrap();
+        assert!(transcript.events.iter().any(|event| {
+            event.kind == TranscriptEventKind::ApprovalRequested
+                && event.content.contains("request_id=request-hub-1")
+        }));
     }
 }

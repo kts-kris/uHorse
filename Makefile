@@ -1,6 +1,6 @@
 # uHorse Makefile - Hub / Node 主线快捷命令
 
-.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke skill-install-smoke baidu-browser-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-package-macos desktop-package-windows desktop-smoke desktop-installer-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
+.PHONY: help start run start-bg stop restart dev quick-setup build build-hub build-node check test test-workspace test-quick test-full roundtrip auth-smoke skill-install-smoke baidu-browser-smoke agent-loop-smoke approval-loop-smoke observability-smoke audit-smoke node-run node-check desktop-web-build desktop-build desktop-package desktop-package-macos desktop-package-windows desktop-smoke desktop-installer-smoke deps deps-stop deps-status docker-build docker-up docker-down docker-logs clean install logs status health watch fmt fmt-check lint info
 
 .DEFAULT_GOAL := help
 
@@ -78,6 +78,24 @@ skill-install-smoke: ## 运行 Agent Browser Skill 安装自动化回归
 baidu-browser-smoke: ## 运行“帮我访问百度”浏览器自动化回归
 	@cargo test -p uhorse-hub test_plan_dingtalk_command_maps_baidu_request_to_open_system -- --nocapture
 	@cargo test -p uhorse-hub test_submit_dingtalk_task_dispatches_baidu_open_system_to_browser_node -- --nocapture
+
+agent-loop-smoke: ## 运行 Agent Loop continuation 主线 smoke
+	@cargo test -p uhorse-hub test_reply_task_result_records_compaction_and_retries_once -- --nocapture
+	@cargo test -p uhorse-hub test_project_transcript_messages_includes_intermediate_events -- --nocapture
+
+approval-loop-smoke: ## 运行 approval wait / resume 主线 smoke
+	@cargo test -p uhorse-hub test_approval_request_records_wait_metric_and_transcript -- --nocapture
+	@cargo test -p uhorse-hub test_approve_approval_appends_transcript_event_for_bound_turn -- --nocapture
+
+observability-smoke: ## 运行 loop / approval 指标与 restore 审计 smoke
+	@cargo test -p uhorse-observability test_metrics_exporter_returns_prometheus_payload -- --nocapture
+	@cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture
+
+audit-smoke: ## 运行 approval / dangerous command / restore 审计 smoke
+	@cargo test -p uhorse-hub test_approval_decision_records_audit_events -- --nocapture
+	@cargo test -p uhorse-node-runtime test_dangerous_git_command_records_audit_event -- --nocapture
+	@cargo test -p uhorse-node-runtime test_checkpoint_and_restore_record_audit_events -- --nocapture
+	@cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --nocapture
 
 node-run: ## 启动 Node（需要已准备 node.toml）
 	@cargo run --release -p uhorse-node -- --config node.toml --log-level info

@@ -28,6 +28,16 @@ pub struct MetricsCollector {
     api_errors: AtomicU64,
     /// WebSocket 连接数
     websocket_connections: Arc<RwLock<u64>>,
+    /// Agent Loop step 次数
+    loop_steps: AtomicU64,
+    /// continuation 次数
+    continuations: AtomicU64,
+    /// approval 等待次数
+    approval_waits: AtomicU64,
+    /// approval 恢复次数
+    approval_resumes: AtomicU64,
+    /// planner 重试次数
+    planner_retries: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +50,11 @@ struct MetricsSnapshot {
     api_requests: u64,
     api_errors: u64,
     websocket_connections: u64,
+    loop_steps: u64,
+    continuations: u64,
+    approval_waits: u64,
+    approval_resumes: u64,
+    planner_retries: u64,
 }
 
 impl MetricsCollector {
@@ -53,6 +68,11 @@ impl MetricsCollector {
             api_requests: AtomicU64::new(0),
             api_errors: AtomicU64::new(0),
             websocket_connections: Arc::new(RwLock::new(0)),
+            loop_steps: AtomicU64::new(0),
+            continuations: AtomicU64::new(0),
+            approval_waits: AtomicU64::new(0),
+            approval_resumes: AtomicU64::new(0),
+            planner_retries: AtomicU64::new(0),
         }
     }
 
@@ -143,6 +163,36 @@ impl MetricsCollector {
         *self.websocket_connections.write().await = count;
     }
 
+    /// 记录 Agent Loop step。
+    pub fn inc_loop_steps(&self, stage: &str) {
+        counter!("uhorse_loop_steps_total", "stage" => stage.to_string()).increment(1);
+        self.loop_steps.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 记录 continuation。
+    pub fn inc_continuations(&self, source: &str) {
+        counter!("uhorse_continuations_total", "source" => source.to_string()).increment(1);
+        self.continuations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 记录 approval 等待。
+    pub fn inc_approval_waits(&self, source: &str) {
+        counter!("uhorse_approval_waits_total", "source" => source.to_string()).increment(1);
+        self.approval_waits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 记录 approval 恢复。
+    pub fn inc_approval_resumes(&self, outcome: &str) {
+        counter!("uhorse_approval_resumes_total", "outcome" => outcome.to_string()).increment(1);
+        self.approval_resumes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 记录 planner 重试。
+    pub fn inc_planner_retries(&self, reason: &str) {
+        counter!("uhorse_planner_retries_total", "reason" => reason.to_string()).increment(1);
+        self.planner_retries.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// 增加 WebSocket 连接
     pub async fn inc_websocket_connections(&self) {
         let mut count = self.websocket_connections.write().await;
@@ -185,6 +235,11 @@ impl MetricsCollector {
             api_requests: self.api_requests.load(Ordering::Relaxed),
             api_errors: self.api_errors.load(Ordering::Relaxed),
             websocket_connections: *self.websocket_connections.read().await,
+            loop_steps: self.loop_steps.load(Ordering::Relaxed),
+            continuations: self.continuations.load(Ordering::Relaxed),
+            approval_waits: self.approval_waits.load(Ordering::Relaxed),
+            approval_resumes: self.approval_resumes.load(Ordering::Relaxed),
+            planner_retries: self.planner_retries.load(Ordering::Relaxed),
         }
     }
 }
@@ -235,7 +290,22 @@ uhorse_api_requests_total {}\n\
 uhorse_api_errors_total {}\n\
 # HELP uhorse_websocket_connections Current number of WebSocket connections.\n\
 # TYPE uhorse_websocket_connections gauge\n\
-uhorse_websocket_connections {}\n",
+uhorse_websocket_connections {}\n\
+# HELP uhorse_loop_steps_total Total number of Agent Loop steps.\n\
+# TYPE uhorse_loop_steps_total counter\n\
+uhorse_loop_steps_total {}\n\
+# HELP uhorse_continuations_total Total number of continuation resumes.\n\
+# TYPE uhorse_continuations_total counter\n\
+uhorse_continuations_total {}\n\
+# HELP uhorse_approval_waits_total Total number of approval waits.\n\
+# TYPE uhorse_approval_waits_total counter\n\
+uhorse_approval_waits_total {}\n\
+# HELP uhorse_approval_resumes_total Total number of approval resumes.\n\
+# TYPE uhorse_approval_resumes_total counter\n\
+uhorse_approval_resumes_total {}\n\
+# HELP uhorse_planner_retries_total Total number of planner retries.\n\
+# TYPE uhorse_planner_retries_total counter\n\
+uhorse_planner_retries_total {}\n",
             snapshot.messages_received,
             snapshot.messages_sent,
             snapshot.tool_executions,
@@ -244,6 +314,11 @@ uhorse_websocket_connections {}\n",
             snapshot.api_requests,
             snapshot.api_errors,
             snapshot.websocket_connections,
+            snapshot.loop_steps,
+            snapshot.continuations,
+            snapshot.approval_waits,
+            snapshot.approval_resumes,
+            snapshot.planner_retries,
         )
     }
 }
@@ -553,6 +628,10 @@ mod tests {
         collector.inc_api_requests("/api/health", "GET", 200);
         collector.inc_api_errors("/api/health", "500");
         collector.set_websocket_connections(3).await;
+        collector.inc_loop_steps("initial_plan");
+        collector.inc_continuations("task_result");
+        collector.inc_approval_resumes("approved");
+        collector.inc_planner_retries("continuation_error");
 
         let output = MetricsExporter::new(collector).export_metrics().await;
 
@@ -562,6 +641,10 @@ mod tests {
         assert!(output.contains("uhorse_active_sessions 2"));
         assert!(output.contains("uhorse_api_requests_total 1"));
         assert!(output.contains("uhorse_websocket_connections 3"));
+        assert!(output.contains("uhorse_loop_steps_total 1"));
+        assert!(output.contains("uhorse_continuations_total 1"));
+        assert!(output.contains("uhorse_approval_resumes_total 1"));
+        assert!(output.contains("uhorse_planner_retries_total 1"));
     }
 
     #[test]

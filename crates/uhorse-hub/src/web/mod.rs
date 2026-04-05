@@ -41,7 +41,10 @@ use uhorse_channel::{
 use uhorse_config::{DingTalkSkillInstaller, HealthConfig, UHorseConfig};
 use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
 use uhorse_llm::{ChatMessage, LLMClient};
-use uhorse_observability::{HealthService, HealthStatus, MetricsCollector, MetricsExporter};
+use uhorse_observability::{
+    log_audit_event, AuditCategory, AuditEvent, AuditLevel, HealthService, HealthStatus,
+    MetricsCollector, MetricsExporter,
+};
 use uhorse_protocol::{
     BrowserResult, Command, CommandOutput, CommandType, FileCommand, HubToNode, MessageId,
     NodeCapabilities, PermissionRule as ProtocolPermissionRule, Priority, SessionId, TaskContext,
@@ -1267,6 +1270,20 @@ async fn install_skill_from_request(
             result = "denied",
             "Denied skill installation request"
         );
+        let _ = log_audit_event(AuditEvent {
+            timestamp: chrono::Utc::now().timestamp() as u64,
+            level: AuditLevel::Warn,
+            category: AuditCategory::Tool,
+            actor: actor.sender_user_id.clone().or(actor.sender_staff_id.clone()),
+            action: "skill_install_denied".to_string(),
+            target: Some(request.package.clone()),
+            details: Some(serde_json::json!({
+                "channel": actor.channel,
+                "target_layer": match request.target_layer { SkillInstallTargetLayer::Global => "global", SkillInstallTargetLayer::User => "user" },
+            })),
+            session_id: None,
+        })
+        .await;
         return Err("当前账号没有安装 Skill 的权限。".into());
     }
 
@@ -1307,6 +1324,22 @@ async fn install_skill_from_request(
         result = "success",
         "Installed skill successfully"
     );
+    let _ = log_audit_event(AuditEvent {
+        timestamp: chrono::Utc::now().timestamp() as u64,
+        level: AuditLevel::Info,
+        category: AuditCategory::Tool,
+        actor: actor.sender_user_id.clone().or(actor.sender_staff_id.clone()),
+        action: "skill_install_succeeded".to_string(),
+        target: Some(skill_name.clone()),
+        details: Some(serde_json::json!({
+            "package": request.package,
+            "channel": actor.channel,
+            "target_layer": target_layer,
+            "target_scope": request.target_scope,
+        })),
+        session_id: None,
+    })
+    .await;
 
     Ok(SkillInstallResponse {
         skill_name,
@@ -2621,8 +2654,23 @@ fn project_transcript_messages(
             TranscriptEventKind::ToolCallDispatched => {
                 assistant_events.push(format!("[tool_call_dispatched] {}", event.content));
             }
+            TranscriptEventKind::ApprovalRequested => {
+                assistant_events.push(format!("[approval_requested] {}", event.content));
+            }
             TranscriptEventKind::ToolResultObserved => {
                 assistant_events.push(format!("[tool_result_observed] {}", event.content));
+            }
+            TranscriptEventKind::ApprovalApproved => {
+                assistant_events.push(format!("[approval_approved] {}", event.content));
+            }
+            TranscriptEventKind::ApprovalRejected => {
+                assistant_events.push(format!("[approval_rejected] {}", event.content));
+            }
+            TranscriptEventKind::TurnResumed => {
+                assistant_events.push(format!("[turn_resumed] {}", event.content));
+            }
+            TranscriptEventKind::PlannerRetry => {
+                assistant_events.push(format!("[planner_retry] {}", event.content));
             }
             TranscriptEventKind::TurnCompacted => {
                 assistant_events.push(format!("[turn_compacted] {}", event.content));
@@ -2965,6 +3013,7 @@ async fn process_dingtalk_task_serialized(
         .start_turn(&session_key.as_str(), text.to_string())
         .await;
     let step = plan_next_dingtalk_step(state, text, &agent_id, &session_key).await?;
+    state.metrics_collector.inc_loop_steps("initial_plan");
     state
         .hub
         .session_runtime()
@@ -3379,6 +3428,27 @@ async fn plan_next_dingtalk_step(
     session_key: &SessionKey,
 ) -> Result<PlannedTurnStep, Box<dyn std::error::Error + Send + Sync>> {
     let decision = decide_dingtalk_action(state, text, agent_id, session_key).await?;
+    let _ = log_audit_event(AuditEvent {
+        timestamp: chrono::Utc::now().timestamp() as u64,
+        level: AuditLevel::Info,
+        category: AuditCategory::Session,
+        actor: None,
+        action: "planner_decision_made".to_string(),
+        target: Some(session_key.as_str().to_string()),
+        details: Some(serde_json::json!({
+            "agent_id": agent_id,
+            "decision": match &decision {
+                AgentDecision::DirectReply { .. } => "direct_reply",
+                AgentDecision::ExecuteCommand { .. } => "execute_command",
+                AgentDecision::ExecuteSkill { .. } => "execute_skill",
+                AgentDecision::ListInstalledSkills => "list_installed_skills",
+                AgentDecision::QuerySkill { .. } => "query_skill",
+                AgentDecision::InstallSkill { .. } => "install_skill",
+            },
+        })),
+        session_id: Some(session_key.as_str().to_string()),
+    })
+    .await;
     Ok(planned_step_from_agent_decision(decision))
 }
 
@@ -4062,6 +4132,9 @@ pub async fn reply_task_result(
         .run_serialized(&lane_session_key, async move {
             let Some(completed_task) = state_for_actor.hub.get_completed_task(&task_result.task_id).await else {
                 let reply_text = build_task_result_reply_text(&state_for_actor, &task_result).await;
+                state_for_actor
+                    .metrics_collector
+                    .inc_continuations("task_result_without_completed_task");
                 let Some(_channel) = state_for_actor.dingtalk_channel.as_ref() else {
                     warn!("Skip DingTalk reply because channel is unavailable");
                     state_for_actor
@@ -4088,6 +4161,23 @@ pub async fn reply_task_result(
                     TranscriptEventKind::ToolResultObserved,
                     serde_json::to_string(&completed_task.result)
                         .unwrap_or_else(|_| "tool result".to_string()),
+                )
+                .await;
+            state_for_actor
+                .metrics_collector
+                .inc_continuations("task_result");
+            state_for_actor
+                .hub
+                .session_runtime()
+                .mark_turn_resuming(&session_key, Some(&task_result.task_id))
+                .await;
+            state_for_actor
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    &session_key,
+                    TranscriptEventKind::TurnResumed,
+                    format!("task_result:{}", task_result.task_id),
                 )
                 .await;
 
@@ -4125,6 +4215,18 @@ pub async fn reply_task_result(
                         "Failed to continue task result with LLM for {}: {}",
                         completed_task.task_id, error
                     );
+                    state_for_actor
+                        .metrics_collector
+                        .inc_planner_retries("continuation_error");
+                    state_for_actor
+                        .hub
+                        .session_runtime()
+                        .append_transcript_event(
+                            &session_key,
+                            TranscriptEventKind::PlannerRetry,
+                            error.to_string(),
+                        )
+                        .await;
                     let retry_state = state_for_actor
                         .hub
                         .session_runtime()
@@ -6356,6 +6458,35 @@ async fn decide_approval(
         );
     }
 
+    state
+        .metrics_collector
+        .inc_approval_resumes(if approved { "approved" } else { "rejected" });
+
+    let _ = log_audit_event(AuditEvent {
+        timestamp: chrono::Utc::now().timestamp() as u64,
+        level: if approved { AuditLevel::Info } else { AuditLevel::Warn },
+        category: AuditCategory::Session,
+        actor: Some(payload.responder.clone()),
+        action: if approved {
+            "approval_approved".to_string()
+        } else {
+            "approval_rejected".to_string()
+        },
+        target: Some(request_id.clone()),
+        details: Some(serde_json::json!({
+            "task_id": existing_request.metadata.get("task_id").and_then(|value| value.as_str()),
+            "node_id": existing_request.metadata.get("node_id").and_then(|value| value.as_str()),
+            "reason": payload.reason,
+        })),
+        session_id: existing_request
+            .metadata
+            .get("context")
+            .and_then(|value| value.get("session_id"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string),
+    })
+    .await;
+
     let updated_request = match security_manager
         .operation_approver()
         .get_request(&request_id)
@@ -6375,6 +6506,33 @@ async fn decide_approval(
             );
         }
     };
+
+    if let Some(task_id) = existing_request
+        .metadata
+        .get("task_id")
+        .and_then(|value| value.as_str())
+    {
+        if let Some(binding) = state
+            .hub
+            .session_runtime()
+            .find_task_binding(&TaskId::from_string(task_id))
+            .await
+        {
+            state
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    &binding.session_key,
+                    if approved {
+                        TranscriptEventKind::ApprovalApproved
+                    } else {
+                        TranscriptEventKind::ApprovalRejected
+                    },
+                    format!("request_id={}; responder={}", request_id, payload.responder),
+                )
+                .await;
+        }
+    }
 
     if let Err(error) =
         notify_node_approval_decision(&state, &existing_request, &payload, approved).await
@@ -6558,6 +6716,7 @@ mod tests {
     use std::time::Duration;
     use tempfile::{tempdir, TempDir};
     use tower::util::ServiceExt;
+    use uhorse_observability::AuditLogger;
     use uhorse_protocol::{
         Action, BrowserCommand, BrowserResult, Command, CommandOutput, CommandResult, CommandType,
         ExecutionError, FileCommand, HubToNode, NodeCapabilities, NodeToHub, Priority,
@@ -7061,6 +7220,15 @@ mod tests {
         node_id: &uhorse_protocol::NodeId,
         request_id: &str,
     ) -> ApprovalRequest {
+        create_pending_approval_with_task(state, node_id, request_id, "task-approval-web").await
+    }
+
+    async fn create_pending_approval_with_task(
+        state: &Arc<WebState>,
+        node_id: &uhorse_protocol::NodeId,
+        request_id: &str,
+        task_id: &str,
+    ) -> ApprovalRequest {
         let security_manager = state.hub.security_manager().unwrap();
         let approval_id = security_manager
             .operation_approver()
@@ -7071,7 +7239,7 @@ mod tests {
                 serde_json::json!({
                     "node_id": node_id.as_str(),
                     "request_id": request_id,
-                    "task_id": "task-approval-web",
+                    "task_id": task_id,
                 }),
             )
             .await
@@ -9215,6 +9383,24 @@ mod tests {
                 crate::session_runtime::TranscriptEvent {
                     seq: 5,
                     created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::ApprovalApproved,
+                    content: "request_id=req-1; responder=admin".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 6,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::TurnResumed,
+                    content: "task_result:task-1".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 7,
+                    created_at: chrono::Utc::now(),
+                    kind: crate::session_runtime::TranscriptEventKind::PlannerRetry,
+                    content: "llm failed".to_string(),
+                },
+                crate::session_runtime::TranscriptEvent {
+                    seq: 8,
+                    created_at: chrono::Utc::now(),
                     kind: crate::session_runtime::TranscriptEventKind::AssistantFinal,
                     content: "README 存在。".to_string(),
                 },
@@ -9233,6 +9419,15 @@ mod tests {
         assert!(projected[0]
             .assistant_message
             .contains("[tool_result_observed] README exists"));
+        assert!(projected[0]
+            .assistant_message
+            .contains("[approval_approved] request_id=req-1; responder=admin"));
+        assert!(projected[0]
+            .assistant_message
+            .contains("[turn_resumed] task_result:task-1"));
+        assert!(projected[0]
+            .assistant_message
+            .contains("[planner_retry] llm failed"));
         assert!(projected[0].assistant_message.contains("README 存在。"));
     }
 
@@ -12371,6 +12566,172 @@ The `browser-use` command provides fast, persistent browser automation.
             }
             other => panic!("unexpected message: {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_approval_decision_records_audit_events() {
+        let logger = AuditLogger::with_in_memory_storage(256).install_global();
+        logger.clear_recorded_events().await;
+
+        let (state, node_id, _rx) = create_security_test_state().await;
+        let approved = create_pending_approval(&state, &node_id, "request-audit-approve").await;
+        let rejected = create_pending_approval(&state, &node_id, "request-audit-reject").await;
+
+        let (approved_status, Json(approved_response)) = approve_approval(
+            State(state.clone()),
+            Path(approved.id.clone()),
+            Json(ApprovalDecisionPayload {
+                responder: "admin".to_string(),
+                reason: Some("looks good".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(approved_status, StatusCode::OK);
+        assert_eq!(
+            approved_response.data.unwrap().status,
+            uhorse_security::ApprovalStatus::Approved
+        );
+
+        let (rejected_status, Json(rejected_response)) = reject_approval(
+            State(state.clone()),
+            Path(rejected.id.clone()),
+            Json(ApprovalDecisionPayload {
+                responder: "auditor".to_string(),
+                reason: Some("too risky".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(rejected_status, StatusCode::OK);
+        assert_eq!(
+            rejected_response.data.unwrap().status,
+            uhorse_security::ApprovalStatus::Rejected
+        );
+
+        let events = logger.recorded_events().await;
+        let approved_event = events
+            .iter()
+            .find(|event| event.action == "approval_approved")
+            .expect("missing approval_approved audit event");
+        assert_eq!(approved_event.actor.as_deref(), Some("admin"));
+        assert_eq!(approved_event.target.as_deref(), Some(approved.id.as_str()));
+        assert_eq!(approved_event.session_id, None);
+        assert_eq!(
+            approved_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("task_id"))
+                .and_then(|value| value.as_str()),
+            Some("task-approval-web")
+        );
+        assert_eq!(
+            approved_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("node_id"))
+                .and_then(|value| value.as_str()),
+            Some(node_id.as_str())
+        );
+        assert_eq!(
+            approved_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("reason"))
+                .and_then(|value| value.as_str()),
+            Some("looks good")
+        );
+
+        let rejected_event = events
+            .iter()
+            .find(|event| event.action == "approval_rejected")
+            .expect("missing approval_rejected audit event");
+        assert_eq!(rejected_event.actor.as_deref(), Some("auditor"));
+        assert_eq!(rejected_event.target.as_deref(), Some(rejected.id.as_str()));
+        assert_eq!(
+            rejected_event
+                .details
+                .as_ref()
+                .and_then(|value| value.get("reason"))
+                .and_then(|value| value.as_str()),
+            Some("too risky")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_approve_approval_appends_transcript_event_for_bound_turn() {
+        let (state, node_id, mut rx) = create_security_test_state().await;
+        let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
+        let turn_id = state
+            .hub
+            .session_runtime()
+            .start_turn(&session_key.as_str(), "等待审批")
+            .await;
+        let tool_call_id = state
+            .hub
+            .session_runtime()
+            .begin_tool_call(&session_key.as_str(), "hub_task")
+            .await
+            .unwrap();
+        let task_id = TaskId::from_string("task-approval-bound");
+        state
+            .hub
+            .session_runtime()
+            .bind_task_to_turn(
+                task_id.clone(),
+                TaskContinuationBinding {
+                    session_key: session_key.as_str().to_string(),
+                    turn_id,
+                    tool_call_id,
+                    agent_id: "main".to_string(),
+                    route: DingTalkReplyRoute {
+                        conversation_id: "conv-approval-bound".to_string(),
+                        conversation_type: Some("2".to_string()),
+                        sender_user_id: Some("actual-user".to_string()),
+                        sender_staff_id: Some("staff-1".to_string()),
+                        session_webhook: None,
+                        session_webhook_expired_time: None,
+                        robot_code: Some("robot-1".to_string()),
+                    },
+                },
+            )
+            .await;
+        let approval = create_pending_approval_with_task(
+            &state,
+            &node_id,
+            "request-approve-bound",
+            task_id.as_str(),
+        )
+        .await;
+
+        let (status, Json(response)) = approve_approval(
+            State(state.clone()),
+            Path(approval.id.clone()),
+            Json(ApprovalDecisionPayload {
+                responder: "admin".to_string(),
+                reason: Some("looks good".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            response.data.unwrap().status,
+            uhorse_security::ApprovalStatus::Approved
+        );
+
+        let _message = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let transcript = state
+            .hub
+            .session_runtime()
+            .transcript(&session_key.as_str())
+            .await
+            .unwrap();
+        assert!(transcript.events.iter().any(|event| {
+            event.kind == crate::session_runtime::TranscriptEventKind::ApprovalApproved
+                && event.content.contains("responder=admin")
+        }));
     }
 
     #[tokio::test]
