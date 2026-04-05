@@ -72,10 +72,16 @@ pub struct SessionTranscript {
 /// Turn 执行状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnStatus {
-    /// Turn 已创建，正在执行规划或直答。
-    Running,
+    /// Turn 正在执行规划。
+    Planning,
+    /// Turn 已决定要派发 action，正在进入派发阶段。
+    Dispatching,
     /// Turn 已派发 tool，等待结果回流。
     WaitingForTool,
+    /// Turn 已进入审批等待。
+    WaitingForApproval,
+    /// Turn 已进入用户澄清等待。
+    WaitingForUser,
     /// Turn 已从等待态恢复，正在继续执行。
     Resuming,
     /// Turn 已完成。
@@ -186,7 +192,7 @@ impl SessionRuntimeManager {
         let turn = SessionTurnState {
             turn_id: turn_id.clone(),
             user_message: user_message.clone(),
-            status: TurnStatus::Running,
+            status: TurnStatus::Planning,
             step_count: 0,
             max_steps: 4,
             cancel_requested: false,
@@ -224,7 +230,7 @@ impl SessionRuntimeManager {
         let mut turns = self.turns.write().await;
         let turn = turns.get_mut(session_key)?;
         let tool_call_id = Uuid::new_v4().to_string();
-        turn.status = TurnStatus::WaitingForTool;
+        turn.status = TurnStatus::Dispatching;
         turn.tool_call = Some(ToolCallState {
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.into(),
@@ -269,6 +275,7 @@ impl SessionRuntimeManager {
         self.task_bindings.write().await.insert(task_id.clone(), binding);
 
         if let Some(turn) = self.turns.write().await.get_mut(&session_key) {
+            turn.status = TurnStatus::WaitingForTool;
             if let Some(tool_call) = turn.tool_call.as_mut() {
                 if tool_call.tool_call_id == tool_call_id {
                     tool_call.task_id = Some(task_id.clone());
@@ -370,6 +377,22 @@ impl SessionRuntimeManager {
     /// 获取指定 task 对应的 continuation 绑定。
     pub async fn find_task_binding(&self, task_id: &TaskId) -> Option<TaskContinuationBinding> {
         self.task_bindings.read().await.get(task_id).cloned()
+    }
+
+    /// 将当前 turn 标记为等待审批。
+    pub async fn mark_waiting_for_approval(&self, session_key: &str) -> Option<SessionTurnState> {
+        let mut turns = self.turns.write().await;
+        let turn = turns.get_mut(session_key)?;
+        turn.status = TurnStatus::WaitingForApproval;
+        Some(turn.clone())
+    }
+
+    /// 将当前 turn 标记为等待用户澄清。
+    pub async fn mark_waiting_for_user(&self, session_key: &str) -> Option<SessionTurnState> {
+        let mut turns = self.turns.write().await;
+        let turn = turns.get_mut(session_key)?;
+        turn.status = TurnStatus::WaitingForUser;
+        Some(turn.clone())
     }
 
     /// 记录 planner 重试次数。
@@ -547,6 +570,9 @@ mod tests {
         let binding = manager.task_binding(&task_id).await.unwrap();
         assert_eq!(binding.session_key, "session-1");
         assert_eq!(binding.turn_id, turn_id);
+
+        let waiting = manager.mark_waiting_for_approval("session-1").await.unwrap();
+        assert_eq!(waiting.status, TurnStatus::WaitingForApproval);
 
         let resumed = manager
             .mark_turn_resuming("session-1", Some(&task_id))

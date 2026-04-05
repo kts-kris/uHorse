@@ -185,6 +185,9 @@ impl MessageRouter {
                 if let Some(session_runtime) = session_runtime {
                     if let Some(binding) = session_runtime.task_binding(&task_id).await {
                         session_runtime
+                            .mark_waiting_for_approval(&binding.session_key)
+                            .await;
+                        session_runtime
                             .append_transcript_event(
                                 &binding.session_key,
                                 TranscriptEventKind::ApprovalRequested,
@@ -564,5 +567,11 @@ mod tests {
             event.kind == TranscriptEventKind::ApprovalRequested
                 && event.content.contains("request_id=request-1")
         }));
+
+        let turn = session_runtime.turn_state("session-1").await.unwrap();
+        assert_eq!(
+            turn.status,
+            crate::session_runtime::TurnStatus::WaitingForApproval
+        );
     }
 }
