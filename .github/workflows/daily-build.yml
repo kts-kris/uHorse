@@ -194,14 +194,14 @@ jobs:
           Compress-Archive -Path package/* -DestinationPath "${ARCHIVE_NAME}.zip"
 
       - name: Upload Hub artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: uhorse-hub-nightly-${{ steps.date.outputs.date }}-${{ matrix.target }}
           path: |
             ${{ github.workspace }}/uhorse-hub-nightly-${{ steps.date.outputs.date }}-${{ matrix.target }}.*
 
       - name: Upload Node Desktop artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: uhorse-node-desktop-nightly-${{ steps.date.outputs.date }}-${{ matrix.target }}
           path: |
