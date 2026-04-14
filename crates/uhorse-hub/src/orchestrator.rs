@@ -112,7 +112,10 @@ impl Orchestrator {
         Self::new(skill_registry, task_scheduler, node_manager)
     }
 
-    /// 理解用户意图并生成编排计划
+    /// 理解用户意图并生成编排计划。
+    ///
+    /// 当前保留为兼容层：v4.6.0 的主线多轮 planner / continuation 已收敛到
+    /// session runtime + Web loop driver，这里的 Orchestrator 不再作为主入口扩展。
     pub async fn understand_intent(
         &self,
         user_input: &str,

@@ -63,12 +63,14 @@ curl -X POST http://127.0.0.1:8765/api/v1/skills/install \
   }'
 ```
 
-When DingTalk is enabled, Skills can also be installed through text commands:
+When DingTalk is enabled, Skills can also be installed in two ways:
 
 ```text
 安装技能 <package> <download_url> [version]
 install skill <package> <download_url> [version]
 ```
+
+or by uploading a `.zip` / `.tar.gz` Skill package first and then following up with “帮我安装这个技能”.
 
 The DingTalk text install entrypoint is gated by `[[channels.dingtalk.skill_installers]]`:
 
@@ -76,6 +78,13 @@ The DingTalk text install entrypoint is gated by `[[channels.dingtalk.skill_inst
 - matching can use `user_id` / `staff_id`
 - `corp_id` may be added to limit the enterprise scope
 - there is currently no DingTalk text refresh command
+
+Additional compatibility in the current online install path:
+
+- both `POST /api/v1/skills/install` and the DingTalk install entrypoint accept `.zip` and `.tar.gz`
+- zip packages may include one nested root directory
+- for Python Skills that only ship `skill.yaml` plus `src/main.py` / `main.py`, install auto-generates `skill.toml`
+- packages with `requirements.txt` get a `.venv` created and dependencies installed during install
 
 ---
 
@@ -409,7 +418,7 @@ echo 'skills = ["my_skill"]' >> ~/.uhorse/config.toml
 
 ## Current limits
 
-- online install currently only accepts `source_type = "skillhub"`
+- the HTTP online install API currently only accepts `source_type = "skillhub"`; DingTalk additionally supports resolving a freshly uploaded attachment package into a controlled install request
 - installation refuses to overwrite an existing Skill directory
 - the DingTalk text entrypoint supports install only, not refresh
 - `skill_installers` is not global RBAC; it only restricts the DingTalk text install path

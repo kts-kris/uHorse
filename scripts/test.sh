@@ -44,6 +44,14 @@ info "运行 JWT node_id 拒绝回归..."
 cargo test -p uhorse-hub test_local_hub_rejects_node_with_mismatched_auth_token -- --nocapture >/tmp/uhorse-test-auth.log 2>&1
 pass "JWT 拒绝回归通过"
 
+info "运行 loop smoke 组合..."
+make smoke-loop >/tmp/uhorse-test-loop-smoke.log 2>&1
+pass "loop smoke 组合通过"
+
+info "运行 observability smoke 组合..."
+make smoke-observability >/tmp/uhorse-test-observability-smoke.log 2>&1
+pass "observability smoke 组合通过"
+
 info "检查当前 workspace 是否可作为 Node 工作区..."
 cargo run --quiet --release -p uhorse-node -- check --workspace . >/tmp/uhorse-test-node-check.log 2>&1
 pass "Node workspace 检查通过"
@@ -81,6 +89,10 @@ echo "  /tmp/uhorse-test-node-runtime.log"
 echo "  /tmp/uhorse-test-hub.log"
 echo "  /tmp/uhorse-test-roundtrip.log"
 echo "  /tmp/uhorse-test-auth.log"
+echo "  /tmp/uhorse-test-agent-loop.log"
+echo "  /tmp/uhorse-test-approval-wait.log"
+echo "  /tmp/uhorse-test-approval-resume.log"
+echo "  /tmp/uhorse-test-observability.log"
 echo "  /tmp/uhorse-test-node-check.log"
 echo "  /tmp/uhorse-test-docker.log"
 echo "  /tmp/uhorse-test-compose.log"

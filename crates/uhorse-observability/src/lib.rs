@@ -11,7 +11,7 @@ pub mod shutdown;
 pub mod telemetry;
 pub mod tracing_setup;
 
-pub use audit::{AuditCategory, AuditEvent, AuditLevel, AuditLogger};
+pub use audit::{log_audit_event, AuditCategory, AuditEvent, AuditLevel, AuditLogger};
 pub use audit_persistent::{
     AuditPersistor, AuditQueryFilter, AuditResult, AuditStorage, AuditStorageError,
     AuditStorageStats, InMemoryAuditStorage, SignedAuditEvent,
@@ -29,4 +29,6 @@ pub use shutdown::{
     GracefulShutdown, ShutdownHandle, ShutdownManager, ShutdownPhase, ShutdownSignal, ShutdownTask,
 };
 pub use telemetry::{current_trace_id, init_observability, OtelConfig, SpanContext};
-pub use tracing_setup::{init_dev_observability, init_full_observability, init_tracing};
+pub use tracing_setup::{
+    init_console_tracing, init_dev_observability, init_full_observability, init_tracing,
+};

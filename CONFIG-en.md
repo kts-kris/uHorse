@@ -317,6 +317,7 @@ user_id = "your-admin-user-id"
 - Allowlist matching supports `user_id` / `staff_id` and may optionally require `corp_id`.
 - DingTalk text is first planned by the LLM into a single safe command; file operations, shell commands, and controlled `BrowserCommand` flows are all part of the current mainline.
 - But `安装技能 <package> <download_url> [version]` / `install skill ...` goes through the dedicated Skill install thin entrypoint instead of general natural-language command planning.
+- The current online install path accepts `.zip` / `.tar.gz`, zip packages may include one nested root directory, and Python Skills that only ship `skill.yaml` get an auto-generated `skill.toml` plus dependency installation in `.venv` when `requirements.txt` exists.
 - For requests such as “open a webpage”, the current mainline prefers `BrowserCommand::OpenSystem` instead of automated browser `Navigate`.
 - Hub validates path scope locally before dispatch and rejects dangerous git commands.
 

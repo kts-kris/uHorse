@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 在线 Skill 安装现在同时支持 `.zip` 与 `.tar.gz`，并兼容嵌套根目录的 zip 包
+- DingTalk 上传 `.zip` 技能包后，再追发“帮我安装这个技能”会优先转成附件安装请求，而不是误走通用命令规划
+- 仅提供 `skill.yaml` 的 Python Skill 安装后会自动生成 `skill.toml`，并在存在 `requirements.txt` 时自动创建 `.venv` 安装依赖，避免执行期出现 `Skill ... is disabled` 或缺少 `yaml` 等模块
+
+### Changed
+
+- README / INSTALL / CHANNELS / SKILLS / API / TESTING / RELEASE_NOTES 已补齐当前在线 Skill 安装兼容性说明
+
+## [4.6.0] - 2026-04-10
+
+### Added
+
+- DingTalk 现在会优先在用户原消息上附加 `🤔思考中` reaction，并在任务完成、失败或取消后自动 recall
+- `uhorse-channel` 已补齐 DingTalk 原消息 `message_id` 透传，以及 reaction attach / recall API
+
+### Changed
+
+- Hub reply handle 生命周期现在把 reaction 作为处理中句柄的一种变体，AI Card 仍优先，reaction attach 失败时会自动回退到现有路径且不阻塞主流程
+- 取消中的 DingTalk 任务现在也会清理处理中句柄；AI Card 会以“任务已取消。”收尾，reaction 与 legacy transient ack 会被 best-effort 回收
+- README / INSTALL / CHANNELS / RELEASE_NOTES 已统一升级到 `v4.6.0` 口径，并补齐当前 DingTalk 处理中交互说明
+
 ## [4.5.1] - 2026-04-04
 
 ### Fixed
@@ -320,7 +343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.1...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.6.0...HEAD
+[4.6.0]: https://github.com/kts-kris/uHorse/compare/v4.5.1...v4.6.0
 [4.5.1]: https://github.com/kts-kris/uHorse/compare/v4.5.0...v4.5.1
 [4.5.0]: https://github.com/kts-kris/uHorse/compare/v4.4.0...v4.5.0
 [4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0

@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 uhorse-node-runtime = { path = "../uhorse-node-runtime", features = ["browser"] }
 uhorse-protocol = { path = "../uhorse-protocol" }
+uhorse-observability = { path = "../uhorse-observability" }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 tracing = { workspace = true }

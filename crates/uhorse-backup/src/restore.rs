@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
+use uhorse_observability::{log_audit_event, AuditCategory, AuditEvent, AuditLevel};
 
 use super::scheduler::{BackupRecord, BackupStatus, BackupType};
 
@@ -198,6 +199,21 @@ impl RestoreManager {
         records.push(record.clone());
 
         info!("Started restore {} from backup {}", record.id, backup.id);
+        let _ = log_audit_event(AuditEvent {
+            timestamp: Utc::now().timestamp() as u64,
+            level: AuditLevel::Info,
+            category: AuditCategory::Tool,
+            actor: None,
+            action: "restore_started".to_string(),
+            target: Some(record.id.clone()),
+            details: Some(serde_json::json!({
+                "backup_id": backup.id,
+                "target_path": record.target_path.display().to_string(),
+                "point_in_time": record.point_in_time,
+            })),
+            session_id: None,
+        })
+        .await;
         Ok(record)
     }
 
@@ -242,6 +258,21 @@ impl RestoreManager {
                 restore_id,
                 record.duration_secs().unwrap_or(0)
             );
+            let _ = log_audit_event(AuditEvent {
+                timestamp: Utc::now().timestamp() as u64,
+                level: AuditLevel::Info,
+                category: AuditCategory::Tool,
+                actor: None,
+                action: "restore_completed".to_string(),
+                target: Some(record.id.clone()),
+                details: Some(serde_json::json!({
+                    "backup_id": record.backup_id,
+                    "target_path": record.target_path.display().to_string(),
+                    "duration_secs": record.duration_secs(),
+                })),
+                session_id: None,
+            })
+            .await;
             Ok(true)
         } else {
             Err(super::BackupError::NotFound(restore_id.to_string()))
@@ -258,6 +289,21 @@ impl RestoreManager {
             record.error_message = Some(error.clone());
 
             info!("Restore {} failed: {}", restore_id, error);
+            let _ = log_audit_event(AuditEvent {
+                timestamp: Utc::now().timestamp() as u64,
+                level: AuditLevel::Warn,
+                category: AuditCategory::Tool,
+                actor: None,
+                action: "restore_failed".to_string(),
+                target: Some(record.id.clone()),
+                details: Some(serde_json::json!({
+                    "backup_id": record.backup_id,
+                    "target_path": record.target_path.display().to_string(),
+                    "error": record.error_message,
+                })),
+                session_id: None,
+            })
+            .await;
             Ok(true)
         } else {
             Err(super::BackupError::NotFound(restore_id.to_string()))
@@ -278,6 +324,21 @@ impl RestoreManager {
             record.status = RestoreStatus::RolledBack;
 
             info!("Restore {} rolled back: {}", restore_id, reason);
+            let _ = log_audit_event(AuditEvent {
+                timestamp: Utc::now().timestamp() as u64,
+                level: AuditLevel::Warn,
+                category: AuditCategory::Tool,
+                actor: None,
+                action: "restore_rolled_back".to_string(),
+                target: Some(record.id.clone()),
+                details: Some(serde_json::json!({
+                    "backup_id": record.backup_id,
+                    "target_path": record.target_path.display().to_string(),
+                    "reason": reason,
+                })),
+                session_id: None,
+            })
+            .await;
             Ok(true)
         } else {
             Err(super::BackupError::NotFound(restore_id.to_string()))
@@ -359,6 +420,8 @@ pub struct RestoreStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+    use uhorse_observability::AuditLogger;
 
     #[test]
     fn test_restore_record_creation() {
@@ -378,11 +441,99 @@ mod tests {
         assert!(record.point_in_time.is_some());
     }
 
+    fn create_completed_backup(temp: &TempDir) -> BackupRecord {
+        let data = b"backup-data";
+        let storage_path = temp.path().join("backup.bin");
+        std::fs::write(&storage_path, data).unwrap();
+        BackupRecord {
+            id: "backup-test-1".to_string(),
+            backup_type: BackupType::Full,
+            status: BackupStatus::Completed,
+            storage_path,
+            size_bytes: data.len() as u64,
+            checksum: format!("{:x}", RestoreManager::compute_checksum(data)),
+            base_backup_id: None,
+            encryption_key_id: None,
+            started_at: Utc::now(),
+            completed_at: Some(Utc::now()),
+            error_message: None,
+            metadata: Default::default(),
+        }
+    }
+
     #[tokio::test]
     async fn test_restore_manager_stats() {
         let manager = RestoreManager::default();
         let stats = manager.stats().await;
 
         assert_eq!(stats.total_restores, 0);
+    }
+
+    #[tokio::test]
+    async fn test_restore_lifecycle_records_audit_events() {
+        let logger = AuditLogger::with_in_memory_storage(256).install_global();
+        logger.clear_recorded_events().await;
+
+        let temp = TempDir::new().unwrap();
+        let backup = create_completed_backup(&temp);
+        let manager = RestoreManager::default();
+        let target = temp.path().join("restore-target");
+
+        let record = manager.start_restore(&backup, target.clone()).await.unwrap();
+        assert!(manager.complete_restore(&record.id).await.unwrap());
+
+        let failed = manager
+            .start_restore(&backup, temp.path().join("restore-failed"))
+            .await
+            .unwrap();
+        assert!(manager
+            .fail_restore(&failed.id, "checksum mismatch".to_string())
+            .await
+            .unwrap());
+
+        let rolled_back = manager
+            .start_restore(&backup, temp.path().join("restore-rollback"))
+            .await
+            .unwrap();
+        assert!(manager
+            .rollback_restore(&rolled_back.id, "operator rollback".to_string())
+            .await
+            .unwrap());
+
+        let events = logger.recorded_events().await;
+        assert!(events.iter().any(|event| {
+            event.action == "restore_started"
+                && event.target.as_deref() == Some(record.id.as_str())
+                && event
+                    .details
+                    .as_ref()
+                    .and_then(|value| value.get("backup_id"))
+                    .and_then(|value| value.as_str())
+                    == Some("backup-test-1")
+        }));
+        assert!(events.iter().any(|event| {
+            event.action == "restore_completed"
+                && event.target.as_deref() == Some(record.id.as_str())
+        }));
+        assert!(events.iter().any(|event| {
+            event.action == "restore_failed"
+                && event.target.as_deref() == Some(failed.id.as_str())
+                && event
+                    .details
+                    .as_ref()
+                    .and_then(|value| value.get("error"))
+                    .and_then(|value| value.as_str())
+                    == Some("checksum mismatch")
+        }));
+        assert!(events.iter().any(|event| {
+            event.action == "restore_rolled_back"
+                && event.target.as_deref() == Some(rolled_back.id.as_str())
+                && event
+                    .details
+                    .as_ref()
+                    .and_then(|value| value.get("reason"))
+                    .and_then(|value| value.as_str())
+                    == Some("operator rollback")
+        }));
     }
 }

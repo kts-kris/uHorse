@@ -231,12 +231,29 @@ impl SkillRegistry {
         // 解析清单
         let manifest = Self::parse_skill_md(&skill_md_content)?;
 
-        // 读取 skill.toml
+        // 读取 skill.toml；若安装包仅提供 skill.yaml，则按 Python Skill 约定推断默认执行配置
         let skill_toml_path = dir.join("skill.toml");
         let config = if skill_toml_path.exists() {
             let toml_content = tokio::fs::read_to_string(&skill_toml_path).await?;
             toml::from_str(&toml_content)
                 .map_err(|e| AgentError::Skill(format!("Failed to parse skill.toml: {}", e)))?
+        } else if dir.join("skill.yaml").exists() {
+            let args = if dir.join("src").join("main.py").exists() {
+                vec!["src/main.py".to_string()]
+            } else if dir.join("main.py").exists() {
+                vec!["main.py".to_string()]
+            } else {
+                Vec::new()
+            };
+
+            SkillConfig {
+                enabled: !args.is_empty(),
+                timeout: default_timeout(),
+                max_retries: default_max_retries(),
+                executable: (!args.is_empty()).then(|| "python3".to_string()),
+                args,
+                env: HashMap::new(),
+            }
         } else {
             SkillConfig::default()
         };
@@ -249,6 +266,7 @@ impl SkillRegistry {
                 args: config.args.clone(),
                 env: config.env.clone(),
                 timeout: Duration::from_secs(config.timeout),
+                workdir: dir.to_path_buf(),
             })
         } else {
             Arc::new(DummySkillExecutor {
@@ -542,12 +560,14 @@ struct ProcessSkillExecutor {
     args: Vec<String>,
     env: HashMap<String, String>,
     timeout: Duration,
+    workdir: PathBuf,
 }
 
 #[async_trait::async_trait]
 impl SkillExecutor for ProcessSkillExecutor {
     async fn execute(&self, input: &str) -> AgentResult<String> {
         let mut command = tokio::process::Command::new(&self.executable);
+        command.current_dir(&self.workdir);
         command.args(&self.args);
         command.env("SKILL_INPUT", input);
         command.env("SKILL_NAME", &self.name);
@@ -659,6 +679,51 @@ args = ["-c", "import os; print(os.environ['SKILL_INPUT'])"]
         let skill = registry.get("echo").unwrap();
         let output = skill.execute("hello").await.unwrap();
         assert_eq!(output, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_load_from_dir_supports_skill_yaml_python_entrypoint() {
+        let tempdir = tempdir().unwrap();
+        let skill_dir = tempdir.path().join("yaml-skill");
+        let src_dir = skill_dir.join("src");
+        tokio::fs::create_dir_all(&src_dir).await.unwrap();
+        tokio::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: audit-newsletter-expert
+version: 1.0.0
+description: yaml skill
+author: test
+parameters: []
+permissions: []
+---
+"#,
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(skill_dir.join("skill.yaml"), "name: audit-newsletter-expert\n")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            src_dir.join("main.py"),
+            "import os\nprint(f\"yaml:{os.environ['SKILL_INPUT']}\")\n",
+        )
+        .await
+        .unwrap();
+
+        let mut registry = SkillRegistry::new();
+        let count = registry
+            .load_from_dir(tempdir.path().to_path_buf())
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let skill = registry.get("audit-newsletter-expert").unwrap();
+        assert!(skill.config.enabled);
+        assert_eq!(skill.config.executable.as_deref(), Some("python3"));
+        assert_eq!(skill.config.args, vec!["src/main.py".to_string()]);
+        let output = skill.execute("hello").await.unwrap();
+        assert_eq!(output, "yaml:hello");
     }
 
     async fn write_skill(root: &std::path::Path, name: &str, command: &str) {

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- online Skill install now accepts both `.zip` and `.tar.gz`, including zip packages with a nested root directory
+- after a DingTalk user uploads a `.zip` Skill package, the follow-up message “帮我安装这个技能” now resolves to attachment install instead of falling into general command planning
+- Python Skills that only ship `skill.yaml` now get an auto-generated `skill.toml`, and packages with `requirements.txt` get an auto-created `.venv` plus dependency installation so execution no longer fails with `Skill ... is disabled` or missing modules such as `yaml`
+
+### Changed
+
+- README / INSTALL / CHANNELS / SKILLS / API / TESTING / RELEASE_NOTES now document the current online Skill install compatibility behavior
+
+## [4.6.0] - 2026-04-10
+
+### Added
+
+- DingTalk now prefers attaching a `🤔思考中` reaction to the user's original message and automatically recalls it after task completion, failure, or cancellation
+- `uhorse-channel` now carries the DingTalk source `message_id` through inbound normalization and exposes reaction attach / recall APIs
+
+### Changed
+
+- The Hub reply-handle lifecycle now treats reactions as another processing handle variant; AI Cards still take priority, and reaction attach failures fall back to the existing path without blocking the main flow
+- Cancelled DingTalk tasks now also clean up processing handles; AI Cards are finalized with `任务已取消。`, while reactions and legacy transient acks are reclaimed on a best-effort basis
+- README / INSTALL / CHANNELS / RELEASE_NOTES are now aligned to `v4.6.0` and document the current DingTalk processing-state interaction
+
 ## [4.5.1] - 2026-04-04
 
 ### Fixed
@@ -320,7 +343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SECURITY.md security policy
 - COMPARISON_OPENCLAW.md comparison with OpenClaw
 
-[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.5.1...HEAD
+[Unreleased]: https://github.com/kts-kris/uHorse/compare/v4.6.0...HEAD
+[4.6.0]: https://github.com/kts-kris/uHorse/compare/v4.5.1...v4.6.0
 [4.5.1]: https://github.com/kts-kris/uHorse/compare/v4.5.0...v4.5.1
 [4.5.0]: https://github.com/kts-kris/uHorse/compare/v4.4.0...v4.5.0
 [4.4.0]: https://github.com/kts-kris/uHorse/compare/v4.3.0...v4.4.0

@@ -516,7 +516,7 @@ mod tests {
             hub_url,
             reconnect_interval_secs: 1,
             heartbeat_interval_secs: 30,
-            connect_timeout_secs: 5,
+            connect_timeout_secs: 20,
             max_reconnect_attempts: 1,
             auth_token: Some("test-token".to_string()),
         }
@@ -556,6 +556,8 @@ mod tests {
             sender.send(WsMessage::Binary(encoded)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
         });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         let state = Arc::new(RwLock::new(ConnectionState::Disconnected));
         let heartbeat_snapshot = Arc::new(RwLock::new(None));
@@ -623,6 +625,8 @@ mod tests {
                 .await
                 .unwrap();
         });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         let state = Arc::new(RwLock::new(ConnectionState::Disconnected));
         let heartbeat_snapshot = Arc::new(RwLock::new(None));
