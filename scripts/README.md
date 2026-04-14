@@ -1,6 +1,6 @@
 # uHorse 主线脚本说明
 
-本目录脚本围绕 **当前 `v4.5.1` Hub + Node 主线** 组织，不再默认验证旧单体 `uhorse`、旧 `/health/live`、旧 `/health/ready`。
+本目录脚本围绕 **当前 `v4.6.0` Hub + Node 主线** 组织，不再默认验证旧单体 `uhorse`、旧 `/health/live`、旧 `/health/ready`。
 
 ## 可用脚本
 
@@ -78,7 +78,7 @@ make skill-install-smoke
 
 打包 Node Desktop 宿主与前端静态资源。
 
-这是当前 `v4.5.1` Node Desktop 交付链路里的 archive 打包入口：
+这是当前 `v4.6.0` Node Desktop 交付链路里的 archive 打包入口：
 
 ```bash
 ./scripts/package-node-desktop.sh
@@ -135,7 +135,7 @@ make skill-install-smoke
 
 运行 Node Desktop 宿主 API + 静态资源 smoke。
 
-这是当前 `v4.5.1` archive 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
+这是当前 `v4.6.0` archive 验收链路里的运行验证入口，用来确认 archive 解包后的宿主与前端资源可正常工作：
 
 ```bash
 ./scripts/desktop-smoke.sh
@@ -200,6 +200,14 @@ make skill-install-smoke
 - “帮我安装 Agent Browser 技能”自然语言安装
 - SkillHub 搜索与安装
 - 安装成功后的中文提示文案
+
+如需验证当前 zip / Python Skill 兼容性，再补跑：
+
+```bash
+cargo test -p uhorse-hub test_unpack_skill_archive_accepts_zip_with_nested_root_dir -- --nocapture
+cargo test -p uhorse-hub test_install_skill_generates_skill_toml_from_skill_yaml_python_entrypoint -- --nocapture
+cargo test -p uhorse-agent test_load_from_dir_supports_skill_yaml_python_entrypoint -- --nocapture
+```
 
 ### `agent-loop-smoke`
 

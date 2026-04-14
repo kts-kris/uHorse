@@ -22,6 +22,11 @@ const STREAM_CALLBACK_TOPIC: &str = "/v1.0/im/bot/messages/get";
 const STREAM_RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const STREAM_CONTENT_TYPE: &str = "application/json";
 const STREAM_UA: &str = "uhorse/4.0";
+const EMOTION_REPLY_URL: &str = "https://api.dingtalk.com/v1.0/robot/emotion/reply";
+const EMOTION_RECALL_URL: &str = "https://api.dingtalk.com/v1.0/robot/emotion/recall";
+const DEFAULT_DINGTALK_ACK_REACTION: &str = "🤔思考中";
+const THINKING_EMOTION_ID: &str = "2659900";
+const THINKING_EMOTION_BACKGROUND_ID: &str = "im_bg_1";
 
 /// 钉钉访问令牌响应
 #[derive(Debug, Deserialize)]
@@ -106,6 +111,8 @@ fn format_dingtalk_business_error(envelope: &DingTalkApiResponseEnvelope) -> Str
 pub struct DingTalkEvent {
     #[serde(rename = "conversationId")]
     pub conversation_id: Option<String>,
+    #[serde(rename = "msgId", alias = "messageId")]
+    pub message_id: Option<String>,
     #[serde(rename = "conversationType")]
     pub conversation_type: Option<String>,
     #[serde(rename = "conversationTitle")]
@@ -145,12 +152,28 @@ pub struct StreamMessage {
     pub data: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DingTalkInboundAttachment {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recognition: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+}
+
 /// Stream 入站消息
 #[derive(Debug, Clone)]
 pub struct DingTalkInboundMessage {
     pub session: Session,
     pub message: Message,
     pub conversation_id: String,
+    pub message_id: Option<String>,
     pub conversation_type: Option<String>,
     pub sender_user_id: Option<String>,
     pub sender_staff_id: Option<String>,
@@ -158,6 +181,7 @@ pub struct DingTalkInboundMessage {
     pub session_webhook: Option<String>,
     pub session_webhook_expired_time: Option<i64>,
     pub robot_code: Option<String>,
+    pub attachments: Vec<DingTalkInboundAttachment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +193,14 @@ pub enum DingTalkTransientClearOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DingTalkAiCardHandle {
     pub out_track_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DingTalkReactionHandle {
+    pub robot_code: String,
+    pub message_id: String,
+    pub conversation_id: String,
+    pub reaction_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,6 +444,11 @@ impl DingTalkChannel {
         self.incoming_tx.subscribe()
     }
 
+    pub async fn set_access_token_for_test(&self, token: &str) {
+        *self.access_token.write().await = Some(token.to_string());
+        *self.token_expires_at.write().await = chrono::Utc::now().timestamp() + 3600;
+    }
+
     /// 获取 app key
     pub fn app_key(&self) -> &str {
         &self.app_key
@@ -529,6 +566,7 @@ impl DingTalkChannel {
 
         let session = Session::new(ChannelType::DingTalk, conversation_id.clone());
         let message_content = self.extract_content(event);
+        let attachments = self.extract_attachments(event);
 
         debug!(
             "Processed DingTalk message: conversation_id={}, sender_id={}, content={:?}",
@@ -548,13 +586,15 @@ impl DingTalkChannel {
             session,
             message,
             conversation_id,
+            message_id: event.message_id.clone(),
             conversation_type: event.conversation_type.clone(),
             sender_user_id: event.sender_id.clone(),
             sender_staff_id: event.sender_staff_id.clone(),
             sender_corp_id: event.sender_corp_id.clone(),
             session_webhook: event.session_webhook.clone(),
             session_webhook_expired_time: event.session_webhook_expired_time,
-            robot_code: event.robot_code.clone(),
+            robot_code: event.robot_code.clone().or_else(|| Some(self.app_key.clone())),
+            attachments,
         }))
     }
 
@@ -586,6 +626,235 @@ impl DingTalkChannel {
         self.handle_event_with_metadata(&event).await
     }
 
+    fn extract_attachments(&self, event: &DingTalkEvent) -> Vec<DingTalkInboundAttachment> {
+        let mut attachments = Vec::new();
+
+        let Some(content) = event.content.as_ref() else {
+            return attachments;
+        };
+
+        let file_name = || {
+            content
+                .get("fileName")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        let download_code = || {
+            content
+                .get("downloadCode")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        let recognition = || {
+            content
+                .get("recognition")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        let description = || {
+            content
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+
+        if let Some(image_key) = content.get("imageKey").and_then(|v| v.as_str()) {
+            attachments.push(DingTalkInboundAttachment {
+                kind: "image".to_string(),
+                key: Some(image_key.to_string()),
+                file_name: file_name(),
+                download_code: download_code(),
+                recognition: None,
+                caption: description(),
+            });
+        } else if matches!(event.msg_type.as_deref(), Some("picture"))
+            && (download_code().is_some() || file_name().is_some())
+        {
+            attachments.push(DingTalkInboundAttachment {
+                kind: "image".to_string(),
+                key: None,
+                file_name: file_name(),
+                download_code: download_code(),
+                recognition: None,
+                caption: description(),
+            });
+        }
+
+        if let Some(audio_key) = content.get("audioKey").and_then(|v| v.as_str()) {
+            attachments.push(DingTalkInboundAttachment {
+                kind: "audio".to_string(),
+                key: Some(audio_key.to_string()),
+                file_name: file_name(),
+                download_code: download_code(),
+                recognition: recognition(),
+                caption: None,
+            });
+        } else if matches!(event.msg_type.as_deref(), Some("audio"))
+            && (download_code().is_some() || recognition().is_some() || file_name().is_some())
+        {
+            attachments.push(DingTalkInboundAttachment {
+                kind: "audio".to_string(),
+                key: None,
+                file_name: file_name(),
+                download_code: download_code(),
+                recognition: recognition(),
+                caption: None,
+            });
+        }
+
+        if let Some(file_key) = content.get("fileKey").and_then(|v| v.as_str()) {
+            attachments.push(DingTalkInboundAttachment {
+                kind: "file".to_string(),
+                key: Some(file_key.to_string()),
+                file_name: file_name(),
+                download_code: download_code(),
+                recognition: None,
+                caption: None,
+            });
+        } else if matches!(event.msg_type.as_deref(), Some("file"))
+            && (download_code().is_some()
+                || file_name().is_some()
+                || content.get("spaceId").is_some()
+                || content.get("fileId").is_some())
+        {
+            attachments.push(DingTalkInboundAttachment {
+                kind: "file".to_string(),
+                key: None,
+                file_name: file_name(),
+                download_code: download_code(),
+                recognition: None,
+                caption: None,
+            });
+        }
+
+        attachments
+    }
+
+    fn inbound_attachment_from_url<'a>(
+        &self,
+        attachments: &'a [DingTalkInboundAttachment],
+        prefix: &str,
+        url: &str,
+    ) -> Option<&'a DingTalkInboundAttachment> {
+        let key = url.strip_prefix(prefix)?;
+        attachments.iter().find(|attachment| {
+            attachment
+                .key
+                .as_deref()
+                .map(|candidate| candidate == key)
+                .unwrap_or(false)
+                || (attachment.key.is_none()
+                    && attachment
+                        .download_code
+                        .as_deref()
+                        .map(|candidate| candidate == key)
+                        .unwrap_or(false))
+        })
+    }
+
+    pub async fn download_inbound_attachment(
+        &self,
+        attachment: &DingTalkInboundAttachment,
+    ) -> Result<Vec<u8>, ChannelError> {
+        let download_code = attachment
+            .download_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ChannelError::ConfigError("download_code is required for DingTalk media".to_string())
+            })?;
+        let robot_code = self.app_key.trim();
+        if robot_code.is_empty() {
+            return Err(ChannelError::ConfigError(
+                "robot_code is required for DingTalk media".to_string(),
+            ));
+        }
+
+        let access_token = self.get_access_token().await?;
+        let response = self
+            .client
+            .post("https://api.dingtalk.com/v1.0/robot/messageFiles/download")
+            .header("x-acs-dingtalk-access-token", access_token)
+            .json(&serde_json::json!({
+                "downloadCode": download_code,
+                "robotCode": robot_code,
+            }))
+            .send()
+            .await
+            .map_err(|e| ChannelError::ConnectionError(format!("HTTP error: {}", e)))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ChannelError::InvalidResponse(format!("Read body error: {}", e)))?;
+        if !status.is_success() {
+            return Err(ChannelError::SendFailed(format!("API error: {}", body)));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&body) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
+        }
+
+        let parsed: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| ChannelError::InvalidResponse(format!("JSON error: {}", e)))?;
+        let download_url = parsed
+            .get("downloadUrl")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                parsed
+                    .get("data")
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|value| value.get("downloadUrl"))
+                    .and_then(serde_json::Value::as_str)
+            })
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| ChannelError::InvalidResponse("download url is missing".to_string()))?;
+
+        let response = self
+            .client
+            .get(download_url)
+            .send()
+            .await
+            .map_err(|e| ChannelError::ConnectionError(format!("HTTP error: {}", e)))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ChannelError::SendFailed(format!("API error: {}", body)));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| ChannelError::InvalidResponse(format!("Read body error: {}", e)))?;
+        Ok(bytes.to_vec())
+    }
+
+    pub async fn download_inbound_message_media(
+        &self,
+        inbound: &DingTalkInboundMessage,
+    ) -> Result<Option<Vec<u8>>, ChannelError> {
+        match &inbound.message.content {
+            MessageContent::Audio { url, .. } => {
+                let Some(attachment) =
+                    self.inbound_attachment_from_url(&inbound.attachments, "dingtalk://audio?key=", url)
+                else {
+                    return Ok(None);
+                };
+                self.download_inbound_attachment(attachment).await.map(Some)
+            }
+            MessageContent::Image { url, .. } => {
+                let Some(attachment) =
+                    self.inbound_attachment_from_url(&inbound.attachments, "dingtalk://image?key=", url)
+                else {
+                    return Ok(None);
+                };
+                self.download_inbound_attachment(attachment).await.map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// 提取消息内容
     fn extract_content(&self, event: &DingTalkEvent) -> MessageContent {
         if let Some(text) = &event.text {
@@ -609,6 +878,25 @@ impl DingTalkChannel {
                 };
             }
 
+            if matches!(event.msg_type.as_deref(), Some("picture"))
+                && content
+                    .get("downloadCode")
+                    .and_then(|v| v.as_str())
+                    .is_some()
+            {
+                let key = content
+                    .get("downloadCode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                return MessageContent::Image {
+                    url: format!("dingtalk://image?key={}", key),
+                    caption: content
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                };
+            }
+
             if let Some(audio_key) = content.get("audioKey").and_then(|v| v.as_str()) {
                 let duration = content
                     .get("duration")
@@ -620,12 +908,64 @@ impl DingTalkChannel {
                 };
             }
 
+            if matches!(event.msg_type.as_deref(), Some("audio"))
+                && content
+                    .get("downloadCode")
+                    .and_then(|v| v.as_str())
+                    .is_some()
+            {
+                let duration = content
+                    .get("duration")
+                    .and_then(|v| v.as_u64())
+                    .map(|d| d as u32);
+                let key = content
+                    .get("downloadCode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                return MessageContent::Audio {
+                    url: format!("dingtalk://audio?key={}", key),
+                    duration,
+                };
+            }
+
             if let Some(file_key) = content.get("fileKey").and_then(|v| v.as_str()) {
                 let file_name = content
                     .get("fileName")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("文件");
-                return MessageContent::Text(format!("[{}] {}", file_name, file_key));
+                    .map(str::to_string);
+                return MessageContent::Structured(serde_json::json!({
+                    "kind": "dingtalk_file",
+                    "file_key": file_key,
+                    "file_name": file_name,
+                }));
+            }
+
+            if matches!(event.msg_type.as_deref(), Some("file")) {
+                let file_name = content
+                    .get("fileName")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let download_code = content
+                    .get("downloadCode")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let space_id = content
+                    .get("spaceId")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                let file_id = content
+                    .get("fileId")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                if download_code.is_some() || file_name.is_some() || space_id.is_some() || file_id.is_some() {
+                    return MessageContent::Structured(serde_json::json!({
+                        "kind": "dingtalk_file",
+                        "download_code": download_code,
+                        "file_name": file_name,
+                        "space_id": space_id,
+                        "file_id": file_id,
+                    }));
+                }
             }
 
             if let Some(markdown) = content.get("markdown").and_then(|v| v.as_str()) {
@@ -968,6 +1308,110 @@ impl DingTalkChannel {
         self.reply_via_session_webhook_markdown(session_webhook, "Wait", markdown, at_user_ids)
             .await?;
         Ok(DingTalkTransientMessageReceipt::unsupported())
+    }
+
+    pub async fn add_processing_reaction(
+        &self,
+        robot_code: &str,
+        message_id: &str,
+        conversation_id: &str,
+    ) -> Result<DingTalkReactionHandle, ChannelError> {
+        self.send_processing_reaction(
+            robot_code,
+            message_id,
+            conversation_id,
+            DEFAULT_DINGTALK_ACK_REACTION,
+            EMOTION_REPLY_URL,
+        )
+        .await?;
+        Ok(DingTalkReactionHandle {
+            robot_code: robot_code.trim().to_string(),
+            message_id: message_id.trim().to_string(),
+            conversation_id: conversation_id.trim().to_string(),
+            reaction_name: DEFAULT_DINGTALK_ACK_REACTION.to_string(),
+        })
+    }
+
+    pub async fn recall_processing_reaction(
+        &self,
+        handle: &DingTalkReactionHandle,
+    ) -> Result<(), ChannelError> {
+        self.send_processing_reaction(
+            &handle.robot_code,
+            &handle.message_id,
+            &handle.conversation_id,
+            &handle.reaction_name,
+            EMOTION_RECALL_URL,
+        )
+        .await
+    }
+
+    async fn send_processing_reaction(
+        &self,
+        robot_code: &str,
+        message_id: &str,
+        conversation_id: &str,
+        reaction_name: &str,
+        url: &str,
+    ) -> Result<(), ChannelError> {
+        let robot_code = robot_code.trim();
+        let message_id = message_id.trim();
+        let conversation_id = conversation_id.trim();
+        if robot_code.is_empty() {
+            return Err(ChannelError::ConfigError(
+                "robot_code is required for DingTalk reaction".to_string(),
+            ));
+        }
+        if message_id.is_empty() {
+            return Err(ChannelError::ConfigError(
+                "message_id is required for DingTalk reaction".to_string(),
+            ));
+        }
+        if conversation_id.is_empty() {
+            return Err(ChannelError::ConfigError(
+                "conversation_id is required for DingTalk reaction".to_string(),
+            ));
+        }
+
+        let reaction_name = if reaction_name.trim().is_empty() {
+            DEFAULT_DINGTALK_ACK_REACTION
+        } else {
+            reaction_name.trim()
+        };
+        let access_token = self.get_access_token().await?;
+        let request = serde_json::json!({
+            "robotCode": robot_code,
+            "openMsgId": message_id,
+            "openConversationId": conversation_id,
+            "emotionType": 2,
+            "emotionName": reaction_name,
+            "textEmotion": {
+                "emotionId": THINKING_EMOTION_ID,
+                "emotionName": reaction_name,
+                "text": reaction_name,
+                "backgroundId": THINKING_EMOTION_BACKGROUND_ID,
+            },
+        });
+
+        let response = self
+            .client
+            .post(url)
+            .header("x-acs-dingtalk-access-token", access_token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ChannelError::SendFailed(format!("HTTP error: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(ChannelError::SendFailed(format!("API error: {}", response_text)));
+        }
+        if let Some(error) = parse_dingtalk_business_error(&response_text) {
+            return Err(ChannelError::SendFailed(format!("API error: {}", error)));
+        }
+
+        Ok(())
     }
 
     pub async fn create_ai_card(
@@ -1510,6 +1954,7 @@ mod tests {
 
         let event = DingTalkEvent {
             conversation_id: Some("conv_123".to_string()),
+            message_id: None,
             conversation_type: Some("1".to_string()),
             conversation_title: None,
             sender_id: Some("user_456".to_string()),
@@ -1535,6 +1980,7 @@ mod tests {
     fn test_event_deserialization() {
         let json = r#"{
             "conversationId": "conv_123",
+            "msgId": "msg_789",
             "conversationType": "1",
             "senderId": "user_456",
             "msgtype": "text",
@@ -1546,6 +1992,7 @@ mod tests {
 
         let event: DingTalkEvent = serde_json::from_str(json).unwrap();
         assert_eq!(event.conversation_id, Some("conv_123".to_string()));
+        assert_eq!(event.message_id, Some("msg_789".to_string()));
         assert_eq!(event.sender_id, Some("user_456".to_string()));
         assert_eq!(
             event.text.as_ref().unwrap().content,
@@ -1554,9 +2001,268 @@ mod tests {
     }
 
     #[test]
+    fn test_handle_event_with_metadata_preserves_message_id() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let incoming = rt
+            .block_on(channel.handle_event_with_metadata(&DingTalkEvent {
+                conversation_id: Some("conv_123".to_string()),
+                message_id: Some("msg_123".to_string()),
+                conversation_type: Some("1".to_string()),
+                conversation_title: None,
+                sender_id: Some("user_456".to_string()),
+                sender_nick: None,
+                sender_corp_id: None,
+                sender_staff_id: None,
+                msg_type: Some("text".to_string()),
+                text: Some(TextContent {
+                    content: Some("Hello".to_string()),
+                }),
+                content: None,
+                session_webhook: None,
+                session_webhook_expired_time: None,
+                robot_code: None,
+                create_time: Some(1234567890),
+            }))
+            .unwrap()
+            .unwrap();
+        assert_eq!(incoming.message_id.as_deref(), Some("msg_123"));
+        assert_eq!(incoming.robot_code.as_deref(), Some("test_key"));
+        assert!(incoming.attachments.is_empty());
+    }
+
+    #[test]
+    fn test_extract_content_returns_structured_file_payload() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let event = DingTalkEvent {
+            conversation_id: Some("conv_file".to_string()),
+            message_id: Some("msg_file".to_string()),
+            conversation_type: Some("2".to_string()),
+            conversation_title: None,
+            sender_id: Some("user_file".to_string()),
+            sender_nick: None,
+            sender_corp_id: Some("corp-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            msg_type: Some("file".to_string()),
+            text: None,
+            content: Some(serde_json::json!({
+                "fileKey": "file-key-1",
+                "fileName": "需求说明.pdf"
+            })),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+            create_time: Some(1234567890),
+        };
+
+        let content = channel.extract_content(&event);
+        match content {
+            MessageContent::Structured(data) => {
+                assert_eq!(
+                    data,
+                    serde_json::json!({
+                        "kind": "dingtalk_file",
+                        "file_key": "file-key-1",
+                        "file_name": "需求说明.pdf"
+                    })
+                );
+            }
+            other => panic!("expected structured file payload, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_extract_content_returns_structured_file_payload_from_download_code_only() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let event = DingTalkEvent {
+            conversation_id: Some("conv_file".to_string()),
+            message_id: Some("msg_file".to_string()),
+            conversation_type: Some("2".to_string()),
+            conversation_title: None,
+            sender_id: Some("user_file".to_string()),
+            sender_nick: None,
+            sender_corp_id: Some("corp-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            msg_type: Some("file".to_string()),
+            text: None,
+            content: Some(serde_json::json!({
+                "downloadCode": "download-code-1",
+                "fileName": "skill.zip"
+            })),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+            create_time: Some(1234567890),
+        };
+
+        let content = channel.extract_content(&event);
+        match content {
+            MessageContent::Structured(data) => {
+                assert_eq!(
+                    data,
+                    serde_json::json!({
+                        "kind": "dingtalk_file",
+                        "download_code": "download-code-1",
+                        "file_name": "skill.zip",
+                        "space_id": null,
+                        "file_id": null,
+                    })
+                );
+            }
+            other => panic!("expected structured file payload, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_event_with_metadata_preserves_audio_attachment_metadata() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let incoming = channel
+            .handle_event_with_metadata(&DingTalkEvent {
+                conversation_id: Some("conv_audio".to_string()),
+                message_id: Some("msg_audio".to_string()),
+                conversation_type: Some("2".to_string()),
+                conversation_title: None,
+                sender_id: Some("user_audio".to_string()),
+                sender_nick: None,
+                sender_corp_id: Some("corp-1".to_string()),
+                sender_staff_id: Some("staff-1".to_string()),
+                msg_type: Some("audio".to_string()),
+                text: None,
+                content: Some(serde_json::json!({
+                    "audioKey": "audio-key-1",
+                    "downloadCode": "download-code-1",
+                    "recognition": "请帮我检查日志",
+                    "duration": 3
+                })),
+                session_webhook: None,
+                session_webhook_expired_time: None,
+                robot_code: Some("robot-1".to_string()),
+                create_time: Some(1234567890),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            incoming.attachments,
+            vec![DingTalkInboundAttachment {
+                kind: "audio".to_string(),
+                key: Some("audio-key-1".to_string()),
+                file_name: None,
+                download_code: Some("download-code-1".to_string()),
+                recognition: Some("请帮我检查日志".to_string()),
+                caption: None,
+            }]
+        );
+        match incoming.message.content {
+            MessageContent::Audio { url, duration } => {
+                assert_eq!(url, "dingtalk://audio?key=audio-key-1");
+                assert_eq!(duration, Some(3));
+            }
+            other => panic!("expected audio content, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_event_with_metadata_preserves_file_attachment_metadata_from_download_code_only() {
+        let channel =
+            DingTalkChannel::new("test_key".to_string(), "test_secret".to_string(), 123456789, None);
+        let incoming = channel
+            .handle_event_with_metadata(&DingTalkEvent {
+                conversation_id: Some("conv_file".to_string()),
+                message_id: Some("msg_file".to_string()),
+                conversation_type: Some("2".to_string()),
+                conversation_title: None,
+                sender_id: Some("user_file".to_string()),
+                sender_nick: None,
+                sender_corp_id: Some("corp-1".to_string()),
+                sender_staff_id: Some("staff-1".to_string()),
+                msg_type: Some("file".to_string()),
+                text: None,
+                content: Some(serde_json::json!({
+                    "downloadCode": "download-code-1",
+                    "fileName": "skill.zip"
+                })),
+                session_webhook: None,
+                session_webhook_expired_time: None,
+                robot_code: Some("robot-1".to_string()),
+                create_time: Some(1234567890),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            incoming.attachments,
+            vec![DingTalkInboundAttachment {
+                kind: "file".to_string(),
+                key: None,
+                file_name: Some("skill.zip".to_string()),
+                download_code: Some("download-code-1".to_string()),
+                recognition: None,
+                caption: None,
+            }]
+        );
+        match incoming.message.content {
+            MessageContent::Structured(data) => {
+                assert_eq!(
+                    data,
+                    serde_json::json!({
+                        "kind": "dingtalk_file",
+                        "download_code": "download-code-1",
+                        "file_name": "skill.zip",
+                        "space_id": null,
+                        "file_id": null,
+                    })
+                );
+            }
+            other => panic!("expected structured file content, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_send_processing_ack_returns_receipt_without_message_id_when_platform_does_not_expose_handle() {
         let receipt = DingTalkTransientMessageReceipt::unsupported();
         assert!(!receipt.supports_clear());
+    }
+
+    #[test]
+    fn test_add_processing_reaction_uses_expected_payload_shape() {
+        let request = serde_json::json!({
+            "robotCode": "app-key",
+            "openMsgId": "msg-1",
+            "openConversationId": "conv-1",
+            "emotionType": 2,
+            "emotionName": DEFAULT_DINGTALK_ACK_REACTION,
+            "textEmotion": {
+                "emotionId": THINKING_EMOTION_ID,
+                "emotionName": DEFAULT_DINGTALK_ACK_REACTION,
+                "text": DEFAULT_DINGTALK_ACK_REACTION,
+                "backgroundId": THINKING_EMOTION_BACKGROUND_ID,
+            },
+        });
+        assert_eq!(request["openMsgId"], "msg-1");
+        assert_eq!(request["openConversationId"], "conv-1");
+        assert_eq!(request["emotionName"], DEFAULT_DINGTALK_ACK_REACTION);
+        assert_eq!(request["textEmotion"]["emotionId"], THINKING_EMOTION_ID);
+    }
+
+    #[test]
+    fn test_recall_processing_reaction_uses_same_payload_identity() {
+        let handle = DingTalkReactionHandle {
+            robot_code: "robot-1".to_string(),
+            message_id: "msg-1".to_string(),
+            conversation_id: "conv-1".to_string(),
+            reaction_name: DEFAULT_DINGTALK_ACK_REACTION.to_string(),
+        };
+        assert_eq!(handle.robot_code, "robot-1");
+        assert_eq!(handle.message_id, "msg-1");
+        assert_eq!(handle.conversation_id, "conv-1");
+        assert_eq!(handle.reaction_name, DEFAULT_DINGTALK_ACK_REACTION);
     }
 
     #[test]

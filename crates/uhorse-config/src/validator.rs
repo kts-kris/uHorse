@@ -399,6 +399,7 @@ mod tests {
             app_key: "key".to_string(),
             app_secret: "secret".to_string(),
             agent_id: 1,
+            ai_card_template_id: None,
             skillhub_search_url: None,
             skillhub_download_url_template: None,
             notification_bindings: vec![],

@@ -9,11 +9,11 @@
 <h1 align="center">uHorse</h1>
 
 <p align="center">
-  <strong>uHorse v4.5.1 current formal release line</strong>
+  <strong>uHorse v4.6.0 current formal release line</strong>
 </p>
 
 <p align="center">
-  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the current repository HEAD is now closed as the formal `v4.5.1` release, with `uhorse-hub` and `uhorse-node-desktop` as the primary deliverables.</em>
+  <em>Hub handles scheduling and channel intake, while Node executes locally and returns results; the current repository HEAD is now closed as the formal `v4.6.0` release, with `uhorse-hub` and `uhorse-node-desktop` as the primary deliverables.</em>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.5.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.6.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/rust-1.78%2B-orange" alt="Rust Version">
   <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License">
   <img src="https://img.shields.io/badge/status-released-green" alt="Status">
@@ -35,7 +35,7 @@
 
 ## Overview
 
-The current public release line is **v4.5.1 Hub-Node mainline**.
+The current public release line is **v4.6.0 Hub-Node mainline**.
 
 Core components and primary deliverables:
 
@@ -45,17 +45,18 @@ Core components and primary deliverables:
 - `uhorse-protocol`: protocol types shared by Hub and Node, including `TaskAssignment`, `TaskResult`, `ApprovalRequest`, and `ApprovalResponse`.
 - `uhorse-config`: unified Hub config model covering `server`, `channels`, `security`, `llm`, and related sections.
 
-The `v4.5.1` capabilities already visible and validated in the repository include:
+The `v4.6.0` capabilities already visible and validated in the repository include:
 
 - DingTalk natural-language requests can enter the Hub → Node pipeline and, in controlled cases, be planned into a `BrowserCommand`.
 - Hub locally validates browser targets and rejects `file://`, localhost, private-network, and other out-of-bound targets.
 - Node Desktop and the runtime support browser-capability routing, so browser tasks are dispatched to nodes that declare `CommandType::Browser`; for DingTalk requests such as “open a webpage”, the mainline contract now plans them as `BrowserCommand::OpenSystem` so they execute with host system browser semantics.
+- DingTalk now prefers attaching a `🤔思考中` reaction to the user's original message and automatically recalling it after task completion, failure, or cancellation; if reaction attach fails, the runtime falls back to the existing processing path on a best-effort basis.
 - `memory / agent / skill` now support the layered chain `global / tenant / enterprise / department / role / user / session`; `memory_context_chain` reads from shared to private, while `visibility_chain` resolves from private back to shared.
 - task context and runtime sessions now explicitly distinguish the stable `execution_workspace_id` from the Hub-side logical `collaboration_workspace_id` / `CollaborationWorkspace`; the former defines the real execution boundary, while the latter only carries collaboration context and default binding.
 - the runtime API and Web UI expose source-aware metadata through `source_layer` and `source_scope`, so same-name resources from different sources can be distinguished.
 - Node Desktop is delivered as a `bin/ + web/` archive, a macOS `.pkg`, a Windows installer, matching smoke coverage, and GitHub release / nightly artifacts, not as a native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installer.
 
-These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.5.1` as a return to the old monolithic Agent platform.
+These docs are aligned to what is **actually implemented and exercised in the repository today**. They no longer treat `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` as the current mainline, and they do not describe `v4.6.0` as a return to the old monolithic Agent platform.
 
 ## Current Status
 
@@ -77,6 +78,7 @@ These docs are aligned to what is **actually implemented and exercised in the re
 | DingTalk Stream integration | ✅ | Stream mode is the recommended path; Node Desktop can establish runtime bindings through pairing, and `channels.dingtalk.notification_bindings` is now only a compatibility seed/fallback |
 | DingTalk browser planning path | ✅ | Hub now allows controlled `BrowserCommand` planning and dispatches browser work to nodes that declare `CommandType::Browser` |
 | Agent Browser Skill install regression | ✅ | `test_agent_browser_natural_language_install_flow_returns_chinese_hint` now covers natural-language install, SkillHub install, and Chinese reply hints |
+| Online Skill install compatibility | ✅ | `POST /api/v1/skills/install` and the DingTalk install thin entrypoint now accept `.zip` / `.tar.gz`, and support `skill.yaml` Python Skills via generated `skill.toml` plus `.venv` dependency installation |
 
 ## Quick Start
 
@@ -210,7 +212,18 @@ If you want to mirror Node Desktop local notifications to DingTalk, both sides m
 - only configure `channels.dingtalk.notification_bindings` when you need compatibility seed/fallback behavior
 - if the running Node and the newly saved config differ, Settings / Dashboard will show that a restart is required before the new workspace and runtime config take effect
 
-### 5. Submit a minimal task
+### 5. Install a Skill online (HTTP / DingTalk)
+
+The current online install path now supports these compatibility cases:
+
+- `POST /api/v1/skills/install` accepts both `.tar.gz` and `.zip` archives
+- DingTalk supports both `安装技能 <package> <download_url> [version]` and the flow where a user uploads a `.zip` package first, then follows up with “帮我安装这个技能”
+- for Python Skills that only ship `skill.yaml` plus `src/main.py` / `main.py`, Hub generates `skill.toml` automatically
+- if the package includes `requirements.txt`, Hub creates `.venv`, installs dependencies, and then refreshes the runtime Skill registry
+
+See [SKILLS-en.md](SKILLS-en.md), [API-en.md](API-en.md), and [CHANNELS-en.md](CHANNELS-en.md) for the exact API and boundary details.
+
+### 6. Submit a minimal task
 
 ```bash
 curl -X POST http://127.0.0.1:8765/api/tasks \
@@ -280,15 +293,16 @@ curl http://127.0.0.1:8765/api/tasks/<task_id>
 
 | Document | Description |
 |----------|-------------|
-| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.5.1` release facts, documentation sync notes, and explicit non-goals |
+| [CHANGELOG-en.md](CHANGELOG-en.md) | `v4.6.0` release facts, documentation sync notes, and explicit non-goals |
 | [INSTALL-en.md](INSTALL-en.md) | current Hub-Node install path plus the Node Desktop archive / smoke boundary |
 | [API-en.md](API-en.md) | current implemented Hub-Node API surface |
 | [LOCAL_SETUP.md](LOCAL_SETUP.md) | local dual-process setup, JWT bootstrap, approval, and reconnect regression |
 | [CONFIG-en.md](CONFIG-en.md) | unified config, legacy HubConfig, NodeConfig, and permission rules |
 | [CHANNELS-en.md](CHANNELS-en.md) | current channel status, DingTalk Stream, browser planning path, and notification mirroring |
+| [SKILLS-en.md](SKILLS-en.md) | online Skill install, package structure, and Python Skill compatibility details |
 | [scripts/README.md](scripts/README.md) | mainline scripts, including Node Desktop package / smoke and CI / release aligned usage |
 | [TESTING.md](TESTING.md) | package tests, workspace tests, `make test-quick` / `make skill-install-smoke`, and manual regression order |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.5.1` release notes |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | `v4.6.0` release notes plus current online Skill install compatibility notes |
 | [deployments/DEPLOYMENT_V4.md](deployments/DEPLOYMENT_V4.md) | v4 Hub-Node deployment guide |
 | [docs/architecture/v4.0-architecture-en.md](docs/architecture/v4.0-architecture-en.md) | v4 architecture details |
 

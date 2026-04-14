@@ -63,12 +63,14 @@ curl -X POST http://127.0.0.1:8765/api/v1/skills/install \
   }'
 ```
 
-如果启用了 DingTalk，还可以通过文本命令安装：
+如果启用了 DingTalk，还可以通过两种方式安装：
 
 ```text
 安装技能 <package> <download_url> [version]
 install skill <package> <download_url> [version]
 ```
+
+或先上传一个 `.zip` / `.tar.gz` 技能包，再跟一句“帮我安装这个技能”。
 
 DingTalk 文本安装入口的权限由 `[[channels.dingtalk.skill_installers]]` 控制：
 
@@ -76,6 +78,13 @@ DingTalk 文本安装入口的权限由 `[[channels.dingtalk.skill_installers]]`
 - 可按 `user_id` / `staff_id` 命中
 - 可选叠加 `corp_id` 限制企业范围
 - 当前不提供 DingTalk 文本 refresh 命令
+
+当前在线安装链路的额外兼容性：
+
+- `POST /api/v1/skills/install` 与 DingTalk 安装入口都支持 `.zip` 与 `.tar.gz`
+- zip 包允许带一层嵌套根目录
+- 对仅提供 `skill.yaml` 与 `src/main.py` / `main.py` 的 Python Skill，安装后会自动生成 `skill.toml`
+- 若安装包带有 `requirements.txt`，安装阶段会自动创建 `.venv` 并安装依赖
 
 ---
 
@@ -409,7 +418,7 @@ echo 'skills = ["my_skill"]' >> ~/.uhorse/config.toml
 
 ## 当前限制
 
-- 在线安装当前只接受 `source_type = "skillhub"`
+- HTTP 在线安装当前只接受 `source_type = "skillhub"`；DingTalk 还支持把当前会话中刚上传的附件技能包转成受控安装请求
 - 安装时会拒绝覆盖已存在的 Skill 目录
 - DingTalk 文本入口只支持 install，不支持 refresh
 - `skill_installers` 不是全局 RBAC，只限制 DingTalk 文本安装入口

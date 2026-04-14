@@ -416,7 +416,11 @@ curl -X POST http://127.0.0.1:8765/api/v1/skills/install \
 限制说明：
 
 - 当前只接受 `source_type = "skillhub"`
+- `download_url` 当前支持 `.zip` 与 `.tar.gz`
+- zip 安装包允许带一层嵌套根目录
 - 当前会拒绝覆盖已存在的 Skill 目录
+- 对仅提供 `skill.yaml` 与 `src/main.py` / `main.py` 的 Python Skill，安装后会自动生成 `skill.toml`
+- 若安装包带有 `requirements.txt`，安装阶段会自动创建 `.venv` 并安装依赖
 - `skill_installers` **不会**限制这个 HTTP API；它只限制 DingTalk 文本安装入口
 
 ### 2. 刷新运行时 Skill：`POST /api/v1/skills/refresh`

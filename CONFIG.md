@@ -317,6 +317,7 @@ user_id = "your-admin-user-id"
 - 白名单匹配支持 `user_id` / `staff_id`，并可选叠加 `corp_id` 限制企业范围。
 - DingTalk 文本会先经过 LLM 规划，再转换为单个安全命令；文件操作、shell，以及受控 `BrowserCommand` 都在当前主线上。
 - 但 `安装技能 <package> <download_url> [version]` / `install skill ...` 会直接走 Skill 安装薄入口，不经过通用自然语言命令规划。
+- 当前在线安装支持 `.zip` / `.tar.gz`，zip 包可带一层嵌套根目录；若是仅提供 `skill.yaml` 的 Python Skill，安装时会自动生成 `skill.toml`，并在存在 `requirements.txt` 时创建 `.venv` 安装依赖。
 - 对于“打开网页”这类场景，当前主链会优先规划为 `BrowserCommand::OpenSystem`，而不是自动化浏览器 `Navigate`。
 - Hub 会在本地下发前校验路径范围，并拒绝危险 git 命令。
 

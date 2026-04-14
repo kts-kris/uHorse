@@ -1,6 +1,6 @@
 # uHorse Channel Guide
 
-This document only describes the **channel path that is actually wired into the current `v4.5.1` mainline runtime**.
+This document only describes the **channel path that is actually wired into the current `v4.6.0` mainline runtime**.
 
 The most important and recommended path today is:
 
@@ -121,7 +121,7 @@ This path does not go through general natural-language task planning. It is pars
 
 ## Source-aware runtime
 
-Under the current `v4.5.1` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
+Under the current `v4.6.0` mainline wording, channel input that enters the Hub task pipeline also enters a runtime view that carries source metadata.
 
 The goal is not to turn DingTalk into a management surface for `memory / agent / skill`, but to let the runtime distinguish where a resource came from and what sharing or isolation boundary it should follow.
 
@@ -149,9 +149,12 @@ If the LLM returns invalid JSON, an out-of-workspace path, an invalid browser ta
 
 For the Skill install thin entrypoint, the current boundary is:
 
-- only `skillhub` packages are accepted
+- it accepts either `skillhub` packages or a controlled install request built from a freshly uploaded DingTalk attachment package in the same session
+- both HTTP and DingTalk online install paths accept `.zip` and `.tar.gz` archives
 - the sender must match `channels.dingtalk.skill_installers` before installation starts
 - the allowlist can match on `user_id` / `staff_id` and optionally require `corp_id`
+- for Python Skills that only ship `skill.yaml` plus `src/main.py` / `main.py`, Hub generates `skill.toml` automatically
+- if the package includes `requirements.txt`, Hub creates `.venv`, installs dependencies, and refreshes the runtime Skill registry
 - the current DingTalk text entrypoint supports install only, not refresh
 
 ---
@@ -165,6 +168,13 @@ The current result handling keeps the full execution result and tries to get bac
 - prefer `session_webhook` when it is still valid
 - fall back to group-message sending via `conversation_id`
 - fall back to direct personal sending via `sender_user_id`
+
+During the processing-handle phase, the current mainline now applies DingTalk intermediate states in this priority order:
+
+- prefer AI Cards for group conversations when an AI Card template is configured
+- otherwise, if the original `message_id` is available, attach a `🤔思考中` reaction to the user's original message
+- if reaction attach fails, automatically fall back to the existing legacy transient / noop path without blocking the main flow
+- when the task completes, fails, or is cancelled, reclaim the processing handle with best-effort recall / clear behavior
 
 The reply-content strategy is:
 
@@ -233,7 +243,7 @@ make skill-install-smoke
 make test-quick
 ```
 
-`make skill-install-smoke` validates the Agent Browser Skill natural-language install flow, SkillHub installation, and Chinese reply hint generation; `make test-quick` now includes that regression by default.
+`make skill-install-smoke` validates the Agent Browser Skill natural-language install flow, SkillHub installation, and Chinese reply hint generation; the uploaded-`.zip` plus follow-up “帮我安装这个技能” attachment install path is also covered by targeted `uhorse-hub` tests; `make test-quick` now includes the former regression by default.
 
 ### Start Hub and inspect logs
 

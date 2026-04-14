@@ -416,7 +416,11 @@ Successful response example:
 Current limits:
 
 - only `source_type = "skillhub"` is accepted
+- `download_url` currently supports `.zip` and `.tar.gz`
+- zip packages may include one nested root directory
 - overwriting an existing Skill directory is rejected
+- for Python Skills that only ship `skill.yaml` plus `src/main.py` / `main.py`, install auto-generates `skill.toml`
+- packages with `requirements.txt` get a `.venv` created and dependencies installed during install
 - `skill_installers` does **not** restrict this HTTP API; it only restricts the DingTalk text install entrypoint
 
 ### 2. Refresh runtime Skills: `POST /api/v1/skills/refresh`

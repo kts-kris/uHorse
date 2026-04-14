@@ -140,6 +140,21 @@ cargo test -p uhorse-hub test_agent_browser_natural_language_install_flow_return
 - 运行时安装与 registry 刷新
 - 安装成功后的简体中文功能介绍与使用示例
 
+与当前在线 Skill 安装兼容性相关的定向测试还包括：
+
+```bash
+cargo test -p uhorse-hub test_unpack_skill_archive_accepts_zip_with_nested_root_dir -- --nocapture
+cargo test -p uhorse-hub test_install_skill_generates_skill_toml_from_skill_yaml_python_entrypoint -- --nocapture
+cargo test -p uhorse-agent test_load_from_dir_supports_skill_yaml_python_entrypoint -- --nocapture
+```
+
+这些测试覆盖：
+
+- zip 包嵌套根目录解包
+- 仅提供 `skill.yaml` 的 Python Skill 自动生成 `skill.toml`
+- `requirements.txt` 触发 `.venv` 依赖安装
+- Agent 运行时对 yaml-only Python Skill 的加载与工作目录执行
+
 ### 4. 安全与审批相关测试
 
 ```bash

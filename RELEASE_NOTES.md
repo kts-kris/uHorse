@@ -1,19 +1,21 @@
-## uHorse 4.5.1 发布
+## uHorse 4.6.0 发布
 
-**发布日期**：2026-04-04
+**发布日期**：2026-04-10
 
 ### 本次发布重点
 
-`v4.5.1` 聚焦修复钉钉真实联调里暴露的两类消息回归：**session webhook 泄漏 `[Wait]`**，以及 **continuation planner 返回命令 JSON 时被误当成最终文本直接回给用户**。
+`v4.6.0` 聚焦补齐 DingTalk 的原消息处理中交互：用户发出消息后，Hub 会优先在**原消息**上贴一个 `🤔思考中` reaction；当任务完成、失败或取消后，再自动 recall。
 
-本次版本重点不是扩展新能力，而是把 **钉钉回复体验**、**continuation 命令兼容解析** 与 **中英文发布文档口径** 一次性收口到当前 Hub-Node 主线中。
+本次版本重点不是改写现有 Hub → runtime → Node → 回传主链路，而是在既有 reply handle 生命周期中接入 reaction，并保持 AI Card、session webhook、群消息和单聊最终回复路径不变。
 
 ### 主要变更
 
-- 修复 DingTalk session webhook 路径，最终回包不再向用户泄漏 `[Wait]`
-- 兼容 continuation planner 返回 `{"action":"execute_command", ...}` 顶层写法，避免命令 JSON 原样回显给钉钉用户
-- 首轮规划与 continuation 继续共用同一套命令 JSON 归一化逻辑，`execute_command` 会继续进入任务派发
-- README / INSTALL / CHANNELS / CHANGELOG / RELEASE_NOTES 已同步更新到 `v4.5.1` 口径
+- 新增 DingTalk 原消息 `🤔思考中` reaction attach / recall 能力
+- `uhorse-channel` 现在会透传 DingTalk 原始 `message_id`，供 Hub 在处理中句柄阶段直接使用
+- Hub reply handle 生命周期新增 `Reaction` 变体，AI Card 仍优先，reaction attach 失败时会自动回退到现有路径
+- 任务取消时也会清理处理中句柄：reaction 会 recall，legacy transient ack 会 clear，AI Card 会以“任务已取消。”收尾
+- README / INSTALL / CHANNELS / CHANGELOG / RELEASE_NOTES 已同步更新到 `v4.6.0` 口径
+- 当前文档已补齐在线 Skill 安装兼容性：`.zip` / `.tar.gz`、DingTalk 附件追装、`skill.yaml` Python Skill 自动生成 `skill.toml` 与 `requirements.txt` 自动安装依赖
 
 ### 当前主交付物
 
@@ -26,7 +28,7 @@
 
 ### 不包含内容
 
-`v4.5.1` 明确 **不包含**：
+`v4.6.0` 明确 **不包含**：
 
 - DingTalk 文本入口的 Skill refresh 命令；当前 refresh 只开放 HTTP API
 - 对非 `skillhub` 来源的在线安装支持

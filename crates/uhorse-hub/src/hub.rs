@@ -538,6 +538,7 @@ mod tests {
                     agent_id: "main".to_string(),
                     route: crate::web::DingTalkReplyRoute {
                         conversation_id: "conv-1".to_string(),
+                        source_message_id: None,
                         conversation_type: Some("2".to_string()),
                         sender_user_id: Some("user-1".to_string()),
                         sender_staff_id: Some("staff-1".to_string()),

@@ -1,6 +1,6 @@
 # uHorse Installation Guide
 
-This document only describes the **current `v4.5.1` Hub-Node mainline** installation path that matches the repository as it exists today.
+This document only describes the **current `v4.6.0` Hub-Node mainline** installation path that matches the repository as it exists today.
 
 The recommended path is:
 
@@ -8,6 +8,7 @@ The recommended path is:
 - optionally build or download `uhorse-node-desktop`
 - generate `hub.toml` and `node.toml`
 - start Hub and Node separately
+- if you want to validate the current DingTalk UX, also verify original-message `🤔思考中` reaction attach / recall
 
 > Note: the repository still contains the legacy `uhorse` monolithic binary and helper scripts such as `install.sh` and `quick-setup.sh`, but those are not the primary path documented here.
 
@@ -88,6 +89,12 @@ For a minimal local roundtrip you usually only need:
 
 See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, configure DingTalk credentials, enable pairing, and complete binding from Node Desktop; `channels.dingtalk.notification_bindings` is only a compatibility seed/fallback.
 
+If you also want to validate the current online Skill install path, note that:
+
+- both `POST /api/v1/skills/install` and the DingTalk install entrypoint accept `.zip` / `.tar.gz`
+- Python Skills that only ship `skill.yaml` get an auto-generated `skill.toml` during install
+- packages that include `requirements.txt` get a `.venv` created and dependencies installed automatically during install
+
 ### 5. Start Hub and Node
 
 Terminal 1:
@@ -108,7 +115,7 @@ Terminal 2:
 
 If you want to ship the desktop client instead of only running the local host API, use the built-in packaging script.
 
-The fixed `v4.5.1` delivery boundary is: **`bin + web` archives, installer smoke, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging, macOS `.pkg`, Windows installer packaging, and matching smoke validation, but it still does **not** include native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installers.
+The fixed `v4.6.0` delivery boundary is: **`bin + web` archives, installer smoke, and CI / release / nightly artifacts**. This means the current mainline already covers archive packaging, macOS `.pkg`, Windows installer packaging, and matching smoke validation, but it still does **not** include native `.app/.dmg`, code signing, notarization, `.msi`, or Linux native installers.
 
 Use the built-in archive packaging script:
 
@@ -223,9 +230,9 @@ If you want the default quick regression entrypoint instead, run:
 make test-quick
 ```
 
-### 5. Verify the Node Desktop `v4.5.1` delivery boundary
+### 5. Verify the Node Desktop `v4.6.0` delivery boundary
 
-If you are validating the `v4.5.1` Node Desktop deliverable, also run:
+If you are validating the `v4.6.0` Node Desktop deliverable, also run:
 
 ```bash
 ./scripts/package-node-desktop.sh

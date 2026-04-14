@@ -1,6 +1,6 @@
 # uHorse 通道指南
 
-本文档只描述 **`v4.5.1` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
+本文档只描述 **`v4.6.0` 当前仓库主线实际接入并在 Hub 运行时链路中使用的通道路径**。
 
 当前最重要、也是主推荐路径的是：
 
@@ -121,7 +121,7 @@ DingTalk inbound message
 
 ## 来源感知运行时
 
-在当前 `v4.5.1` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
+在当前 `v4.6.0` 主线口径下，通道消息进入 Hub 任务链路后，还会进入带来源元信息的 runtime 视图。
 
 这里的目标不是把 DingTalk 变成 `memory / agent / skill` 管理入口，而是让运行时能够区分资源来自哪里、应该按什么边界共享或隔离。
 
@@ -149,9 +149,12 @@ DingTalk inbound message
 
 对于 Skill 安装薄入口，当前边界还包括：
 
-- 只接受 `skillhub` 来源
+- 只接受 `skillhub` 来源，或由当前 DingTalk 会话里刚上传的附件技能包转成受控安装请求
+- HTTP / DingTalk 在线安装都支持 `.zip` 与 `.tar.gz` 安装包
 - 安装前会按 `channels.dingtalk.skill_installers` 校验发送者是否命中白名单
 - 白名单可按 `user_id` / `staff_id` 命中，并可选叠加 `corp_id`
+- 对仅提供 `skill.yaml` 与 `src/main.py` / `main.py` 的 Python Skill，Hub 会自动生成 `skill.toml`
+- 若安装包带有 `requirements.txt`，Hub 会自动创建 `.venv` 并安装依赖，再刷新运行时 Skill registry
 - 当前 DingTalk 文本入口只支持 install，不支持 refresh
 
 ---
@@ -165,6 +168,13 @@ DingTalk inbound message
 - 优先使用 `session_webhook`（未过期时）
 - 群会话回退到 `conversation_id` 群消息发送
 - 单聊回退到 `sender_user_id` 直接发送
+
+在“处理中句柄”阶段，当前主线会按以下优先级处理 DingTalk 中间态：
+
+- 群会话且配置了 AI Card 模板时，优先使用 AI Card
+- 其余场景如果拿到了原消息 `message_id`，则优先在用户原消息上贴 `🤔思考中` reaction
+- 如果 reaction attach 失败，则自动回退到现有 legacy transient / noop 路径，不阻塞主流程
+- 当任务完成、失败或取消后，会 best-effort recall / clear 对应处理中句柄
 
 回传内容策略可以概括为：
 
@@ -233,7 +243,7 @@ make skill-install-smoke
 make test-quick
 ```
 
-其中 `make skill-install-smoke` 会单独验证 Agent Browser Skill 的自然语言安装、SkillHub 安装与中文提示；`make test-quick` 已默认包含该回归。
+其中 `make skill-install-smoke` 会单独验证 Agent Browser Skill 的自然语言安装、SkillHub 安装与中文提示；当前上传 `.zip` 技能包后再追发“帮我安装这个技能”的附件安装链路，也已有 `uhorse-hub` 定向测试覆盖；`make test-quick` 已默认包含前者。
 
 ### 启动 Hub 并观察日志
 

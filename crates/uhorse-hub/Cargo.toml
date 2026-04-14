@@ -23,6 +23,7 @@ uhorse-storage = { path = "../uhorse-storage" }
 uhorse-security = { path = "../uhorse-security" }
 uhorse-observability = { path = "../uhorse-observability" }
 uhorse-config = { path = "../uhorse-config" }
+uhorse-multimodal = { path = "../uhorse-multimodal" }
 
 # Async runtime
 tokio = { workspace = true }

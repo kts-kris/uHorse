@@ -548,6 +548,7 @@ mod tests {
     fn sample_route() -> DingTalkReplyRoute {
         DingTalkReplyRoute {
             conversation_id: "conversation-1".to_string(),
+            source_message_id: None,
             conversation_type: Some("1".to_string()),
             sender_user_id: Some("user-1".to_string()),
             sender_staff_id: Some("staff-1".to_string()),
