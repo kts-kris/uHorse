@@ -4,7 +4,8 @@
 
 use crate::error::{ChannelError, PluginError, Result, UHorseError};
 use crate::types::{
-    ChannelType, DeviceId, ExecutionContext, MessageContent, PermissionLevel, SessionId, ToolId,
+    ChannelCapabilityFlags, ChannelRecipient, ChannelType, DeviceId, ExecutionContext,
+    MessageContent, PermissionLevel, SessionId, ToolId,
 };
 use async_trait::async_trait;
 
@@ -18,12 +19,33 @@ pub trait Channel: Send + Sync + std::fmt::Debug {
     /// 获取通道类型
     fn channel_type(&self) -> ChannelType;
 
-    /// 发送消息
+    /// 获取通道能力声明。
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::empty()
+    }
+
+    /// 发送消息到通用收件人。
+    async fn send_to_recipient(
+        &self,
+        recipient: &ChannelRecipient,
+        message: &MessageContent,
+    ) -> Result<(), ChannelError>;
+
+    /// 发送消息。
     async fn send_message(
         &self,
         user_id: &str,
         message: &MessageContent,
-    ) -> Result<(), ChannelError>;
+    ) -> Result<(), ChannelError> {
+        self.send_to_recipient(
+            &ChannelRecipient {
+                channel_type: self.channel_type(),
+                recipient: user_id.to_string(),
+            },
+            message,
+        )
+        .await
+    }
 
     /// 验证 Webhook 请求
     async fn verify_webhook(

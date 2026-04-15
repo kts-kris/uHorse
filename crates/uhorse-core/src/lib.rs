@@ -19,10 +19,10 @@ pub mod types;
 
 // 重新导出常用类型
 pub use types::{
-    AccessToken, ChannelType, DeviceCapabilities, DeviceId, DeviceInfo, ErrorCategory, ErrorCode,
-    ExecutionContext, IsolationLevel, JobId, JobTarget, Message, MessageContent, MessageRole,
-    PermissionLevel, Schedule, ScheduledJob, Session, SessionId, Tool, ToolCall, ToolError, ToolId,
-    ToolResult,
+    AccessToken, ChannelCapabilityFlags, ChannelRecipient, ChannelType, DeviceCapabilities,
+    DeviceId, DeviceInfo, ErrorCategory, ErrorCode, ExecutionContext, IsolationLevel, JobId,
+    JobTarget, Message, MessageContent, MessageRole, PermissionLevel, ReplyContext, Schedule,
+    ScheduledJob, Session, SessionId, Tool, ToolCall, ToolError, ToolId, ToolResult,
 };
 
 pub use protocol::{

@@ -5,7 +5,10 @@
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
-use uhorse_core::{Channel, ChannelError, ChannelType, Message, MessageContent, Result};
+use uhorse_core::{
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, Message,
+    MessageContent, Result,
+};
 
 /// 企业微信通道
 #[derive(Debug)]
@@ -213,13 +216,24 @@ impl Channel for WeWorkChannel {
         ChannelType::WeWork
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending message to WeWork: user_id={}", user_id);
+        if recipient.channel_type != ChannelType::WeWork {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
+
+        debug!("Sending message to WeWork: user_id={}", recipient.recipient);
 
         // TODO: 实现实际的 HTTP 请求
         match message {

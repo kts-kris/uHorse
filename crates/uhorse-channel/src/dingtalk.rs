@@ -13,8 +13,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 use uhorse_core::{
-    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    UHorseError,
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, Message,
+    MessageContent, MessageRole, Result, Session, UHorseError,
 };
 
 const STREAM_OPEN_URL: &str = "https://api.dingtalk.com/v1.0/gateway/connections/open";
@@ -1838,17 +1838,33 @@ impl Channel for DingTalkChannel {
         ChannelType::DingTalk
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+            | ChannelCapabilityFlags::INBOUND_WEBHOOK
+            | ChannelCapabilityFlags::REPLY_CONTEXT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending DingTalk message to {}: {:?}", user_id, message);
+        if recipient.channel_type != ChannelType::DingTalk {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
+
+        debug!(
+            "Sending DingTalk message to {}: {:?}",
+            recipient.recipient, message
+        );
 
         match message {
             MessageContent::Text(text) => {
-                self.send_text(user_id, text).await?;
+                self.send_text(&recipient.recipient, text).await?;
             }
             MessageContent::Image { url, caption } => {
                 let text = format!(
@@ -1859,17 +1875,21 @@ impl Channel for DingTalkChannel {
                         .map(|c| format!(" - {}", c))
                         .unwrap_or_default()
                 );
-                self.send_text(user_id, &text).await?;
+                self.send_text(&recipient.recipient, &text).await?;
             }
             MessageContent::Audio { url, duration } => {
                 let text = format!("[音频] {} ({}秒)", url, duration.unwrap_or(0));
-                self.send_text(user_id, &text).await?;
+                self.send_text(&recipient.recipient, &text).await?;
             }
             MessageContent::Structured(data) => {
                 let json = serde_json::to_string_pretty(data)
                     .unwrap_or_else(|_| "Invalid JSON".to_string());
-                self.send_markdown(user_id, "数据", &format!("```\n{}\n```", json))
-                    .await?;
+                self.send_markdown(
+                    &recipient.recipient,
+                    "数据",
+                    &format!("```\n{}\n```", json),
+                )
+                .await?;
             }
         }
 

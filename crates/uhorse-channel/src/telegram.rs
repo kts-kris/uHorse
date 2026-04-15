@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument};
 use uhorse_core::{
-    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    UHorseError,
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, Message,
+    MessageContent, MessageRole, Result, Session, UHorseError,
 };
 
 /// Telegram API 响应
@@ -519,15 +519,30 @@ impl Channel for TelegramChannel {
         ChannelType::Telegram
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending Telegram message to {}: {:?}", user_id, message);
+        if recipient.channel_type != ChannelType::Telegram {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
 
-        let chat_id: i64 = user_id
+        debug!(
+            "Sending Telegram message to {}: {:?}",
+            recipient.recipient, message
+        );
+
+        let chat_id: i64 = recipient
+            .recipient
             .parse()
             .map_err(|_| ChannelError::ConfigError("Invalid chat_id".to_string()))?;
 

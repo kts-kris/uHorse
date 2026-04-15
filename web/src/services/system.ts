@@ -1,13 +1,19 @@
 import client from './api';
 import { getApiErrorMessage } from './api';
 import type { ApiResponse } from './api';
-import type { HubStats, NodeRuntimeInfo, TaskRuntimeInfo } from '../types';
+import type { ChannelCapabilityInfo, HubStats, NodeRuntimeInfo, TaskRuntimeInfo } from '../types';
 
 export const systemService = {
   async getStats(): Promise<HubStats> {
     const { data } = await client.get<ApiResponse<HubStats>>('/api/stats');
     if (data.success && data.data !== null) return data.data;
     throw new Error(getApiErrorMessage(data.error, '获取 Hub 统计失败'));
+  },
+
+  async getChannels(): Promise<ChannelCapabilityInfo[]> {
+    const { data } = await client.get<ApiResponse<ChannelCapabilityInfo[]>>('/api/channels');
+    if (data.success && data.data !== null) return data.data;
+    throw new Error(getApiErrorMessage(data.error, '获取通道能力失败'));
   },
 
   async getNodes(): Promise<NodeRuntimeInfo[]> {

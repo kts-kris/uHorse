@@ -16,7 +16,7 @@ use uhorse_observability::MetricsCollector;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
-use uhorse_channel::DingTalkChannel;
+use uhorse_channel::ChannelRegistry;
 use uhorse_protocol::{
     Command, NodeCapabilities, NodeId, NodeToHub, Priority, TaskContext, TaskId, WorkspaceInfo,
 };
@@ -106,7 +106,7 @@ impl Hub {
         Self::new_with_components(
             config,
             None,
-            None,
+            Arc::new(ChannelRegistry::new()),
             Arc::new(NotificationBindingManager::default()),
             None,
         )
@@ -120,7 +120,7 @@ impl Hub {
         Self::new_with_components(
             config,
             security_manager,
-            None,
+            Arc::new(ChannelRegistry::new()),
             Arc::new(NotificationBindingManager::default()),
             None,
         )
@@ -130,7 +130,7 @@ impl Hub {
     pub fn new_with_components(
         config: HubConfig,
         security_manager: Option<Arc<SecurityManager>>,
-        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        channel_registry: Arc<ChannelRegistry>,
         notification_bindings: Arc<NotificationBindingManager>,
         metrics_collector: Option<Arc<MetricsCollector>>,
     ) -> (Self, mpsc::Receiver<crate::task_scheduler::TaskResult>) {
@@ -149,7 +149,7 @@ impl Hub {
         let message_router = Arc::new(MessageRouter::new(
             node_manager.clone(),
             task_scheduler.clone(),
-            dingtalk_channel,
+            channel_registry,
             notification_bindings.clone(),
         ));
         let session_runtime = Arc::new(SessionRuntimeManager::new());
@@ -513,7 +513,7 @@ mod tests {
         let (hub, _rx) = Hub::new_with_components(
             HubConfig::default(),
             Some(security_manager),
-            None,
+            Arc::new(ChannelRegistry::new()),
             Arc::new(NotificationBindingManager::default()),
             Some(Arc::clone(&metrics)),
         );

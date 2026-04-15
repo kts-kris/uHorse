@@ -35,6 +35,16 @@ const Channels: React.FC = () => {
   });
 
   const {
+    data: channels = [],
+    isLoading: channelsLoading,
+    error: channelsError,
+  } = useQuery({
+    queryKey: ['runtime-channels'],
+    queryFn: systemService.getChannels,
+    refetchInterval: 5000,
+  });
+
+  const {
     data: nodes = [],
     isLoading: nodesLoading,
     error: nodesError,
@@ -44,7 +54,7 @@ const Channels: React.FC = () => {
     refetchInterval: 5000,
   });
 
-  const loading = statsLoading || nodesLoading;
+  const loading = statsLoading || channelsLoading || nodesLoading;
 
   const channelStats = useMemo(() => {
     const onlineNodes = nodes.filter((node) => node.state.toLowerCase() === 'online').length;
@@ -56,8 +66,9 @@ const Channels: React.FC = () => {
       busyNodes,
       taskNodes,
       totalNodes: stats?.nodes.total_nodes || nodes.length,
+      registeredChannels: channels.filter((channel) => channel.registered).length,
     };
-  }, [nodes, stats]);
+  }, [channels, nodes, stats]);
 
   if (loading && !stats) {
     return (
@@ -73,7 +84,7 @@ const Channels: React.FC = () => {
         type="info"
         showIcon
         message="当前控制面暂无独立的通道启停 / 测试 API。"
-        description="此页展示 Hub 已接入的消息入口与节点侧运行状态；DingTalk webhook 已接入，文件 / shell 执行仍通过在线节点承载。"
+        description="此页展示 Hub 当前进程已注册 channel 的运行时能力与节点侧状态；当前 Phase0 仅收口 Telegram / DingTalk / Slack / Discord / WhatsApp，完整交互主线仍以 DingTalk 为主。"
       />
 
       {statsError && (
@@ -82,6 +93,15 @@ const Channels: React.FC = () => {
           showIcon
           message="加载 Hub 统计失败"
           description={statsError instanceof Error ? statsError.message : '未知错误'}
+        />
+      )}
+
+      {channelsError && (
+        <Alert
+          type="error"
+          showIcon
+          message="加载通道能力失败"
+          description={channelsError instanceof Error ? channelsError.message : '未知错误'}
         />
       )}
 
@@ -97,7 +117,12 @@ const Channels: React.FC = () => {
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={6}>
           <Card>
-            <Statistic title="接入入口" value={1} prefix={<ApiOutlined />} suffix="个" />
+            <Statistic
+              title="接入入口"
+              value={channelStats.registeredChannels}
+              prefix={<ApiOutlined />}
+              suffix="个"
+            />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
@@ -117,26 +142,35 @@ const Channels: React.FC = () => {
         </Col>
       </Row>
 
-      <Card title="消息入口">
+      <Card title="已注册消息入口与运行时能力">
         <List
-          dataSource={[
-            {
-              key: 'dingtalk-webhook',
-              name: 'DingTalk Webhook',
-              status: '已接入',
-              description: 'Hub 提供 /api/v1/channels/dingtalk/webhook 入站接口，用于接收钉钉回调。',
-            },
-          ]}
+          dataSource={channels}
+          locale={{ emptyText: '暂无 channel 能力数据' }}
           renderItem={(item) => (
-            <List.Item key={item.key}>
+            <List.Item key={item.channel_type}>
               <Descriptions size="small" column={1} style={{ width: '100%' }}>
                 <Descriptions.Item label="名称">
                   <Space>
-                    <Typography.Text strong>{item.name}</Typography.Text>
-                    <Tag color="green">{item.status}</Tag>
+                    <Typography.Text strong>{item.channel_type}</Typography.Text>
+                    <Tag color={item.registered ? 'green' : 'default'}>
+                      {item.registered ? '已注册' : '未注册'}
+                    </Tag>
                   </Space>
                 </Descriptions.Item>
-                <Descriptions.Item label="说明">{item.description}</Descriptions.Item>
+                <Descriptions.Item label="能力">
+                  {item.capabilities.length === 0 ? (
+                    <Typography.Text type="secondary">当前未注册或未声明运行时能力</Typography.Text>
+                  ) : (
+                    <Space size={[4, 4]} wrap>
+                      {item.capabilities.map((capability) => (
+                        <Tag key={capability}>{formatChannelCapability(capability)}</Tag>
+                      ))}
+                    </Space>
+                  )}
+                </Descriptions.Item>
+                <Descriptions.Item label="说明">
+                  {describeChannelEntry(item.channel_type, item.capabilities)}
+                </Descriptions.Item>
               </Descriptions>
             </List.Item>
           )}
@@ -192,6 +226,32 @@ const Channels: React.FC = () => {
     </Space>
   );
 };
+
+function formatChannelCapability(capability: string): string {
+  switch (capability) {
+    case 'send_to_recipient':
+      return '通用发送';
+    case 'inbound_webhook':
+      return '入站 Webhook';
+    case 'reply_context':
+      return '上下文回复';
+    default:
+      return capability;
+  }
+}
+
+function describeChannelEntry(channelType: string, capabilities: string[]): string {
+  if (capabilities.includes('reply_context')) {
+    return `${channelType} 已声明上下文回复能力，可承接当前主线中的回复路由语义。`;
+  }
+  if (capabilities.includes('inbound_webhook')) {
+    return `${channelType} 已声明入站 Webhook 能力，可承接平台回调入口。`;
+  }
+  if (capabilities.includes('send_to_recipient')) {
+    return `${channelType} 当前仅声明通用收件人发送能力，未承诺完整回复主链。`;
+  }
+  return `${channelType} 当前不在本进程注册表中，或不属于本阶段已接线入口。`;
+}
 
 function formatDateTime(value: string): string {
   const timestamp = Date.parse(value);

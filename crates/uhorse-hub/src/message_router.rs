@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use uhorse_channel::DingTalkChannel;
-use uhorse_core::{Channel, MessageContent};
+use uhorse_channel::ChannelRegistry;
+use uhorse_core::{ChannelCapabilityFlags, MessageContent};
 use uhorse_observability::{log_audit_event, AuditCategory, AuditEvent, AuditLevel};
 use uhorse_protocol::{
     CommandResult, ErrorSource, ExecutionError, HubToNode, NodeId, NodeToHub,
@@ -32,8 +32,8 @@ pub struct MessageRouter {
     node_manager: Arc<NodeManager>,
     /// 任务调度器
     task_scheduler: Arc<TaskScheduler>,
-    /// DingTalk 通道
-    dingtalk_channel: Option<Arc<DingTalkChannel>>,
+    /// 消息渠道注册表
+    channel_registry: Arc<ChannelRegistry>,
     /// 节点通知绑定
     notification_bindings: Arc<NotificationBindingManager>,
     /// 节点消息发送器映射 (用于 WebSocket 连接)
@@ -45,13 +45,13 @@ impl MessageRouter {
     pub fn new(
         node_manager: Arc<NodeManager>,
         task_scheduler: Arc<TaskScheduler>,
-        dingtalk_channel: Option<Arc<DingTalkChannel>>,
+        channel_registry: Arc<ChannelRegistry>,
         notification_bindings: Arc<NotificationBindingManager>,
     ) -> Self {
         Self {
             node_manager,
             task_scheduler,
-            dingtalk_channel,
+            channel_registry,
             notification_bindings,
             node_senders: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -257,7 +257,7 @@ impl MessageRouter {
 
                 let dedupe_key = event.dedupe_key.as_deref().unwrap_or("-");
 
-                if let Err(error) = self.forward_notification_to_dingtalk(node_id, &event).await {
+                if let Err(error) = self.forward_notification_to_binding(node_id, &event).await {
                     warn!(
                         node_id = %node_id,
                         event_id = %event.event_id,
@@ -324,36 +324,53 @@ impl MessageRouter {
         }
     }
 
-    async fn forward_notification_to_dingtalk(
+    async fn forward_notification_to_binding(
         &self,
         node_id: &NodeId,
         event: &uhorse_protocol::NotificationEvent,
     ) -> HubResult<()> {
-        let Some(channel) = self.dingtalk_channel.as_ref() else {
-            return Ok(());
-        };
-
-        let Some(user_id) = self
-            .notification_bindings
-            .get_user_id(node_id.as_str())
-            .await
-        else {
+        let Some(binding) = self.notification_bindings.get_binding(node_id.as_str()).await else {
             warn!(
                 node_id = %node_id,
                 event_id = %event.event_id,
-                "Received node notification event but no Hub-side DingTalk recipient binding is configured yet"
+                "Received node notification event but no Hub-side recipient binding is configured yet"
             );
             return Ok(());
         };
 
+        let recipient = binding.as_recipient();
+        let Some(channel) = self.channel_registry.get(recipient.channel_type) else {
+            warn!(
+                node_id = %node_id,
+                event_id = %event.event_id,
+                channel = %recipient.channel_type,
+                "Received node notification event but no registered channel is available for this binding"
+            );
+            return Ok(());
+        };
+
+        let capability_flags = channel.capability_flags();
+        if !capability_flags.contains(ChannelCapabilityFlags::SEND_TO_RECIPIENT) {
+            warn!(
+                node_id = %node_id,
+                event_id = %event.event_id,
+                channel = %recipient.channel_type,
+                "Received node notification event for channel binding without send_to_recipient capability"
+            );
+            return Ok(());
+        }
+
         channel
-            .send_message(
-                &user_id,
+            .send_to_recipient(
+                &recipient,
                 &MessageContent::Text(Self::render_notification_message(node_id, event)),
             )
             .await
             .map_err(|error| {
-                HubError::Communication(format!("Failed to send DingTalk notification: {}", error))
+                HubError::Communication(format!(
+                    "Failed to send channel notification via {}: {}",
+                    recipient.channel_type, error
+                ))
             })
     }
 
@@ -436,8 +453,61 @@ impl MessageRouter {
 mod tests {
     use super::*;
     use crate::session_runtime::SessionRuntimeManager;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use uhorse_core::{
+        Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType,
+        Result as CoreResult,
+    };
     use uhorse_observability::MetricsCollector;
     use uhorse_protocol::{Command, MessageId, NotificationEvent, SessionId, TaskContext, UserId};
+
+    #[derive(Debug)]
+    struct StubChannel {
+        channel_type: ChannelType,
+        capability_flags: ChannelCapabilityFlags,
+        send_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl Channel for StubChannel {
+        fn channel_type(&self) -> ChannelType {
+            self.channel_type
+        }
+
+        fn capability_flags(&self) -> ChannelCapabilityFlags {
+            self.capability_flags
+        }
+
+        async fn send_to_recipient(
+            &self,
+            _recipient: &ChannelRecipient,
+            _message: &MessageContent,
+        ) -> CoreResult<(), ChannelError> {
+            self.send_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn verify_webhook(
+            &self,
+            _payload: &[u8],
+            _signature: Option<&str>,
+        ) -> CoreResult<bool, ChannelError> {
+            Ok(true)
+        }
+
+        async fn start(&mut self) -> CoreResult<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> CoreResult<()> {
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+    }
 
     #[test]
     fn test_render_notification_message_includes_node_and_content() {
@@ -458,7 +528,7 @@ mod tests {
         let router = MessageRouter::new(
             node_manager,
             Arc::new(task_scheduler),
-            None,
+            Arc::new(ChannelRegistry::new()),
             Arc::new(NotificationBindingManager::default()),
         );
         let node_id = NodeId::from_string("node-desktop-test");
@@ -481,13 +551,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_notification_with_registered_non_dingtalk_channel_uses_capability_guard() {
+        let node_manager = Arc::new(NodeManager::new(10, 30));
+        let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
+        let send_calls = Arc::new(AtomicUsize::new(0));
+        let channel: Arc<dyn Channel> = Arc::new(StubChannel {
+            channel_type: ChannelType::Slack,
+            capability_flags: ChannelCapabilityFlags::SEND_TO_RECIPIENT,
+            send_calls: Arc::clone(&send_calls),
+        });
+        let notification_bindings = Arc::new(NotificationBindingManager::default());
+        notification_bindings
+            .set_channel_binding("node-slack-test", ChannelType::Slack, "slack-user-1")
+            .await;
+        let router = MessageRouter::new(
+            node_manager,
+            Arc::new(task_scheduler),
+            Arc::new(ChannelRegistry::new().with_channel(channel)),
+            notification_bindings,
+        );
+        let node_id = NodeId::from_string("node-slack-test");
+        let event = NotificationEvent::new(NotificationEventKind::Info, "标题", "内容", true);
+
+        router
+            .route_node_message(
+                &node_id,
+                NodeToHub::NotificationEvent {
+                    message_id: MessageId::new(),
+                    node_id: node_id.clone(),
+                    event,
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(send_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_notification_without_send_capability_is_ignored() {
+        let node_manager = Arc::new(NodeManager::new(10, 30));
+        let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
+        let send_calls = Arc::new(AtomicUsize::new(0));
+        let channel: Arc<dyn Channel> = Arc::new(StubChannel {
+            channel_type: ChannelType::Slack,
+            capability_flags: ChannelCapabilityFlags::empty(),
+            send_calls: Arc::clone(&send_calls),
+        });
+        let notification_bindings = Arc::new(NotificationBindingManager::default());
+        notification_bindings
+            .set_channel_binding("node-slack-test", ChannelType::Slack, "slack-user-1")
+            .await;
+        let router = MessageRouter::new(
+            node_manager,
+            Arc::new(task_scheduler),
+            Arc::new(ChannelRegistry::new().with_channel(channel)),
+            notification_bindings,
+        );
+        let node_id = NodeId::from_string("node-slack-test");
+        let event = NotificationEvent::new(NotificationEventKind::Info, "标题", "内容", true);
+
+        router
+            .route_node_message(
+                &node_id,
+                NodeToHub::NotificationEvent {
+                    message_id: MessageId::new(),
+                    node_id: node_id.clone(),
+                    event,
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(send_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn test_approval_request_records_wait_metric_and_transcript() {
         let node_manager = Arc::new(NodeManager::new(10, 30));
         let (task_scheduler, _rx) = TaskScheduler::new(node_manager.clone(), 3, 300);
         let router = MessageRouter::new(
             node_manager,
             Arc::new(task_scheduler),
-            None,
+            Arc::new(ChannelRegistry::new()),
             Arc::new(NotificationBindingManager::default()),
         );
         let session_runtime = SessionRuntimeManager::new();

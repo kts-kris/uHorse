@@ -38,10 +38,13 @@ use uhorse_channel::{
         DingTalkAiCardHandle, DingTalkAiCardTarget, DingTalkEvent, DingTalkInboundAttachment,
         DingTalkReactionHandle, DingTalkTransientClearOutcome, DingTalkTransientMessageReceipt,
     },
-    DingTalkChannel, DingTalkInboundMessage,
+    ChannelRegistry, DingTalkChannel, DingTalkInboundMessage,
 };
 use uhorse_config::{DingTalkSkillInstaller, HealthConfig, UHorseConfig};
-use uhorse_core::{Channel, MessageContent, SessionId as CoreSessionId};
+use uhorse_core::{
+    Channel, ChannelCapabilityFlags, ChannelType, MessageContent, ReplyContext,
+    SessionId as CoreSessionId,
+};
 use uhorse_llm::{ChatMessage, LLMClient};
 use uhorse_multimodal::stt::{SttClient, SttConfig};
 use uhorse_observability::{
@@ -82,6 +85,31 @@ pub struct DingTalkReplyRoute {
     pub session_webhook_expired_time: Option<i64>,
     /// 机器人编码
     pub robot_code: Option<String>,
+}
+
+impl From<&DingTalkReplyRoute> for ReplyContext {
+    fn from(route: &DingTalkReplyRoute) -> Self {
+        let mut metadata = HashMap::new();
+        if let Some(conversation_type) = route.conversation_type.as_ref() {
+            metadata.insert("conversation_type".to_string(), conversation_type.clone());
+        }
+        if let Some(sender_staff_id) = route.sender_staff_id.as_ref() {
+            metadata.insert("sender_staff_id".to_string(), sender_staff_id.clone());
+        }
+        if let Some(robot_code) = route.robot_code.as_ref() {
+            metadata.insert("robot_code".to_string(), robot_code.clone());
+        }
+
+        Self {
+            channel_type: uhorse_core::ChannelType::DingTalk,
+            conversation_id: route.conversation_id.clone(),
+            source_message_id: route.source_message_id.clone(),
+            reply_webhook: route.session_webhook.clone(),
+            reply_webhook_expires_at: route.session_webhook_expired_time,
+            sender_recipient: route.sender_user_id.clone(),
+            metadata,
+        }
+    }
 }
 
 const DINGTALK_PROCESSING_ACK_TEXT: &str = "[Wait]";
@@ -136,6 +164,261 @@ impl DingTalkReplyHandle {
             | Self::LegacyTransient { attached_at, .. } => Some(*attached_at),
             Self::Noop => None,
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct DingTalkReplyRuntime {
+    routes: RwLock<HashMap<TaskId, DingTalkReplyRoute>>,
+    handles: RwLock<HashMap<TaskId, DingTalkReplyHandle>>,
+}
+
+impl DingTalkReplyRuntime {
+    async fn insert_route(&self, task_id: TaskId, route: DingTalkReplyRoute) {
+        self.routes.write().await.insert(task_id, route);
+    }
+
+    async fn take_route(&self, task_id: &TaskId) -> Option<DingTalkReplyRoute> {
+        self.routes.write().await.remove(task_id)
+    }
+
+    #[cfg(test)]
+    async fn get_route(&self, task_id: &TaskId) -> Option<DingTalkReplyRoute> {
+        self.routes.read().await.get(task_id).cloned()
+    }
+
+    #[cfg(test)]
+    async fn has_route(&self, task_id: &TaskId) -> bool {
+        self.routes.read().await.contains_key(task_id)
+    }
+
+    #[cfg(test)]
+    async fn route_count(&self) -> usize {
+        self.routes.read().await.len()
+    }
+
+    async fn insert_handle(&self, task_id: TaskId, handle: DingTalkReplyHandle) {
+        self.handles.write().await.insert(task_id, handle);
+    }
+
+    async fn take_handle(&self, task_id: &TaskId) -> Option<DingTalkReplyHandle> {
+        self.handles.write().await.remove(task_id)
+    }
+
+    #[cfg(test)]
+    async fn has_handle(&self, task_id: &TaskId) -> bool {
+        self.handles.read().await.contains_key(task_id)
+    }
+
+    #[cfg(test)]
+    async fn handle_count(&self) -> usize {
+        self.handles.read().await.len()
+    }
+}
+
+struct DingTalkReplyAdapter<'a> {
+    channel: &'a DingTalkChannel,
+}
+
+impl<'a> DingTalkReplyAdapter<'a> {
+    fn new(channel: &'a DingTalkChannel) -> Self {
+        Self { channel }
+    }
+
+    async fn create_handle(
+        &self,
+        route: &DingTalkReplyRoute,
+    ) -> Result<DingTalkReplyHandle, Box<dyn std::error::Error + Send + Sync>> {
+        let capability_flags = self.channel.capability_flags();
+
+        if let Some(target) = resolve_dingtalk_ai_card_target(route, capability_flags) {
+            if let Some(robot_code) = route.robot_code.as_deref() {
+                let Some(card_template_id) = self.channel.ai_card_template_id() else {
+                    return Err("DingTalk AI card template id is not configured".into());
+                };
+                let reply_text = format_dingtalk_reply_text(DINGTALK_PROCESSING_ACK_TEXT);
+                let handle = self
+                    .channel
+                    .create_ai_card(
+                        &target,
+                        robot_code,
+                        card_template_id,
+                        "processing",
+                        &reply_text,
+                    )
+                    .await?;
+                return Ok(DingTalkReplyHandle::AiCard {
+                    handle,
+                    attached_at: Instant::now(),
+                });
+            }
+        }
+
+        if capability_flags.contains(ChannelCapabilityFlags::REPLY_CONTEXT) {
+            if let (Some(source_message_id), Some(robot_code)) = (
+                route.source_message_id.as_deref(),
+                route.robot_code.as_deref(),
+            ) {
+                match self
+                    .channel
+                    .add_processing_reaction(robot_code, source_message_id, &route.conversation_id)
+                    .await
+                {
+                    Ok(handle) => {
+                        return Ok(DingTalkReplyHandle::Reaction {
+                            handle,
+                            attached_at: Instant::now(),
+                        })
+                    }
+                    Err(error) => {
+                        warn!(
+                            conversation_id = %route.conversation_id,
+                            source_message_id = source_message_id,
+                            error = %error,
+                            "Attach DingTalk processing reaction failed, fallback to legacy processing handle"
+                        );
+                    }
+                }
+            }
+        }
+
+        let receipt = match resolve_dingtalk_reply_target(route, capability_flags) {
+            Some(DingTalkReplyTarget::SessionWebhook { .. }) => {
+                return Ok(DingTalkReplyHandle::Noop);
+            }
+            Some(DingTalkReplyTarget::GroupConversation { .. }) => None,
+            Some(DingTalkReplyTarget::DirectUser { .. }) => None,
+            None => {
+                warn!(
+                    conversation_id = %route.conversation_id,
+                    conversation_type = ?route.conversation_type,
+                    sender_user_id = ?route.sender_user_id,
+                    sender_staff_id = ?route.sender_staff_id,
+                    has_session_webhook = route.session_webhook.is_some(),
+                    session_webhook_expired_time = ?route.session_webhook_expired_time,
+                    robot_code = ?route.robot_code,
+                    "Skip DingTalk processing ack because no reply target could be resolved"
+                );
+                return Err("No DingTalk reply target could be resolved".into());
+            }
+        };
+
+        Ok(DingTalkReplyHandle::LegacyTransient {
+            receipt,
+            attached_at: Instant::now(),
+        })
+    }
+
+    async fn cleanup_processing_handle(
+        &self,
+        reply_handle: Option<DingTalkReplyHandle>,
+        task_id: Option<&TaskId>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match reply_handle {
+            Some(DingTalkReplyHandle::AiCard { handle, .. }) => {
+                if let Err(error) = self.channel.finalize_ai_card(&handle, DINGTALK_CANCELLED_TEXT).await {
+                    warn!(task_id = ?task_id, error = %error, "Finalize DingTalk AI card failed during cleanup");
+                }
+            }
+            Some(DingTalkReplyHandle::Reaction { handle, .. }) => {
+                if let Err(error) = self.channel.recall_processing_reaction(&handle).await {
+                    warn!(task_id = ?task_id, error = %error, "Recall DingTalk processing reaction failed during cleanup");
+                }
+            }
+            Some(DingTalkReplyHandle::LegacyTransient { receipt, .. }) => {
+                let outcome = self.channel.clear_processing_ack(receipt.as_ref()).await?;
+                if matches!(outcome, DingTalkTransientClearOutcome::Unsupported) {
+                    info!(task_id = ?task_id, "DingTalk transient ack clear is unsupported during cleanup");
+                }
+            }
+            Some(DingTalkReplyHandle::Noop) | None => {}
+        }
+
+        Ok(())
+    }
+
+    async fn send_or_finalize(
+        &self,
+        route: &DingTalkReplyRoute,
+        reply_text: &str,
+        reply_handle: Option<DingTalkReplyHandle>,
+        task_id: Option<&TaskId>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match reply_handle {
+            Some(DingTalkReplyHandle::AiCard { handle, .. }) => {
+                if let Err(error) = self.channel.finalize_ai_card(&handle, reply_text).await {
+                    warn!(task_id = ?task_id, error = %error, "Finalize DingTalk AI card failed, fallback to markdown reply");
+                    self.send(route, reply_text).await?;
+                }
+            }
+            Some(DingTalkReplyHandle::Reaction { handle, .. }) => {
+                if let Err(error) = self.channel.recall_processing_reaction(&handle).await {
+                    warn!(task_id = ?task_id, error = %error, "Recall DingTalk processing reaction failed; continue with final reply");
+                }
+                self.send(route, reply_text).await?;
+            }
+            Some(DingTalkReplyHandle::LegacyTransient { receipt, .. }) => {
+                let outcome = self.channel.clear_processing_ack(receipt.as_ref()).await?;
+                if matches!(outcome, DingTalkTransientClearOutcome::Unsupported) {
+                    info!(task_id = ?task_id, "DingTalk transient ack clear is unsupported; continue with final reply");
+                }
+                self.send(route, reply_text).await?;
+            }
+            Some(DingTalkReplyHandle::Noop) => {
+                if reply_text != DINGTALK_PROCESSING_ACK_TEXT {
+                    self.send(route, reply_text).await?;
+                }
+            }
+            None => {
+                self.send(route, reply_text).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn send(
+        &self,
+        route: &DingTalkReplyRoute,
+        reply_text: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let reply_text = format_dingtalk_reply_text(reply_text);
+
+        let capability_flags = self.channel.capability_flags();
+
+        match resolve_dingtalk_reply_target(route, capability_flags) {
+            Some(DingTalkReplyTarget::SessionWebhook {
+                webhook,
+                at_user_ids,
+            }) => {
+                self.channel
+                    .reply_via_session_webhook_markdown(&webhook, "uHorse", &reply_text, &at_user_ids)
+                    .await?;
+            }
+            Some(DingTalkReplyTarget::GroupConversation { conversation_id }) => {
+                self.channel
+                    .send_group_markdown_message(&conversation_id, "uHorse", &reply_text)
+                    .await?;
+            }
+            Some(DingTalkReplyTarget::DirectUser { user_id }) => {
+                self.channel.send_markdown(&user_id, "uHorse", &reply_text).await?;
+            }
+            None => {
+                warn!(
+                    conversation_id = %route.conversation_id,
+                    conversation_type = ?route.conversation_type,
+                    sender_user_id = ?route.sender_user_id,
+                    sender_staff_id = ?route.sender_staff_id,
+                    has_session_webhook = route.session_webhook.is_some(),
+                    session_webhook_expired_time = ?route.session_webhook_expired_time,
+                    robot_code = ?route.robot_code,
+                    "Skip DingTalk reply because no reply target could be resolved"
+                );
+                return Err("No DingTalk reply target could be resolved".into());
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -760,7 +1043,9 @@ pub struct WebState {
     pub metrics_collector: Arc<MetricsCollector>,
     /// Metrics 导出器
     pub metrics_exporter: Arc<MetricsExporter>,
-    /// DingTalk 通道
+    /// 渠道注册表
+    channel_registry: Arc<ChannelRegistry>,
+    /// DingTalk 通道兼容访问入口
     pub dingtalk_channel: Option<Arc<DingTalkChannel>>,
     /// LLM 客户端
     pub llm_client: Option<Arc<dyn LLMClient>>,
@@ -768,13 +1053,105 @@ pub struct WebState {
     pub pairing_manager: Option<Arc<DevicePairingManager>>,
     /// Agent 运行时
     pub agent_runtime: Arc<WebAgentRuntime>,
-    /// 任务回传路由
-    pub dingtalk_routes: Arc<RwLock<HashMap<TaskId, DingTalkReplyRoute>>>,
-    /// 异步任务处理中提示句柄
-    dingtalk_reply_handles: Arc<RwLock<HashMap<TaskId, DingTalkReplyHandle>>>,
+    /// DingTalk reply 运行时状态
+    dingtalk_reply_runtime: Arc<DingTalkReplyRuntime>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChannelCapabilityView {
+    channel_type: String,
+    registered: bool,
+    capabilities: Vec<String>,
 }
 
 impl WebState {
+    fn dingtalk_channel(&self) -> Option<Arc<DingTalkChannel>> {
+        self.channel_registry.dingtalk()
+    }
+
+    fn channel_capability_views(&self) -> Vec<ChannelCapabilityView> {
+        let registered_channels = self
+            .channel_registry
+            .registered_channels()
+            .into_iter()
+            .map(|channel| (channel.channel_type, channel))
+            .collect::<HashMap<_, _>>();
+
+        [
+            ChannelType::Telegram,
+            ChannelType::Slack,
+            ChannelType::Discord,
+            ChannelType::WhatsApp,
+            ChannelType::DingTalk,
+        ]
+        .into_iter()
+        .map(|channel_type| {
+            let registered = registered_channels.get(&channel_type).copied();
+            let capability_flags = registered
+                .map(|channel| channel.capability_flags)
+                .unwrap_or_else(ChannelCapabilityFlags::empty);
+
+            ChannelCapabilityView {
+                channel_type: channel_type.to_string(),
+                registered: registered.is_some(),
+                capabilities: capability_flags
+                    .as_strs()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }
+        })
+        .collect()
+    }
+
+    fn require_dingtalk_channel(
+        &self,
+        message: &'static str,
+    ) -> Result<Arc<DingTalkChannel>, Box<dyn std::error::Error + Send + Sync>> {
+        self.dingtalk_channel().ok_or_else(|| message.into())
+    }
+
+    async fn insert_dingtalk_reply_route(&self, task_id: TaskId, route: DingTalkReplyRoute) {
+        self.dingtalk_reply_runtime.insert_route(task_id, route).await;
+    }
+
+    async fn take_dingtalk_reply_route(&self, task_id: &TaskId) -> Option<DingTalkReplyRoute> {
+        self.dingtalk_reply_runtime.take_route(task_id).await
+    }
+
+    #[cfg(test)]
+    async fn get_dingtalk_reply_route(&self, task_id: &TaskId) -> Option<DingTalkReplyRoute> {
+        self.dingtalk_reply_runtime.get_route(task_id).await
+    }
+
+    #[cfg(test)]
+    async fn has_dingtalk_reply_route(&self, task_id: &TaskId) -> bool {
+        self.dingtalk_reply_runtime.has_route(task_id).await
+    }
+
+    #[cfg(test)]
+    async fn dingtalk_reply_route_count(&self) -> usize {
+        self.dingtalk_reply_runtime.route_count().await
+    }
+
+    async fn insert_dingtalk_reply_handle(&self, task_id: TaskId, handle: DingTalkReplyHandle) {
+        self.dingtalk_reply_runtime.insert_handle(task_id, handle).await;
+    }
+
+    async fn take_dingtalk_reply_handle(&self, task_id: &TaskId) -> Option<DingTalkReplyHandle> {
+        self.dingtalk_reply_runtime.take_handle(task_id).await
+    }
+
+    #[cfg(test)]
+    async fn has_dingtalk_reply_handle(&self, task_id: &TaskId) -> bool {
+        self.dingtalk_reply_runtime.has_handle(task_id).await
+    }
+
+    #[cfg(test)]
+    async fn dingtalk_reply_handle_count(&self) -> usize {
+        self.dingtalk_reply_runtime.handle_count().await
+    }
+
     /// 创建新的 Web 状态
     pub fn new(
         hub: Arc<Hub>,
@@ -906,18 +1283,48 @@ impl WebState {
         pairing_manager: Option<Arc<DevicePairingManager>>,
         agent_runtime: Arc<WebAgentRuntime>,
     ) -> Self {
+        let channel_registry = Arc::new(match dingtalk_channel.clone() {
+            Some(channel) => ChannelRegistry::new().with_dingtalk(channel),
+            None => ChannelRegistry::new(),
+        });
+        Self::new_with_runtime_and_health_and_config_with_registry(
+            app_config,
+            hub,
+            health_service,
+            metrics_collector,
+            metrics_exporter,
+            channel_registry,
+            llm_client,
+            pairing_manager,
+            agent_runtime,
+        )
+    }
+
+    /// 使用显式应用配置、health、metrics 与渠道注册表创建 Web 状态。
+    pub fn new_with_runtime_and_health_and_config_with_registry(
+        app_config: Arc<UHorseConfig>,
+        hub: Arc<Hub>,
+        health_service: Arc<HealthService>,
+        metrics_collector: Arc<MetricsCollector>,
+        metrics_exporter: Arc<MetricsExporter>,
+        channel_registry: Arc<ChannelRegistry>,
+        llm_client: Option<Arc<dyn LLMClient>>,
+        pairing_manager: Option<Arc<DevicePairingManager>>,
+        agent_runtime: Arc<WebAgentRuntime>,
+    ) -> Self {
+        let dingtalk_channel = channel_registry.dingtalk();
         Self {
             app_config,
             hub,
             health_service,
             metrics_collector,
             metrics_exporter,
+            channel_registry,
             dingtalk_channel,
             llm_client,
             pairing_manager,
             agent_runtime,
-            dingtalk_routes: Arc::new(RwLock::new(HashMap::new())),
-            dingtalk_reply_handles: Arc::new(RwLock::new(HashMap::new())),
+            dingtalk_reply_runtime: Arc::new(DingTalkReplyRuntime::default()),
         }
     }
 }
@@ -1096,10 +1503,7 @@ async fn fetch_dingtalk_attachment_archive(
         .filter(|value| !value.is_empty())
         .unwrap_or("uploaded-skill.zip")
         .to_string();
-    let channel = state
-        .dingtalk_channel
-        .as_ref()
-        .ok_or("DingTalk channel is unavailable")?;
+    let channel = state.require_dingtalk_channel("DingTalk channel is unavailable")?;
     let bytes = channel
         .download_inbound_attachment(&DingTalkInboundAttachment {
             kind: "file".to_string(),
@@ -2770,16 +3174,18 @@ async fn try_create_early_dingtalk_reply_handle(
     state: &Arc<WebState>,
     inbound: &DingTalkInboundMessage,
 ) -> Result<Option<DingTalkReplyHandle>, Box<dyn std::error::Error + Send + Sync>> {
-    if !should_attach_dingtalk_processing_ack_now(inbound) {
-        return Ok(None);
-    }
-
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
+    let Some(channel) = state.dingtalk_channel() else {
         return Ok(None);
     };
 
+    let capability_flags = channel.capability_flags();
+    if !should_attach_dingtalk_processing_ack_now(inbound, capability_flags) {
+        return Ok(None);
+    }
+
     let route = reply_route_from_inbound(inbound);
-    Ok(Some(create_dingtalk_reply_handle(channel, &route).await?))
+    let reply_adapter = DingTalkReplyAdapter::new(&channel);
+    Ok(Some(reply_adapter.create_handle(&route).await?))
 }
 
 async fn persist_direct_reply_memory(
@@ -3358,14 +3764,15 @@ pub fn create_router_with_health_config(state: WebState, health_config: &HealthC
         .route("/dashboard", get(dashboard_page))
         // WebSocket 路由 (Node 连接)
         .route("/ws", get(ws_handler))
-        // DingTalk 回调路由
-        .route("/api/v1/channels/dingtalk/webhook", post(dingtalk_webhook))
+        // 通道回调路由
+        .route("/api/v1/channels/:channel/webhook", post(channel_webhook))
         .route(
-            "/api/v1/channels/dingtalk/webhook",
-            get(dingtalk_webhook_verify),
+            "/api/v1/channels/:channel/webhook",
+            get(channel_webhook_verify),
         )
         // API 路由
         .route("/api/stats", get(get_stats))
+        .route("/api/channels", get(list_channels))
         .route("/api/nodes", get(list_nodes))
         .route("/api/nodes/:node_id", get(get_node))
         .route(
@@ -3438,13 +3845,32 @@ async fn dashboard_page(State(state): State<Arc<WebState>>) -> Html<String> {
     )
 }
 
-/// DingTalk webhook 端点
-async fn dingtalk_webhook(
+/// 通道 webhook 端点。
+async fn channel_webhook(
+    Path(channel): Path<String>,
     State(state): State<Arc<WebState>>,
     headers: HeaderMap,
     payload: String,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
+    match channel.as_str() {
+        "dingtalk" => dingtalk_webhook(state, headers, payload).await,
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": format!("Unsupported channel: {}", channel)
+            })),
+        ),
+    }
+}
+
+/// DingTalk webhook 端点
+async fn dingtalk_webhook(
+    state: Arc<WebState>,
+    headers: HeaderMap,
+    payload: String,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(channel) = state.dingtalk_channel() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
@@ -3538,9 +3964,16 @@ async fn dingtalk_webhook(
     )
 }
 
-/// DingTalk webhook 验证端点
-async fn dingtalk_webhook_verify() -> &'static str {
-    "DingTalk webhook endpoint is ready"
+/// 通道 webhook 验证端点。
+async fn channel_webhook_verify(Path(channel): Path<String>) -> Response {
+    match channel.as_str() {
+        "dingtalk" => (StatusCode::OK, "DingTalk webhook endpoint is ready").into_response(),
+        _ => (
+            StatusCode::NOT_FOUND,
+            format!("Unsupported channel: {}", channel),
+        )
+            .into_response(),
+    }
 }
 
 /// 处理 DingTalk 入站消息。
@@ -3599,10 +4032,7 @@ async fn normalize_dingtalk_inbound_message(
                 set_last_audio_transcript(state, session_key, &agent_id, &transcript).await;
                 Some(transcript)
             } else {
-                let channel = state
-                    .dingtalk_channel
-                    .as_ref()
-                    .ok_or("DingTalk channel is unavailable")?;
+                let channel = state.require_dingtalk_channel("DingTalk channel is unavailable")?;
                 let bytes = channel
                     .download_inbound_message_media(inbound)
                     .await?
@@ -3763,15 +4193,10 @@ async fn submit_dingtalk_task(
                 )
                 .await;
                 let _ = turn_id;
-                if let Some(channel) = state.dingtalk_channel.as_ref() {
-                    send_or_finalize_dingtalk_reply(
-                        channel,
-                        &route,
-                        &reply_text,
-                        early_reply_handle,
-                        None,
-                    )
-                    .await?;
+                if let Some(channel) = state.dingtalk_channel() {
+                    DingTalkReplyAdapter::new(&channel)
+                        .send_or_finalize(&route, &reply_text, early_reply_handle, None)
+                        .await?;
                 }
                 Ok(())
             })
@@ -3831,13 +4256,18 @@ async fn process_dingtalk_task_serialized(
             .session_runtime()
             .complete_turn(&session_key.as_str(), None)
             .await;
-        if let Some(channel) = state.dingtalk_channel.as_ref() {
-            send_dingtalk_reply(channel, &route, &reply_text).await?;
+        if let Some(channel) = state.dingtalk_channel() {
+            DingTalkReplyAdapter::new(&channel)
+                .send(&route, &reply_text)
+                .await?;
         }
         return Ok(());
     }
 
-    let immediate_reply_handle = if should_send_dingtalk_immediate_ack(&step) {
+    let immediate_reply_handle = if state
+        .dingtalk_channel()
+        .is_some_and(|channel| should_send_dingtalk_immediate_ack(&step, channel.capability_flags()))
+    {
         early_reply_handle.clone()
     } else {
         None
@@ -3873,7 +4303,7 @@ async fn process_dingtalk_task_serialized(
                 None,
             )
             .await;
-            if let Some(channel) = state.dingtalk_channel.as_ref() {
+            if let Some(channel) = state.dingtalk_channel() {
                 if enforce_min_ack_display {
                     enforce_dingtalk_ack_min_display(
                         immediate_reply_handle.as_ref(),
@@ -3881,14 +4311,9 @@ async fn process_dingtalk_task_serialized(
                     )
                     .await;
                 }
-                send_or_finalize_dingtalk_reply(
-                    channel,
-                    &route,
-                    &reply_text,
-                    immediate_reply_handle,
-                    None,
-                )
-                .await?;
+                DingTalkReplyAdapter::new(&channel)
+                    .send_or_finalize(&route, &reply_text, immediate_reply_handle, None)
+                    .await?;
             } else {
                 warn!("Skip DingTalk direct reply because channel is unavailable");
             }
@@ -4064,18 +4489,19 @@ async fn process_dingtalk_task_serialized(
             )
             .await;
 
-            {
-                let mut routes = state.dingtalk_routes.write().await;
-                routes.insert(task_id.clone(), route.clone());
-            }
+            state
+                .insert_dingtalk_reply_route(task_id.clone(), route.clone())
+                .await;
 
             if let Some(handle) = early_reply_handle {
-                let mut handles = state.dingtalk_reply_handles.write().await;
-                handles.insert(task_id.clone(), handle);
-            } else if let Some(channel) = state.dingtalk_channel.as_ref() {
-                let handle = create_dingtalk_reply_handle(channel, &route).await?;
-                let mut handles = state.dingtalk_reply_handles.write().await;
-                handles.insert(task_id.clone(), handle);
+                state
+                    .insert_dingtalk_reply_handle(task_id.clone(), handle)
+                    .await;
+            } else if let Some(channel) = state.dingtalk_channel() {
+                let handle = DingTalkReplyAdapter::new(&channel).create_handle(&route).await?;
+                state
+                    .insert_dingtalk_reply_handle(task_id.clone(), handle)
+                    .await;
             } else {
                 warn!("Skip DingTalk processing ack because channel is unavailable");
             }
@@ -4238,7 +4664,7 @@ async fn execute_local_turn_step(
         None,
     )
     .await;
-    if let Some(channel) = state.dingtalk_channel.as_ref() {
+    if let Some(channel) = state.dingtalk_channel() {
         if should_enforce_min_ack_display(step) {
             enforce_dingtalk_ack_min_display(
                 reply_handle.as_ref(),
@@ -4246,7 +4672,9 @@ async fn execute_local_turn_step(
             )
             .await;
         }
-        send_or_finalize_dingtalk_reply(channel, route, &reply_text, reply_handle, None).await?;
+        DingTalkReplyAdapter::new(&channel)
+            .send_or_finalize(route, &reply_text, reply_handle, None)
+            .await?;
     }
     Ok(reply_text)
 }
@@ -4935,28 +5363,10 @@ pub async fn reply_task_result(
         .take_task_binding(&task_result.task_id)
         .await
     else {
-        let route = {
-            let mut routes = state.dingtalk_routes.write().await;
-            routes.remove(&task_result.task_id)
-        };
-        if route.is_none() {
-            return Ok(());
-        }
-
-        let completed_task = state.hub.get_completed_task(&task_result.task_id).await;
-        let reply_text = build_task_result_reply_text(&state, &task_result).await;
-
-        if let Some(completed_task) = completed_task.as_ref() {
-            persist_task_result_memory(&state, completed_task, &reply_text).await;
-        }
-
-        let Some(_channel) = state.dingtalk_channel.as_ref() else {
-            warn!("Skip DingTalk reply because channel is unavailable");
+        let Some(route) = state.take_dingtalk_reply_route(&task_result.task_id).await else {
             return Ok(());
         };
-        finalize_dingtalk_reply_handle(&state, &task_result.task_id, route.as_ref().unwrap(), &reply_text).await?;
-        info!("Replied DingTalk task result for {}", task_result.task_id);
-        return Ok(());
+        return reply_task_result_without_continuation(&state, &task_result, route).await;
     };
 
     let session_key = binding.session_key.clone();
@@ -4968,25 +5378,14 @@ pub async fn reply_task_result(
         .run_serialized(&lane_session_key, async move {
             let Some(completed_task) = state_for_actor.hub.get_completed_task(&task_result.task_id).await else {
                 let reply_text = build_task_result_reply_text(&state_for_actor, &task_result).await;
-                state_for_actor
-                    .metrics_collector
-                    .inc_continuations("task_result_without_completed_task");
-                let Some(_channel) = state_for_actor.dingtalk_channel.as_ref() else {
-                    warn!("Skip DingTalk reply because channel is unavailable");
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .fail_turn(&session_key, Some(&task_result.task_id))
-                        .await;
-                    return Ok(());
-                };
-                finalize_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route, &reply_text).await?;
-                state_for_actor
-                    .hub
-                    .session_runtime()
-                    .complete_turn(&session_key, Some(&task_result.task_id))
-                    .await;
-                return Ok(());
+                return handle_continuation_missing_completed_task(
+                    &state_for_actor,
+                    &session_key,
+                    &task_result,
+                    &binding.route,
+                    &reply_text,
+                )
+                .await;
             };
 
             state_for_actor
@@ -5011,20 +5410,14 @@ pub async fn reply_task_result(
                 .map(|turn| turn.cancel_requested)
                 .unwrap_or(false)
             {
-                if state_for_actor.dingtalk_channel.is_some() {
-                    cleanup_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route)
-                        .await?;
-                }
-                state_for_actor
-                    .hub
-                    .session_runtime()
-                    .prune_completed_turn_transcript(&session_key, 6)
-                    .await;
-                info!(
-                    "Skip continuation for {} because session turn was cancelled",
-                    completed_task.task_id
-                );
-                return Ok(());
+                return handle_continuation_cancelled_turn(
+                    &state_for_actor,
+                    &session_key,
+                    &task_result.task_id,
+                    &binding.route,
+                    &completed_task,
+                )
+                .await;
             }
 
             state_for_actor
@@ -5042,102 +5435,13 @@ pub async fn reply_task_result(
                 )
                 .await;
 
-            let step = match continue_task_result(&state_for_actor, &binding, &completed_task).await {
-                Ok(step) => {
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .reset_planner_retry(&session_key)
-                        .await;
-                    step
-                }
-                Err(error) => {
-                    warn!(
-                        "Failed to continue task result with LLM for {}: {}",
-                        completed_task.task_id, error
-                    );
-                    state_for_actor
-                        .metrics_collector
-                        .inc_planner_retries("continuation_error");
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .append_transcript_event(
-                            &session_key,
-                            TranscriptEventKind::PlannerRetry,
-                            error.to_string(),
-                        )
-                        .await;
-                    let retry_state = state_for_actor
-                        .hub
-                        .session_runtime()
-                        .increment_planner_retry(&session_key)
-                        .await;
-                    if let Some(retry_state) = retry_state {
-                        if retry_state.planner_retry_count <= retry_state.max_planner_retries {
-                            let compact_summary = format!(
-                                "user_request: {}; last_command: {}; last_result: {}",
-                                completed_task.context.intent.clone().unwrap_or_default(),
-                                serde_json::to_string(&completed_task.command)
-                                    .unwrap_or_else(|_| "{}".to_string()),
-                                serde_json::to_string(&completed_task.result)
-                                    .unwrap_or_else(|_| "{}".to_string())
-                            );
-                            state_for_actor
-                                .hub
-                                .session_runtime()
-                                .record_compaction(
-                                    &session_key,
-                                    compact_summary.clone(),
-                                    state_for_actor
-                                        .hub
-                                        .session_runtime()
-                                        .transcript(&session_key)
-                                        .await
-                                        .map(|transcript| transcript.events.len())
-                                        .unwrap_or_default(),
-                                )
-                                .await;
-                            state_for_actor
-                                .hub
-                                .session_runtime()
-                                .append_transcript_event(
-                                    &session_key,
-                                    TranscriptEventKind::TurnCompacted,
-                                    compact_summary,
-                                )
-                                .await;
-                            match continue_task_result(&state_for_actor, &binding, &completed_task).await {
-                                Ok(step) => {
-                                    state_for_actor
-                                        .hub
-                                        .session_runtime()
-                                        .reset_planner_retry(&session_key)
-                                        .await;
-                                    step
-                                }
-                                Err(retry_error) => {
-                                    warn!(
-                                        "Retry continuation failed for {}: {}",
-                                        completed_task.task_id, retry_error
-                                    );
-                                    PlannedTurnStep::Finalize {
-                                        text: summarize_task_result_or_fallback(&state_for_actor, &completed_task).await,
-                                    }
-                                }
-                            }
-                        } else {
-                            PlannedTurnStep::Finalize {
-                                text: summarize_task_result_or_fallback(&state_for_actor, &completed_task).await,
-                            }
-                        }
-                    } else {
-                        PlannedTurnStep::Finalize {
-                            text: summarize_task_result_or_fallback(&state_for_actor, &completed_task).await,
-                        }
-                    }
-                }
-            };
+            let step = plan_continuation_step_with_retry(
+                &state_for_actor,
+                &session_key,
+                &binding,
+                &completed_task,
+            )
+            .await;
             state_for_actor
                 .hub
                 .session_runtime()
@@ -5154,151 +5458,25 @@ pub async fn reply_task_result(
                 .await
                 .ok_or_else(|| "session turn is missing before continuation step".to_string())?;
             if turn_state.step_count > turn_state.max_steps {
-                let reply_text = summarize_task_result_or_fallback(&state_for_actor, &completed_task).await;
-                state_for_actor
-                    .hub
-                    .session_runtime()
-                    .append_transcript_event(
-                        &session_key,
-                        TranscriptEventKind::AssistantFinal,
-                        reply_text.clone(),
-                    )
-                    .await;
-                persist_task_result_memory(&state_for_actor, &completed_task, &reply_text).await;
-                if state_for_actor.dingtalk_channel.is_some() {
-                    finalize_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route, &reply_text).await?;
-                } else {
-                    warn!("Skip DingTalk reply because channel is unavailable");
-                }
-                state_for_actor
-                    .hub
-                    .session_runtime()
-                    .complete_turn(&session_key, Some(&task_result.task_id))
-                    .await;
-                state_for_actor
-                    .hub
-                    .session_runtime()
-                    .prune_completed_turn_transcript(&session_key, 6)
-                    .await;
-                return Ok(());
+                return handle_continuation_max_steps_exceeded(
+                    &state_for_actor,
+                    &session_key,
+                    &task_result.task_id,
+                    &binding.route,
+                    &completed_task,
+                )
+                .await;
             }
 
-            match step {
-                PlannedTurnStep::Finalize { text: reply_text } => {
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .append_transcript_event(
-                            &session_key,
-                            TranscriptEventKind::AssistantFinal,
-                            reply_text.clone(),
-                        )
-                        .await;
-                    persist_task_result_memory(&state_for_actor, &completed_task, &reply_text).await;
-
-                    if state_for_actor.dingtalk_channel.is_some() {
-                        finalize_dingtalk_reply_handle(&state_for_actor, &task_result.task_id, &binding.route, &reply_text).await?;
-                    } else {
-                        warn!("Skip DingTalk reply because channel is unavailable");
-                    }
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .complete_turn(&session_key, Some(&task_result.task_id))
-                        .await;
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .prune_completed_turn_transcript(&session_key, 6)
-                        .await;
-                }
-                PlannedTurnStep::SubmitTask {
-                    command,
-                    workspace_path,
-                } => {
-                    let online_nodes = state_for_actor.hub.get_online_nodes().await;
-                    let online_workspace_roots = collect_online_workspace_roots(&online_nodes);
-                    let workspace_hint = workspace_path
-                        .or_else(|| resolve_default_workspace_root(&online_workspace_roots))
-                        .ok_or_else(|| "workspace_path is required for continuation task".to_string())?;
-                    let required_capabilities = match &command {
-                        Command::Browser(_) => Some(NodeCapabilities {
-                            supported_commands: vec![CommandType::Browser],
-                            ..NodeCapabilities::default()
-                        }),
-                        _ => None,
-                    };
-                    validate_planned_command(&command, &workspace_hint)?;
-                    let mut task_context = completed_task.context.clone();
-                    task_context.intent = completed_task.context.intent.clone();
-                    let tool_call_id = state_for_actor
-                        .hub
-                        .session_runtime()
-                        .begin_tool_call(&session_key, "hub_task")
-                        .await
-                        .ok_or_else(|| "session turn is missing before continuation task submission".to_string())?;
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .append_transcript_event(
-                            &session_key,
-                            TranscriptEventKind::ToolCallPlanned,
-                            format!("{}:{}", tool_call_id, "hub_task"),
-                        )
-                        .await;
-                    let task_id = state_for_actor
-                        .hub
-                        .submit_task(
-                            command,
-                            task_context,
-                            uhorse_protocol::Priority::Normal,
-                            required_capabilities,
-                            vec![],
-                            Some(workspace_hint),
-                        )
-                        .await?;
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .bind_task_to_turn(
-                            task_id.clone(),
-                            TaskContinuationBinding {
-                                session_key: binding.session_key.clone(),
-                                turn_id: binding.turn_id.clone(),
-                                tool_call_id,
-                                agent_id: binding.agent_id.clone(),
-                                route: binding.route.clone(),
-                            },
-                        )
-                        .await;
-                }
-                PlannedTurnStep::ExecuteSkill { .. }
-                | PlannedTurnStep::ListInstalledSkills
-                | PlannedTurnStep::QuerySkill { .. }
-                | PlannedTurnStep::InstallSkill { .. } => {
-                    let continuation_session_key = parse_dingtalk_binding_session_key(&binding);
-                    execute_local_turn_step(
-                        &state_for_actor,
-                        &binding.route,
-                        &continuation_session_key,
-                        &binding.agent_id,
-                        completed_task.context.intent.as_deref().unwrap_or_default(),
-                        &step,
-                        &[],
-                        binding.route.sender_user_id.as_deref(),
-                        binding.route.sender_staff_id.as_deref(),
-                        continuation_session_key.team_id.as_deref(),
-                        &binding.route.conversation_id,
-                        None,
-                    )
-                    .await?;
-                    state_for_actor
-                        .hub
-                        .session_runtime()
-                        .prune_completed_turn_transcript(&session_key, 6)
-                        .await;
-                }
-            }
+            execute_continuation_step(
+                &state_for_actor,
+                &session_key,
+                &task_result,
+                &binding,
+                &completed_task,
+                step,
+            )
+            .await?;
 
             info!(
                 "Replied DingTalk task result for {} via session actor turn {}",
@@ -5315,7 +5493,7 @@ pub async fn reply_dingtalk_error(
     inbound: &DingTalkInboundMessage,
     error_message: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
+    let Some(channel) = state.dingtalk_channel() else {
         warn!("Skip DingTalk error reply because channel is unavailable");
         return Ok(());
     };
@@ -5331,7 +5509,8 @@ pub async fn reply_dingtalk_error(
         robot_code: inbound.robot_code.clone(),
     };
     let reply_text = format!("执行失败：{}", error_message);
-    let reply_handle = Some(create_dingtalk_reply_handle(channel, &route).await?);
+    let reply_adapter = DingTalkReplyAdapter::new(&channel);
+    let reply_handle = Some(reply_adapter.create_handle(&route).await?);
 
     let session_key = build_dingtalk_session_key(
         &inbound.session.channel_user_id,
@@ -5349,7 +5528,9 @@ pub async fn reply_dingtalk_error(
         )
         .await;
 
-    send_or_finalize_dingtalk_reply(channel, &route, &reply_text, reply_handle, None).await?;
+    reply_adapter
+        .send_or_finalize(&route, &reply_text, reply_handle, None)
+        .await?;
 
     info!(
         "Replied DingTalk immediate error for conversation {}",
@@ -5358,14 +5539,18 @@ pub async fn reply_dingtalk_error(
     Ok(())
 }
 
-fn resolve_dingtalk_reply_target(route: &DingTalkReplyRoute) -> Option<DingTalkReplyTarget> {
+fn resolve_dingtalk_reply_target(
+    route: &DingTalkReplyRoute,
+    capability_flags: ChannelCapabilityFlags,
+) -> Option<DingTalkReplyTarget> {
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let webhook_available = route.session_webhook.as_ref().is_some_and(|_| {
-        route
-            .session_webhook_expired_time
-            .map(|expires_at| now_ms < expires_at)
-            .unwrap_or(true)
-    });
+    let webhook_available = capability_flags.contains(ChannelCapabilityFlags::INBOUND_WEBHOOK)
+        && route.session_webhook.as_ref().is_some_and(|_| {
+            route
+                .session_webhook_expired_time
+                .map(|expires_at| now_ms < expires_at)
+                .unwrap_or(true)
+        });
 
     if webhook_available {
         let at_user_ids = route
@@ -5380,6 +5565,10 @@ fn resolve_dingtalk_reply_target(route: &DingTalkReplyRoute) -> Option<DingTalkR
                 webhook,
                 at_user_ids,
             });
+    }
+
+    if !capability_flags.contains(ChannelCapabilityFlags::SEND_TO_RECIPIENT) {
+        return None;
     }
 
     let is_group = matches!(route.conversation_type.as_deref(), Some("2"));
@@ -5434,18 +5623,35 @@ fn format_dingtalk_reply_text(reply_text: &str) -> String {
     formatted_lines.join("\n")
 }
 
-fn should_send_dingtalk_immediate_ack(step: &PlannedTurnStep) -> bool {
-    matches!(
-        step,
-        PlannedTurnStep::Finalize { .. }
-            | PlannedTurnStep::ExecuteSkill { .. }
-            | PlannedTurnStep::ListInstalledSkills
-            | PlannedTurnStep::QuerySkill { .. }
-            | PlannedTurnStep::InstallSkill { .. }
-    )
+fn supports_dingtalk_reply_handle(capability_flags: ChannelCapabilityFlags) -> bool {
+    capability_flags.contains(ChannelCapabilityFlags::REPLY_CONTEXT)
+        || capability_flags.contains(ChannelCapabilityFlags::SEND_TO_RECIPIENT)
+        || capability_flags.contains(ChannelCapabilityFlags::INBOUND_WEBHOOK)
 }
 
-fn should_attach_dingtalk_processing_ack_now(inbound: &DingTalkInboundMessage) -> bool {
+fn should_send_dingtalk_immediate_ack(
+    step: &PlannedTurnStep,
+    capability_flags: ChannelCapabilityFlags,
+) -> bool {
+    supports_dingtalk_reply_handle(capability_flags)
+        && matches!(
+            step,
+            PlannedTurnStep::Finalize { .. }
+                | PlannedTurnStep::ExecuteSkill { .. }
+                | PlannedTurnStep::ListInstalledSkills
+                | PlannedTurnStep::QuerySkill { .. }
+                | PlannedTurnStep::InstallSkill { .. }
+        )
+}
+
+fn should_attach_dingtalk_processing_ack_now(
+    inbound: &DingTalkInboundMessage,
+    capability_flags: ChannelCapabilityFlags,
+) -> bool {
+    if !supports_dingtalk_reply_handle(capability_flags) {
+        return false;
+    }
+
     let has_meaningful_text = match &inbound.message.content {
         MessageContent::Text(text) => !text.trim().is_empty(),
         MessageContent::Audio { .. } | MessageContent::Image { .. } => true,
@@ -5469,7 +5675,14 @@ fn should_enforce_min_ack_display(step: &PlannedTurnStep) -> bool {
     matches!(step, PlannedTurnStep::Finalize { .. })
 }
 
-fn resolve_dingtalk_ai_card_target(route: &DingTalkReplyRoute) -> Option<DingTalkAiCardTarget> {
+fn resolve_dingtalk_ai_card_target(
+    route: &DingTalkReplyRoute,
+    capability_flags: ChannelCapabilityFlags,
+) -> Option<DingTalkAiCardTarget> {
+    if !capability_flags.contains(ChannelCapabilityFlags::REPLY_CONTEXT) {
+        return None;
+    }
+
     if route.robot_code.is_none() {
         return None;
     }
@@ -5484,99 +5697,20 @@ fn resolve_dingtalk_ai_card_target(route: &DingTalkReplyRoute) -> Option<DingTal
     })
 }
 
-async fn create_dingtalk_reply_handle(
-    channel: &DingTalkChannel,
-    route: &DingTalkReplyRoute,
-) -> Result<DingTalkReplyHandle, Box<dyn std::error::Error + Send + Sync>> {
-    if let Some(target) = resolve_dingtalk_ai_card_target(route) {
-        if let Some(robot_code) = route.robot_code.as_deref() {
-            let Some(card_template_id) = channel.ai_card_template_id() else {
-                return Err("DingTalk AI card template id is not configured".into());
-            };
-            let reply_text = format_dingtalk_reply_text(DINGTALK_PROCESSING_ACK_TEXT);
-            let handle = channel
-                .create_ai_card(
-                    &target,
-                    robot_code,
-                    card_template_id,
-                    "processing",
-                    &reply_text,
-                )
-                .await?;
-            return Ok(DingTalkReplyHandle::AiCard {
-                handle,
-                attached_at: Instant::now(),
-            });
-        }
-    }
-
-    if let (Some(source_message_id), Some(robot_code)) = (
-        route.source_message_id.as_deref(),
-        route.robot_code.as_deref(),
-    ) {
-        match channel
-            .add_processing_reaction(robot_code, source_message_id, &route.conversation_id)
-            .await
-        {
-            Ok(handle) => {
-                return Ok(DingTalkReplyHandle::Reaction {
-                    handle,
-                    attached_at: Instant::now(),
-                })
-            },
-            Err(error) => {
-                warn!(
-                    conversation_id = %route.conversation_id,
-                    source_message_id = source_message_id,
-                    error = %error,
-                    "Attach DingTalk processing reaction failed, fallback to legacy processing handle"
-                );
-            }
-        }
-    }
-
-    let receipt = match resolve_dingtalk_reply_target(route) {
-        Some(DingTalkReplyTarget::SessionWebhook { .. }) => {
-            return Ok(DingTalkReplyHandle::Noop);
-        }
-        Some(DingTalkReplyTarget::GroupConversation { .. }) => None,
-        Some(DingTalkReplyTarget::DirectUser { .. }) => None,
-        None => {
-            warn!(
-                conversation_id = %route.conversation_id,
-                conversation_type = ?route.conversation_type,
-                sender_user_id = ?route.sender_user_id,
-                sender_staff_id = ?route.sender_staff_id,
-                has_session_webhook = route.session_webhook.is_some(),
-                session_webhook_expired_time = ?route.session_webhook_expired_time,
-                robot_code = ?route.robot_code,
-                "Skip DingTalk processing ack because no reply target could be resolved"
-            );
-            return Err("No DingTalk reply target could be resolved".into());
-        }
-    };
-
-    Ok(DingTalkReplyHandle::LegacyTransient {
-        receipt,
-        attached_at: Instant::now(),
-    })
-}
-
 async fn cleanup_dingtalk_reply_handle(
     state: &Arc<WebState>,
     task_id: &TaskId,
-    route: &DingTalkReplyRoute,
+    _route: &DingTalkReplyRoute,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let handle = {
-        let mut handles = state.dingtalk_reply_handles.write().await;
-        handles.remove(task_id)
-    };
+    let handle = state.take_dingtalk_reply_handle(task_id).await;
 
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
+    let Some(channel) = state.dingtalk_channel() else {
         return Ok(());
     };
 
-    cleanup_dingtalk_processing_handle(channel, route, handle, Some(task_id)).await
+    DingTalkReplyAdapter::new(&channel)
+        .cleanup_processing_handle(handle, Some(task_id))
+        .await
 }
 
 async fn finalize_dingtalk_reply_handle(
@@ -5585,16 +5719,15 @@ async fn finalize_dingtalk_reply_handle(
     route: &DingTalkReplyRoute,
     reply_text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let handle = {
-        let mut handles = state.dingtalk_reply_handles.write().await;
-        handles.remove(task_id)
-    };
+    let handle = state.take_dingtalk_reply_handle(task_id).await;
 
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
+    let Some(channel) = state.dingtalk_channel() else {
         return Ok(());
     };
 
-    send_or_finalize_dingtalk_reply(channel, route, reply_text, handle, Some(task_id)).await
+    DingTalkReplyAdapter::new(&channel)
+        .send_or_finalize(route, reply_text, handle, Some(task_id))
+        .await
 }
 
 async fn enforce_dingtalk_ack_min_display(
@@ -5610,116 +5743,6 @@ async fn enforce_dingtalk_ack_min_display(
     }
 }
 
-async fn cleanup_dingtalk_processing_handle(
-    channel: &DingTalkChannel,
-    _route: &DingTalkReplyRoute,
-    reply_handle: Option<DingTalkReplyHandle>,
-    task_id: Option<&TaskId>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match reply_handle {
-        Some(DingTalkReplyHandle::AiCard { handle, .. }) => {
-            if let Err(error) = channel.finalize_ai_card(&handle, DINGTALK_CANCELLED_TEXT).await {
-                warn!(task_id = ?task_id, error = %error, "Finalize DingTalk AI card failed during cleanup");
-            }
-        }
-        Some(DingTalkReplyHandle::Reaction { handle, .. }) => {
-            if let Err(error) = channel.recall_processing_reaction(&handle).await {
-                warn!(task_id = ?task_id, error = %error, "Recall DingTalk processing reaction failed during cleanup");
-            }
-        }
-        Some(DingTalkReplyHandle::LegacyTransient { receipt, .. }) => {
-            let outcome = channel.clear_processing_ack(receipt.as_ref()).await?;
-            if matches!(outcome, DingTalkTransientClearOutcome::Unsupported) {
-                info!(task_id = ?task_id, "DingTalk transient ack clear is unsupported during cleanup");
-            }
-        }
-        Some(DingTalkReplyHandle::Noop) | None => {}
-    }
-
-    Ok(())
-}
-
-async fn send_or_finalize_dingtalk_reply(
-    channel: &DingTalkChannel,
-    route: &DingTalkReplyRoute,
-    reply_text: &str,
-    reply_handle: Option<DingTalkReplyHandle>,
-    task_id: Option<&TaskId>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match reply_handle {
-        Some(DingTalkReplyHandle::AiCard { handle, .. }) => {
-            if let Err(error) = channel.finalize_ai_card(&handle, reply_text).await {
-                warn!(task_id = ?task_id, error = %error, "Finalize DingTalk AI card failed, fallback to markdown reply");
-                send_dingtalk_reply(channel, route, reply_text).await?;
-            }
-        }
-        Some(DingTalkReplyHandle::Reaction { handle, .. }) => {
-            if let Err(error) = channel.recall_processing_reaction(&handle).await {
-                warn!(task_id = ?task_id, error = %error, "Recall DingTalk processing reaction failed; continue with final reply");
-            }
-            send_dingtalk_reply(channel, route, reply_text).await?;
-        }
-        Some(DingTalkReplyHandle::LegacyTransient { receipt, .. }) => {
-            let outcome = channel.clear_processing_ack(receipt.as_ref()).await?;
-            if matches!(outcome, DingTalkTransientClearOutcome::Unsupported) {
-                info!(task_id = ?task_id, "DingTalk transient ack clear is unsupported; continue with final reply");
-            }
-            send_dingtalk_reply(channel, route, reply_text).await?;
-        }
-        Some(DingTalkReplyHandle::Noop) => {
-            if reply_text != DINGTALK_PROCESSING_ACK_TEXT {
-                send_dingtalk_reply(channel, route, reply_text).await?;
-            }
-        }
-        None => {
-            send_dingtalk_reply(channel, route, reply_text).await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn send_dingtalk_reply(
-    channel: &DingTalkChannel,
-    route: &DingTalkReplyRoute,
-    reply_text: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let reply_text = format_dingtalk_reply_text(reply_text);
-
-    match resolve_dingtalk_reply_target(route) {
-        Some(DingTalkReplyTarget::SessionWebhook {
-            webhook,
-            at_user_ids,
-        }) => {
-            channel
-                .reply_via_session_webhook_markdown(&webhook, "uHorse", &reply_text, &at_user_ids)
-                .await?;
-        }
-        Some(DingTalkReplyTarget::GroupConversation { conversation_id }) => {
-            channel
-                .send_group_markdown_message(&conversation_id, "uHorse", &reply_text)
-                .await?;
-        }
-        Some(DingTalkReplyTarget::DirectUser { user_id }) => {
-            channel.send_markdown(&user_id, "uHorse", &reply_text).await?;
-        }
-        None => {
-            warn!(
-                conversation_id = %route.conversation_id,
-                conversation_type = ?route.conversation_type,
-                sender_user_id = ?route.sender_user_id,
-                sender_staff_id = ?route.sender_staff_id,
-                has_session_webhook = route.session_webhook.is_some(),
-                session_webhook_expired_time = ?route.session_webhook_expired_time,
-                robot_code = ?route.robot_code,
-                "Skip DingTalk reply because no reply target could be resolved"
-            );
-            return Err("No DingTalk reply target could be resolved".into());
-        }
-    }
-
-    Ok(())
-}
 
 async fn build_task_result_reply_text(state: &Arc<WebState>, task_result: &TaskResult) -> String {
     let Some(completed_task) = state.hub.get_completed_task(&task_result.task_id).await else {
@@ -5733,6 +5756,37 @@ async fn build_task_result_reply_text(state: &Arc<WebState>, task_result: &TaskR
     summarize_task_result_or_fallback(state, &completed_task).await
 }
 
+async fn finalize_task_result_reply(
+    state: &Arc<WebState>,
+    task_id: &TaskId,
+    route: &DingTalkReplyRoute,
+    reply_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let Some(_channel) = state.dingtalk_channel() else {
+        warn!("Skip DingTalk reply because channel is unavailable");
+        return Ok(());
+    };
+
+    finalize_dingtalk_reply_handle(state, task_id, route, reply_text).await
+}
+
+async fn reply_task_result_without_continuation(
+    state: &Arc<WebState>,
+    task_result: &TaskResult,
+    route: DingTalkReplyRoute,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let completed_task = state.hub.get_completed_task(&task_result.task_id).await;
+    let reply_text = build_task_result_reply_text(state, task_result).await;
+
+    if let Some(completed_task) = completed_task.as_ref() {
+        persist_task_result_memory(state, completed_task, &reply_text).await;
+    }
+
+    finalize_task_result_reply(state, &task_result.task_id, &route, &reply_text).await?;
+    info!("Replied DingTalk task result for {}", task_result.task_id);
+    Ok(())
+}
+
 fn parse_dingtalk_binding_session_key(binding: &TaskContinuationBinding) -> SessionKey {
     build_dingtalk_session_key(
         &binding.route.conversation_id,
@@ -5740,6 +5794,330 @@ fn parse_dingtalk_binding_session_key(binding: &TaskContinuationBinding) -> Sess
         binding.route.sender_staff_id.as_deref(),
         None,
     )
+}
+
+async fn complete_continuation_with_reply(
+    state: &Arc<WebState>,
+    session_key: &str,
+    task_id: &TaskId,
+    route: &DingTalkReplyRoute,
+    completed_task: &CompletedTask,
+    reply_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    persist_task_result_memory(state, completed_task, reply_text).await;
+    finalize_task_result_reply(state, task_id, route, reply_text).await?;
+    state
+        .hub
+        .session_runtime()
+        .complete_turn(session_key, Some(task_id))
+        .await;
+    state
+        .hub
+        .session_runtime()
+        .prune_completed_turn_transcript(session_key, 6)
+        .await;
+    Ok(())
+}
+
+async fn handle_continuation_missing_completed_task(
+    state: &Arc<WebState>,
+    session_key: &str,
+    task_result: &TaskResult,
+    route: &DingTalkReplyRoute,
+    reply_text: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    state
+        .metrics_collector
+        .inc_continuations("task_result_without_completed_task");
+    if state.dingtalk_channel().is_none() {
+        warn!("Skip DingTalk reply because channel is unavailable");
+        state
+            .hub
+            .session_runtime()
+            .fail_turn(session_key, Some(&task_result.task_id))
+            .await;
+        return Ok(());
+    }
+    finalize_task_result_reply(state, &task_result.task_id, route, reply_text).await?;
+    state
+        .hub
+        .session_runtime()
+        .complete_turn(session_key, Some(&task_result.task_id))
+        .await;
+    Ok(())
+}
+
+async fn handle_continuation_cancelled_turn(
+    state: &Arc<WebState>,
+    session_key: &str,
+    task_id: &TaskId,
+    route: &DingTalkReplyRoute,
+    completed_task: &CompletedTask,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if state.dingtalk_channel().is_some() {
+        cleanup_dingtalk_reply_handle(state, task_id, route).await?;
+    }
+    state
+        .hub
+        .session_runtime()
+        .prune_completed_turn_transcript(session_key, 6)
+        .await;
+    info!(
+        "Skip continuation for {} because session turn was cancelled",
+        completed_task.task_id
+    );
+    Ok(())
+}
+
+async fn handle_continuation_max_steps_exceeded(
+    state: &Arc<WebState>,
+    session_key: &str,
+    task_id: &TaskId,
+    route: &DingTalkReplyRoute,
+    completed_task: &CompletedTask,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let reply_text = summarize_task_result_or_fallback(state, completed_task).await;
+    state
+        .hub
+        .session_runtime()
+        .append_transcript_event(
+            session_key,
+            TranscriptEventKind::AssistantFinal,
+            reply_text.clone(),
+        )
+        .await;
+    complete_continuation_with_reply(
+        state,
+        session_key,
+        task_id,
+        route,
+        completed_task,
+        &reply_text,
+    )
+    .await
+}
+
+async fn plan_continuation_step_with_retry(
+    state: &Arc<WebState>,
+    session_key: &str,
+    binding: &TaskContinuationBinding,
+    completed_task: &CompletedTask,
+) -> PlannedTurnStep {
+    match continue_task_result(state, binding, completed_task).await {
+        Ok(step) => {
+            state
+                .hub
+                .session_runtime()
+                .reset_planner_retry(session_key)
+                .await;
+            step
+        }
+        Err(error) => {
+            warn!(
+                "Failed to continue task result with LLM for {}: {}",
+                completed_task.task_id, error
+            );
+            state
+                .metrics_collector
+                .inc_planner_retries("continuation_error");
+            state
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    session_key,
+                    TranscriptEventKind::PlannerRetry,
+                    error.to_string(),
+                )
+                .await;
+            let retry_state = state
+                .hub
+                .session_runtime()
+                .increment_planner_retry(session_key)
+                .await;
+            if let Some(retry_state) = retry_state {
+                if retry_state.planner_retry_count <= retry_state.max_planner_retries {
+                    let compact_summary = format!(
+                        "user_request: {}; last_command: {}; last_result: {}",
+                        completed_task.context.intent.clone().unwrap_or_default(),
+                        serde_json::to_string(&completed_task.command)
+                            .unwrap_or_else(|_| "{}".to_string()),
+                        serde_json::to_string(&completed_task.result)
+                            .unwrap_or_else(|_| "{}".to_string())
+                    );
+                    state
+                        .hub
+                        .session_runtime()
+                        .record_compaction(
+                            session_key,
+                            compact_summary.clone(),
+                            state
+                                .hub
+                                .session_runtime()
+                                .transcript(session_key)
+                                .await
+                                .map(|transcript| transcript.events.len())
+                                .unwrap_or_default(),
+                        )
+                        .await;
+                    state
+                        .hub
+                        .session_runtime()
+                        .append_transcript_event(
+                            session_key,
+                            TranscriptEventKind::TurnCompacted,
+                            compact_summary,
+                        )
+                        .await;
+                    match continue_task_result(state, binding, completed_task).await {
+                        Ok(step) => {
+                            state
+                                .hub
+                                .session_runtime()
+                                .reset_planner_retry(session_key)
+                                .await;
+                            step
+                        }
+                        Err(retry_error) => {
+                            warn!(
+                                "Retry continuation failed for {}: {}",
+                                completed_task.task_id, retry_error
+                            );
+                            PlannedTurnStep::Finalize {
+                                text: summarize_task_result_or_fallback(state, completed_task).await,
+                            }
+                        }
+                    }
+                } else {
+                    PlannedTurnStep::Finalize {
+                        text: summarize_task_result_or_fallback(state, completed_task).await,
+                    }
+                }
+            } else {
+                PlannedTurnStep::Finalize {
+                    text: summarize_task_result_or_fallback(state, completed_task).await,
+                }
+            }
+        }
+    }
+}
+
+async fn execute_continuation_step(
+    state: &Arc<WebState>,
+    session_key: &str,
+    task_result: &TaskResult,
+    binding: &TaskContinuationBinding,
+    completed_task: &CompletedTask,
+    step: PlannedTurnStep,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match step {
+        PlannedTurnStep::Finalize { text: reply_text } => {
+            state
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    session_key,
+                    TranscriptEventKind::AssistantFinal,
+                    reply_text.clone(),
+                )
+                .await;
+            complete_continuation_with_reply(
+                state,
+                session_key,
+                &task_result.task_id,
+                &binding.route,
+                completed_task,
+                &reply_text,
+            )
+            .await?;
+        }
+        PlannedTurnStep::SubmitTask {
+            command,
+            workspace_path,
+        } => {
+            let online_nodes = state.hub.get_online_nodes().await;
+            let online_workspace_roots = collect_online_workspace_roots(&online_nodes);
+            let workspace_hint = workspace_path
+                .or_else(|| resolve_default_workspace_root(&online_workspace_roots))
+                .ok_or_else(|| "workspace_path is required for continuation task".to_string())?;
+            let required_capabilities = match &command {
+                Command::Browser(_) => Some(NodeCapabilities {
+                    supported_commands: vec![CommandType::Browser],
+                    ..NodeCapabilities::default()
+                }),
+                _ => None,
+            };
+            validate_planned_command(&command, &workspace_hint)?;
+            let mut task_context = completed_task.context.clone();
+            task_context.intent = completed_task.context.intent.clone();
+            let tool_call_id = state
+                .hub
+                .session_runtime()
+                .begin_tool_call(session_key, "hub_task")
+                .await
+                .ok_or_else(|| "session turn is missing before continuation task submission".to_string())?;
+            state
+                .hub
+                .session_runtime()
+                .append_transcript_event(
+                    session_key,
+                    TranscriptEventKind::ToolCallPlanned,
+                    format!("{}:{}", tool_call_id, "hub_task"),
+                )
+                .await;
+            let task_id = state
+                .hub
+                .submit_task(
+                    command,
+                    task_context,
+                    uhorse_protocol::Priority::Normal,
+                    required_capabilities,
+                    vec![],
+                    Some(workspace_hint),
+                )
+                .await?;
+            state
+                .hub
+                .session_runtime()
+                .bind_task_to_turn(
+                    task_id.clone(),
+                    TaskContinuationBinding {
+                        session_key: binding.session_key.clone(),
+                        turn_id: binding.turn_id.clone(),
+                        tool_call_id,
+                        agent_id: binding.agent_id.clone(),
+                        route: binding.route.clone(),
+                    },
+                )
+                .await;
+        }
+        PlannedTurnStep::ExecuteSkill { .. }
+        | PlannedTurnStep::ListInstalledSkills
+        | PlannedTurnStep::QuerySkill { .. }
+        | PlannedTurnStep::InstallSkill { .. } => {
+            let continuation_session_key = parse_dingtalk_binding_session_key(binding);
+            execute_local_turn_step(
+                state,
+                &binding.route,
+                &continuation_session_key,
+                &binding.agent_id,
+                completed_task.context.intent.as_deref().unwrap_or_default(),
+                &step,
+                &[],
+                binding.route.sender_user_id.as_deref(),
+                binding.route.sender_staff_id.as_deref(),
+                continuation_session_key.team_id.as_deref(),
+                &binding.route.conversation_id,
+                None,
+            )
+            .await?;
+            state
+                .hub
+                .session_runtime()
+                .prune_completed_turn_transcript(session_key, 6)
+                .await;
+        }
+    }
+    Ok(())
 }
 
 async fn continue_task_result(
@@ -6020,6 +6398,12 @@ fn format_task_result_message(result: &uhorse_protocol::CommandResult) -> String
 async fn get_stats(State(state): State<Arc<WebState>>) -> Json<ApiResponse<HubStats>> {
     let stats = state.hub.get_stats().await;
     Json(ApiResponse::success(stats))
+}
+
+async fn list_channels(
+    State(state): State<Arc<WebState>>,
+) -> Json<ApiResponse<Vec<ChannelCapabilityView>>> {
+    Json(ApiResponse::success(state.channel_capability_views()))
 }
 
 async fn list_runtime_agents(
@@ -6961,11 +7345,11 @@ async fn try_handle_dingtalk_pairing_command(
     };
 
     let route = reply_route_from_inbound(inbound);
-    let Some(channel) = state.dingtalk_channel.as_ref() else {
-        return Err("DingTalk channel is not configured".into());
-    };
+    let channel = state.require_dingtalk_channel("DingTalk channel is not configured")?;
 
-    send_dingtalk_reply(channel, &route, &reply_text).await?;
+    DingTalkReplyAdapter::new(&channel)
+                .send(&route, &reply_text)
+                .await?;
     Ok(true)
 }
 
@@ -7820,6 +8204,49 @@ mod tests {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn list_channels_returns_registered_capabilities() {
+        let runtime = create_test_runtime().await;
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let dingtalk = Arc::new(DingTalkChannel::new(
+            "app-key".to_string(),
+            "app-secret".to_string(),
+            1,
+            None,
+        ));
+        let state = Arc::new(WebState::new_with_runtime(
+            Arc::new(hub),
+            Some(dingtalk),
+            None,
+            None,
+            runtime,
+        ));
+
+        let (status, body) = get_json(create_router((*state).clone()), "/api/channels").await;
+
+        assert_eq!(status, StatusCode::OK);
+        let data = body["data"].as_array().unwrap();
+        assert_eq!(data.len(), 5);
+        let dingtalk = data
+            .iter()
+            .find(|item| item["channel_type"] == "DingTalk")
+            .unwrap();
+        assert_eq!(dingtalk["registered"], true);
+        assert_eq!(
+            dingtalk["capabilities"],
+            json!(["send_to_recipient", "inbound_webhook", "reply_context"])
+        );
+
+        let slack = data
+            .iter()
+            .find(|item| item["channel_type"] == "Slack")
+            .unwrap();
+        assert_eq!(slack["registered"], false);
+        assert_eq!(slack["capabilities"], json!([]));
+        assert!(data.iter().all(|item| item["channel_type"] != "Feishu"));
+        assert!(data.iter().all(|item| item["channel_type"] != "WeWork"));
+    }
+
     fn build_test_skill_archive(skill_name: &str, skill_toml: &str) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut builder = tar::Builder::new(encoder);
@@ -8368,6 +8795,28 @@ mod tests {
         assert_eq!(custom_status, StatusCode::OK);
         assert_eq!(body["status"], json!("healthy"));
         assert_eq!(legacy_status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_channel_webhook_verify_routes_dingtalk_path() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new(Arc::new(hub), None, None));
+
+        let (status, body, _) = get_text(app, "/api/v1/channels/dingtalk/webhook").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, "DingTalk webhook endpoint is ready");
+    }
+
+    #[tokio::test]
+    async fn test_channel_webhook_verify_rejects_unknown_channel() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let app = create_router(WebState::new(Arc::new(hub), None, None));
+
+        let (status, body, _) = get_text(app, "/api/v1/channels/slack/webhook").await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body, "Unsupported channel: slack");
     }
 
     #[tokio::test]
@@ -10211,6 +10660,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_web_state_require_dingtalk_channel_reads_from_registry() {
+        let (hub, _rx) = Hub::new(HubConfig::default());
+        let channel = Arc::new(DingTalkChannel::new(
+            "key".to_string(),
+            "secret".to_string(),
+            1,
+            None,
+        ));
+        let state = WebState::new(Arc::new(hub), Some(Arc::clone(&channel)), None);
+
+        let resolved = state
+            .require_dingtalk_channel("DingTalk channel is unavailable")
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&resolved, &channel));
+    }
+
+    #[tokio::test]
     async fn test_reply_task_result_skips_continuation_when_turn_cancelled() {
         let runtime = create_test_runtime().await;
         let (hub, mut task_result_rx) = Hub::new(HubConfig::default());
@@ -10291,13 +10758,15 @@ mod tests {
         hub.task_scheduler()
             .insert_completed_task_for_test(completed_task)
             .await;
-        state.dingtalk_reply_handles.write().await.insert(
-            task_id.clone(),
-            DingTalkReplyHandle::LegacyTransient {
-                receipt: Some(DingTalkTransientMessageReceipt::unsupported()),
-                attached_at: Instant::now(),
-            },
-        );
+        state
+            .insert_dingtalk_reply_handle(
+                task_id.clone(),
+                DingTalkReplyHandle::LegacyTransient {
+                    receipt: Some(DingTalkTransientMessageReceipt::unsupported()),
+                    attached_at: Instant::now(),
+                },
+            )
+            .await;
 
         reply_task_result(
             state.clone(),
@@ -10342,7 +10811,7 @@ mod tests {
             event.kind == crate::session_runtime::TranscriptEventKind::AssistantStep
                 && event.content.contains("SubmitTask")
         }));
-        assert!(!state.dingtalk_reply_handles.read().await.contains_key(&task_id));
+        assert!(!state.has_dingtalk_reply_handle(&task_id).await);
     }
 
     #[tokio::test]
@@ -11092,13 +11561,11 @@ mod tests {
         assert_eq!(status.status, TaskStatus::Running);
         assert_eq!(status.node_id.as_ref(), Some(&node_id));
 
-        let routes = state.dingtalk_routes.read().await;
-        let route = routes.get(&task_id).unwrap();
+        let route = state.get_dingtalk_reply_route(&task_id).await.unwrap();
         assert_eq!(route.conversation_id, "conv-submit");
         assert_eq!(route.sender_user_id.as_deref(), Some("actual-user"));
         assert_eq!(route.sender_staff_id.as_deref(), Some("staff-1"));
         assert_eq!(route.robot_code.as_deref(), Some("robot-1"));
-        drop(routes);
 
         let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
         let scope = runtime.agent_manager.get_scope("main").unwrap();
@@ -11523,7 +11990,7 @@ mod tests {
         assert_eq!(task_result.task_id, task_id);
         assert!(task_result.result.success);
         assert_eq!(format_task_result_message(&task_result.result), "页面正文");
-        assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
+        assert!(state.has_dingtalk_reply_route(&task_id).await);
 
         let completed_task = hub.get_completed_task(&task_id).await.unwrap();
         assert_eq!(
@@ -11532,8 +11999,8 @@ mod tests {
         );
 
         reply_task_result(state.clone(), task_result).await.unwrap();
-        assert!(state.dingtalk_routes.read().await.contains_key(&task_id));
-        assert!(!state.dingtalk_reply_handles.read().await.contains_key(&task_id));
+        assert!(state.has_dingtalk_reply_route(&task_id).await);
+        assert!(!state.has_dingtalk_reply_handle(&task_id).await);
     }
 
     #[tokio::test]
@@ -11635,9 +12102,7 @@ mod tests {
             other => panic!("unexpected message: {:?}", other),
         };
 
-        let routes = state.dingtalk_routes.read().await;
-        assert!(routes.contains_key(&task_id));
-        drop(routes);
+        assert!(state.has_dingtalk_reply_route(&task_id).await);
 
     }
 
@@ -11656,13 +12121,15 @@ mod tests {
             runtime,
         ));
         let task_id = TaskId::new();
-        state.dingtalk_reply_handles.write().await.insert(
-            task_id.clone(),
-            DingTalkReplyHandle::LegacyTransient {
-                receipt: Some(DingTalkTransientMessageReceipt::unsupported()),
-                attached_at: Instant::now(),
-            },
-        );
+        state
+            .insert_dingtalk_reply_handle(
+                task_id.clone(),
+                DingTalkReplyHandle::LegacyTransient {
+                    receipt: Some(DingTalkTransientMessageReceipt::unsupported()),
+                    attached_at: Instant::now(),
+                },
+            )
+            .await;
 
         let route = DingTalkReplyRoute {
             conversation_id: "conv-1".to_string(),
@@ -11677,7 +12144,7 @@ mod tests {
         finalize_dingtalk_reply_handle(&state, &task_id, &route, "done")
             .await
             .unwrap();
-        assert!(!state.dingtalk_reply_handles.read().await.contains_key(&task_id));
+        assert!(!state.has_dingtalk_reply_handle(&task_id).await);
     }
 
     #[tokio::test]
@@ -11694,7 +12161,8 @@ mod tests {
             robot_code: Some("robot-1".to_string()),
         };
 
-        let handle = create_dingtalk_reply_handle(&channel, &route)
+        let handle = DingTalkReplyAdapter::new(&channel)
+            .create_handle(&route)
             .await
             .unwrap();
 
@@ -11899,7 +12367,7 @@ mod tests {
         };
 
         assert_eq!(
-            resolve_dingtalk_reply_target(&route),
+            resolve_dingtalk_reply_target(&route, ChannelCapabilityFlags::SEND_TO_RECIPIENT | ChannelCapabilityFlags::INBOUND_WEBHOOK),
             Some(DingTalkReplyTarget::SessionWebhook {
                 webhook: "https://example.com/hook".to_string(),
                 at_user_ids: vec!["staff-1".to_string()],
@@ -11921,7 +12389,7 @@ mod tests {
         };
 
         assert_eq!(
-            resolve_dingtalk_reply_target(&route),
+            resolve_dingtalk_reply_target(&route, ChannelCapabilityFlags::SEND_TO_RECIPIENT | ChannelCapabilityFlags::INBOUND_WEBHOOK),
             Some(DingTalkReplyTarget::SessionWebhook {
                 webhook: "https://example.com/hook".to_string(),
                 at_user_ids: vec!["staff-1".to_string()],
@@ -11943,7 +12411,7 @@ mod tests {
         };
 
         assert_eq!(
-            resolve_dingtalk_reply_target(&route),
+            resolve_dingtalk_reply_target(&route, ChannelCapabilityFlags::SEND_TO_RECIPIENT | ChannelCapabilityFlags::INBOUND_WEBHOOK),
             Some(DingTalkReplyTarget::GroupConversation {
                 conversation_id: "conv-group".to_string(),
             })
@@ -11964,7 +12432,7 @@ mod tests {
         };
 
         assert_eq!(
-            resolve_dingtalk_reply_target(&route),
+            resolve_dingtalk_reply_target(&route, ChannelCapabilityFlags::SEND_TO_RECIPIENT | ChannelCapabilityFlags::INBOUND_WEBHOOK),
             Some(DingTalkReplyTarget::DirectUser {
                 user_id: "user-1".to_string(),
             })
@@ -12037,8 +12505,8 @@ mod tests {
         let assignment =
             tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(assignment.is_err());
-        assert!(state.dingtalk_routes.read().await.is_empty());
-        assert!(state.dingtalk_reply_handles.read().await.is_empty());
+        assert_eq!(state.dingtalk_reply_route_count().await, 0);
+        assert_eq!(state.dingtalk_reply_handle_count().await, 0);
 
         let session_key = SessionKey::with_team("dingtalk", "actual-user", "corp-1");
         let history = runtime
@@ -12192,7 +12660,7 @@ mod tests {
         assert!(history.contains("**User:** 帮我列出已经安装的技能"));
         assert!(history.contains("当前已安装 1 个 Skill"));
         assert!(history.contains("- echo：echo skill"));
-        assert!(state.dingtalk_routes.read().await.is_empty());
+        assert_eq!(state.dingtalk_reply_route_count().await, 0);
     }
 
     #[tokio::test]
@@ -12244,7 +12712,7 @@ mod tests {
             .unwrap();
         assert!(history.contains("**User:** phase1 测试"));
         assert!(history.contains("**Assistant:** 串行答复"));
-        assert!(state.dingtalk_routes.read().await.is_empty());
+        assert_eq!(state.dingtalk_reply_route_count().await, 0);
     }
 
     #[tokio::test]
@@ -13043,6 +13511,31 @@ args = ["-c", "print('manual')"]
     }
 
     #[test]
+    fn test_dingtalk_reply_route_converts_to_reply_context() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-1".to_string(),
+            source_message_id: Some("msg-1".to_string()),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: Some(123456789),
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        let context = ReplyContext::from(&route);
+        assert_eq!(context.channel_type, uhorse_core::ChannelType::DingTalk);
+        assert_eq!(context.conversation_id, "conv-1");
+        assert_eq!(context.source_message_id.as_deref(), Some("msg-1"));
+        assert_eq!(context.reply_webhook.as_deref(), Some("https://example.com/hook"));
+        assert_eq!(context.reply_webhook_expires_at, Some(123456789));
+        assert_eq!(context.sender_recipient.as_deref(), Some("user-1"));
+        assert_eq!(context.metadata.get("conversation_type").map(String::as_str), Some("2"));
+        assert_eq!(context.metadata.get("sender_staff_id").map(String::as_str), Some("staff-1"));
+        assert_eq!(context.metadata.get("robot_code").map(String::as_str), Some("robot-1"));
+    }
+
+    #[test]
     fn test_resolve_dingtalk_reply_target_returns_none_without_webhook_group_or_user() {
         let route = DingTalkReplyRoute {
             conversation_id: "conv-missing".to_string(),
@@ -13055,7 +13548,7 @@ args = ["-c", "print('manual')"]
             robot_code: Some("robot-1".to_string()),
         };
 
-        assert_eq!(resolve_dingtalk_reply_target(&route), None);
+        assert_eq!(resolve_dingtalk_reply_target(&route, ChannelCapabilityFlags::SEND_TO_RECIPIENT | ChannelCapabilityFlags::INBOUND_WEBHOOK), None);
     }
 
     #[test]
@@ -13072,7 +13565,7 @@ args = ["-c", "print('manual')"]
         };
 
         assert_eq!(
-            resolve_dingtalk_ai_card_target(&route),
+            resolve_dingtalk_ai_card_target(&route, ChannelCapabilityFlags::REPLY_CONTEXT),
             Some(DingTalkAiCardTarget::ImGroup {
                 conversation_id: "conv-group".to_string(),
             })
@@ -13092,7 +13585,7 @@ args = ["-c", "print('manual')"]
             robot_code: Some("robot-1".to_string()),
         };
 
-        assert_eq!(resolve_dingtalk_ai_card_target(&route), None);
+        assert_eq!(resolve_dingtalk_ai_card_target(&route, ChannelCapabilityFlags::REPLY_CONTEXT), None);
     }
 
     #[test]
@@ -13118,8 +13611,52 @@ args = ["-c", "print('manual')"]
             robot_code: Some("robot-1".to_string()),
         };
 
-        assert_eq!(resolve_dingtalk_ai_card_target(&missing_robot_route), None);
-        assert_eq!(resolve_dingtalk_ai_card_target(&private_route), None);
+        assert_eq!(
+            resolve_dingtalk_ai_card_target(&missing_robot_route, ChannelCapabilityFlags::REPLY_CONTEXT),
+            None
+        );
+        assert_eq!(
+            resolve_dingtalk_ai_card_target(&private_route, ChannelCapabilityFlags::REPLY_CONTEXT),
+            None
+        );
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_reply_target_returns_none_without_send_capability() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-no-send".to_string(),
+            source_message_id: None,
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: Some("https://example.com/hook".to_string()),
+            session_webhook_expired_time: Some(chrono::Utc::now().timestamp_millis() + 60_000),
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_reply_target(&route, ChannelCapabilityFlags::REPLY_CONTEXT),
+            None
+        );
+    }
+
+    #[test]
+    fn test_resolve_dingtalk_ai_card_target_requires_reply_context_capability() {
+        let route = DingTalkReplyRoute {
+            conversation_id: "conv-group".to_string(),
+            source_message_id: None,
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+        };
+
+        assert_eq!(
+            resolve_dingtalk_ai_card_target(&route, ChannelCapabilityFlags::SEND_TO_RECIPIENT),
+            None
+        );
     }
 
     #[tokio::test]
@@ -13136,7 +13673,8 @@ args = ["-c", "print('manual')"]
             robot_code: Some("robot-1".to_string()),
         };
 
-        let error = send_dingtalk_reply(&channel, &route, "hello")
+        let error = DingTalkReplyAdapter::new(&channel)
+            .send(&route, "hello")
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), "No DingTalk reply target could be resolved");
@@ -13168,32 +13706,62 @@ args = ["-c", "print('manual')"]
 
     #[test]
     fn test_should_send_dingtalk_immediate_ack_for_direct_reply_and_local_skill_steps() {
-        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::Finalize {
-            text: "done".to_string(),
-        }));
-        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::ExecuteSkill {
-            skill_name: "echo".to_string(),
-            input: "hello".to_string(),
-        }));
-        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::ListInstalledSkills));
-        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::QuerySkill {
-            skill_name: "echo".to_string(),
-        }));
-        assert!(should_send_dingtalk_immediate_ack(&PlannedTurnStep::InstallSkill {
-            query: "agent-browser".to_string(),
-        }));
+        let capability_flags = ChannelCapabilityFlags::SEND_TO_RECIPIENT;
+
+        assert!(should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::Finalize {
+                text: "done".to_string(),
+            },
+            capability_flags,
+        ));
+        assert!(should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::ExecuteSkill {
+                skill_name: "echo".to_string(),
+                input: "hello".to_string(),
+            },
+            capability_flags,
+        ));
+        assert!(should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::ListInstalledSkills,
+            capability_flags,
+        ));
+        assert!(should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::QuerySkill {
+                skill_name: "echo".to_string(),
+            },
+            capability_flags,
+        ));
+        assert!(should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::InstallSkill {
+                query: "agent-browser".to_string(),
+            },
+            capability_flags,
+        ));
     }
 
     #[test]
     fn test_should_not_send_dingtalk_immediate_ack_for_submit_task_step() {
-        assert!(!should_send_dingtalk_immediate_ack(&PlannedTurnStep::SubmitTask {
-            command: Command::File(FileCommand::List {
-                path: ".".to_string(),
-                recursive: false,
-                pattern: None,
-            }),
-            workspace_path: Some("/tmp/workspace".to_string()),
-        }));
+        assert!(!should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::SubmitTask {
+                command: Command::File(FileCommand::List {
+                    path: ".".to_string(),
+                    recursive: false,
+                    pattern: None,
+                }),
+                workspace_path: Some("/tmp/workspace".to_string()),
+            },
+            ChannelCapabilityFlags::SEND_TO_RECIPIENT,
+        ));
+    }
+
+    #[test]
+    fn test_should_not_send_dingtalk_immediate_ack_without_reply_handle_capability() {
+        assert!(!should_send_dingtalk_immediate_ack(
+            &PlannedTurnStep::Finalize {
+                text: "done".to_string(),
+            },
+            ChannelCapabilityFlags::empty(),
+        ));
     }
 
     #[test]
@@ -13222,7 +13790,42 @@ args = ["-c", "print('manual')"]
             attachments: vec![],
         };
 
-        assert!(should_attach_dingtalk_processing_ack_now(&inbound));
+        assert!(should_attach_dingtalk_processing_ack_now(
+            &inbound,
+            ChannelCapabilityFlags::SEND_TO_RECIPIENT,
+        ));
+    }
+
+    #[test]
+    fn test_should_not_attach_dingtalk_processing_ack_without_reply_handle_capability() {
+        let session = uhorse_core::Session::new(
+            uhorse_core::ChannelType::DingTalk,
+            "fallback-user".to_string(),
+        );
+        let inbound = DingTalkInboundMessage {
+            message: uhorse_core::Message::new(
+                session.id.clone(),
+                uhorse_core::MessageRole::User,
+                MessageContent::Text("你好".to_string()),
+                1,
+            ),
+            session,
+            conversation_id: "conv-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            conversation_type: Some("2".to_string()),
+            sender_user_id: Some("user-1".to_string()),
+            sender_staff_id: Some("staff-1".to_string()),
+            sender_corp_id: Some("corp-1".to_string()),
+            session_webhook: None,
+            session_webhook_expired_time: None,
+            robot_code: Some("robot-1".to_string()),
+            attachments: vec![],
+        };
+
+        assert!(!should_attach_dingtalk_processing_ack_now(
+            &inbound,
+            ChannelCapabilityFlags::empty(),
+        ));
     }
 
     #[tokio::test]

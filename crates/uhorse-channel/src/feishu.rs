@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 use uhorse_core::{
-    Channel, ChannelError, ChannelType, Message, MessageContent, MessageRole, Result, Session,
-    UHorseError,
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, Message,
+    MessageContent, MessageRole, Result, Session, UHorseError,
 };
 
 /// 飞书 API 响应
@@ -652,17 +652,31 @@ impl Channel for FeishuChannel {
         ChannelType::Feishu
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending Feishu message to {}: {:?}", user_id, message);
+        if recipient.channel_type != ChannelType::Feishu {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
+
+        debug!(
+            "Sending Feishu message to {}: {:?}",
+            recipient.recipient, message
+        );
 
         match message {
             MessageContent::Text(text) => {
-                self.send_text(user_id, text).await?;
+                self.send_text(&recipient.recipient, text).await?;
             }
             MessageContent::Image { url, caption } => {
                 let text = format!(
@@ -673,17 +687,21 @@ impl Channel for FeishuChannel {
                         .map(|c| format!(" - {}", c))
                         .unwrap_or_default()
                 );
-                self.send_text(user_id, &text).await?;
+                self.send_text(&recipient.recipient, &text).await?;
             }
             MessageContent::Audio { url, duration } => {
                 let text = format!("[音频] {} ({}秒)", url, duration.unwrap_or(0));
-                self.send_text(user_id, &text).await?;
+                self.send_text(&recipient.recipient, &text).await?;
             }
             MessageContent::Structured(data) => {
                 let json = serde_json::to_string_pretty(data)
                     .unwrap_or_else(|_| "Invalid JSON".to_string());
-                self.send_rich_text(user_id, "数据", &format!("```\n{}\n```", json))
-                    .await?;
+                self.send_rich_text(
+                    &recipient.recipient,
+                    "数据",
+                    &format!("```\n{}\n```", json),
+                )
+                .await?;
             }
         }
 

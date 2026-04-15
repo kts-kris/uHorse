@@ -107,7 +107,16 @@ impl Session {
 
 /// 支持的消息通道类型
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, strum::Display, strum::EnumIter,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::Display,
+    strum::EnumIter,
 )]
 pub enum ChannelType {
     /// Telegram 通道
@@ -149,6 +158,100 @@ impl FromStr for ChannelType {
             _ => Err(()),
         }
     }
+}
+
+/// 通道能力标记。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ChannelCapabilityFlags(u8);
+
+impl ChannelCapabilityFlags {
+    /// 空能力集。
+    pub const NONE: Self = Self(0);
+    /// 支持通用收件人发送。
+    pub const SEND_TO_RECIPIENT: Self = Self(1 << 0);
+    /// 支持入站 Webhook。
+    pub const INBOUND_WEBHOOK: Self = Self(1 << 1);
+    /// 支持上下文回复。
+    pub const REPLY_CONTEXT: Self = Self(1 << 2);
+
+    /// 返回空能力集。
+    pub const fn empty() -> Self {
+        Self::NONE
+    }
+
+    /// 判断是否包含指定能力。
+    pub const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    /// 返回底层位值。
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// 导出为稳定字符串列表。
+    pub fn as_strs(self) -> Vec<&'static str> {
+        let mut values = Vec::new();
+        if self.contains(Self::SEND_TO_RECIPIENT) {
+            values.push("send_to_recipient");
+        }
+        if self.contains(Self::INBOUND_WEBHOOK) {
+            values.push("inbound_webhook");
+        }
+        if self.contains(Self::REPLY_CONTEXT) {
+            values.push("reply_context");
+        }
+        values
+    }
+}
+
+impl std::ops::BitOr for ChannelCapabilityFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for ChannelCapabilityFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl Default for ChannelCapabilityFlags {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// 通用通道收件人。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelRecipient {
+    /// 收件人所属渠道类型。
+    pub channel_type: ChannelType,
+    /// 渠道内收件人标识。
+    pub recipient: String,
+}
+
+/// 通用回复上下文。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplyContext {
+    /// 回复目标所属渠道类型。
+    pub channel_type: ChannelType,
+    /// 会话或对话标识。
+    pub conversation_id: String,
+    /// 原始消息标识。
+    pub source_message_id: Option<String>,
+    /// 临时回复 webhook。
+    pub reply_webhook: Option<String>,
+    /// 临时回复 webhook 过期时间（毫秒时间戳）。
+    pub reply_webhook_expires_at: Option<i64>,
+    /// 发送人或默认回传对象标识。
+    pub sender_recipient: Option<String>,
+    /// 通道专属元数据。
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub metadata: HashMap<String, String>,
 }
 
 // ============== 消息类型 ==============
@@ -544,6 +647,24 @@ pub struct DeviceInfo {
     pub last_seen: u64,
     /// 设备能力
     pub capabilities: DeviceCapabilities,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChannelCapabilityFlags;
+
+    #[test]
+    fn channel_capability_flags_support_union_and_export() {
+        let flags = ChannelCapabilityFlags::SEND_TO_RECIPIENT | ChannelCapabilityFlags::REPLY_CONTEXT;
+
+        assert!(flags.contains(ChannelCapabilityFlags::SEND_TO_RECIPIENT));
+        assert!(!flags.contains(ChannelCapabilityFlags::INBOUND_WEBHOOK));
+        assert_eq!(flags.bits(), 0b101);
+        assert_eq!(
+            flags.as_strs(),
+            vec!["send_to_recipient", "reply_context"]
+        );
+    }
 }
 
 /// 访问令牌

@@ -125,6 +125,12 @@ export interface NodeRuntimeInfo {
   failed_tasks: number;
 }
 
+export interface ChannelCapabilityInfo {
+  channel_type: string;
+  registered: boolean;
+  capabilities: string[];
+}
+
 export interface TaskRuntimeInfo {
   task_id: string;
   status: string;

@@ -3,6 +3,7 @@
 //! 测试 Hub 的安全功能：JWT 认证、敏感操作审批、字段加密
 
 use std::sync::Arc;
+use uhorse_channel::ChannelRegistry;
 use uhorse_hub::{
     security_integration::{
         HubFieldEncryptor, HubTlsConfig, NodeAuthenticator, SecurityManager,
@@ -43,7 +44,7 @@ fn create_test_message_router() -> MessageRouter {
     MessageRouter::new(
         node_manager,
         Arc::new(task_scheduler),
-        None,
+        Arc::new(ChannelRegistry::new()),
         Arc::new(NotificationBindingManager::default()),
     )
 }

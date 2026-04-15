@@ -15,7 +15,10 @@ use uhorse_observability::{
 };
 use uhorse_security::{ApprovalManager, DevicePairingManager};
 
-use uhorse_channel::DingTalkChannel;
+use uhorse_channel::{
+    ChannelRegistry, DingTalkChannel, DiscordChannel, SlackChannel, TelegramChannel,
+    WhatsAppChannel,
+};
 use uhorse_config::{loader::create_default_loader, DingTalkNotificationBinding, UHorseConfig};
 use uhorse_core::Channel;
 use uhorse_hub::{
@@ -104,7 +107,8 @@ async fn main() -> anyhow::Result<()> {
     info!("🚀 uHorse Hub v{} starting...", env!("CARGO_PKG_VERSION"));
 
     // 初始化运行时依赖
-    let dingtalk_channel = init_dingtalk_channel(&runtime_config.app_config).await?;
+    let channel_registry = Arc::new(init_channel_registry(&runtime_config.app_config).await?);
+    let dingtalk_channel = channel_registry.dingtalk();
     let llm_client = init_llm_client(&runtime_config.app_config).await?;
 
     // 创建 Hub
@@ -128,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
     let (hub, mut task_result_rx) = Hub::new_with_components(
         runtime_config.hub_config.clone(),
         security_manager,
-        dingtalk_channel.clone(),
+        Arc::clone(&channel_registry),
         notification_binding_manager,
         Some(Arc::clone(&metrics_collector)),
     );
@@ -158,13 +162,13 @@ async fn main() -> anyhow::Result<()> {
                 .with_pairing_ttl(runtime_config.app_config.security.pairing_expiry),
         )
     });
-    let web_state = WebState::new_with_runtime_and_health_and_config(
+    let web_state = WebState::new_with_runtime_and_health_and_config_with_registry(
         Arc::new(runtime_config.app_config.clone()),
         hub.clone(),
         health_service,
         metrics_collector,
         metrics_exporter,
-        dingtalk_channel.clone(),
+        Arc::clone(&channel_registry),
         llm_client,
         pairing_manager,
         agent_runtime,
@@ -355,43 +359,117 @@ fn looks_like_unified_config(content: &str) -> bool {
     .any(|marker| content.contains(marker))
 }
 
-/// 初始化 DingTalk 通道
-async fn init_dingtalk_channel(
-    config: &UHorseConfig,
-) -> anyhow::Result<Option<Arc<DingTalkChannel>>> {
-    if !config
-        .channels
-        .enabled
-        .iter()
-        .any(|channel| channel == "dingtalk")
-    {
-        info!("📱 DingTalk channel is disabled in configuration");
-        return Ok(None);
+/// 初始化当前 Phase0 支持的通道注册表。
+async fn init_channel_registry(config: &UHorseConfig) -> anyhow::Result<ChannelRegistry> {
+    let mut registry = ChannelRegistry::new();
+
+    if config.channels.enabled.iter().any(|channel| channel == "telegram") {
+        let telegram_config = config
+            .channels
+            .telegram
+            .as_ref()
+            .context("Telegram channel is enabled but config is missing")?;
+        info!("📱 Initializing Telegram channel...");
+        let mut channel = TelegramChannel::new(telegram_config.bot_token.clone());
+        channel
+            .start()
+            .await
+            .context("Failed to start Telegram channel")?;
+        info!("  ✓ Telegram channel initialized");
+        registry = registry.with_channel(Arc::new(channel));
+    } else {
+        info!("📱 Telegram channel is disabled in configuration");
     }
 
-    let dingtalk_config = config
-        .channels
-        .dingtalk
-        .as_ref()
-        .context("DingTalk channel is enabled but config is missing")?;
+    if config.channels.enabled.iter().any(|channel| channel == "dingtalk") {
+        let dingtalk_config = config
+            .channels
+            .dingtalk
+            .as_ref()
+            .context("DingTalk channel is enabled but config is missing")?;
+        info!("📱 Initializing DingTalk channel...");
+        let mut channel = DingTalkChannel::new(
+            dingtalk_config.app_key.clone(),
+            dingtalk_config.app_secret.clone(),
+            dingtalk_config.agent_id,
+            dingtalk_config.ai_card_template_id.clone(),
+        );
+        channel
+            .start()
+            .await
+            .context("Failed to start DingTalk channel")?;
+        info!("  ✓ DingTalk channel initialized");
+        registry = registry.with_dingtalk(Arc::new(channel));
+    } else {
+        info!("📱 DingTalk channel is disabled in configuration");
+    }
 
-    info!("📱 Initializing DingTalk channel...");
+    if config.channels.enabled.iter().any(|channel| channel == "slack") {
+        let slack_config = config
+            .channels
+            .slack
+            .as_ref()
+            .context("Slack channel is enabled but config is missing")?;
+        info!("📱 Initializing Slack channel...");
+        let mut channel = SlackChannel::with_signing_secret(
+            slack_config.bot_token.clone(),
+            slack_config.signing_secret.clone(),
+        );
+        channel
+            .start()
+            .await
+            .context("Failed to start Slack channel")?;
+        info!("  ✓ Slack channel initialized");
+        registry = registry.with_channel(Arc::new(channel));
+    } else {
+        info!("📱 Slack channel is disabled in configuration");
+    }
 
-    let mut channel = DingTalkChannel::new(
-        dingtalk_config.app_key.clone(),
-        dingtalk_config.app_secret.clone(),
-        dingtalk_config.agent_id,
-        dingtalk_config.ai_card_template_id.clone(),
-    );
+    if config.channels.enabled.iter().any(|channel| channel == "discord") {
+        let discord_config = config
+            .channels
+            .discord
+            .as_ref()
+            .context("Discord channel is enabled but config is missing")?;
+        info!("📱 Initializing Discord channel...");
+        let bot_token = discord_config
+            .bot_token
+            .strip_prefix("Bot ")
+            .unwrap_or(discord_config.bot_token.as_str())
+            .to_string();
+        let mut channel = DiscordChannel::new(bot_token);
+        channel
+            .start()
+            .await
+            .context("Failed to start Discord channel")?;
+        info!("  ✓ Discord channel initialized");
+        registry = registry.with_channel(Arc::new(channel));
+    } else {
+        info!("📱 Discord channel is disabled in configuration");
+    }
 
-    channel
-        .start()
-        .await
-        .context("Failed to start DingTalk channel")?;
+    if config.channels.enabled.iter().any(|channel| channel == "whatsapp") {
+        let whatsapp_config = config
+            .channels
+            .whatsapp
+            .as_ref()
+            .context("WhatsApp channel is enabled but config is missing")?;
+        info!("📱 Initializing WhatsApp channel...");
+        let mut channel = WhatsAppChannel::new(
+            whatsapp_config.access_token.clone(),
+            whatsapp_config.phone_number_id.clone(),
+        );
+        channel
+            .start()
+            .await
+            .context("Failed to start WhatsApp channel")?;
+        info!("  ✓ WhatsApp channel initialized");
+        registry = registry.with_channel(Arc::new(channel));
+    } else {
+        info!("📱 WhatsApp channel is disabled in configuration");
+    }
 
-    info!("  ✓ DingTalk channel initialized");
-
-    Ok(Some(Arc::new(channel)))
+    Ok(registry)
 }
 
 /// 初始化 LLM 客户端
@@ -440,6 +518,28 @@ fn generate_config(output: &str) -> anyhow::Result<()> {
     std::fs::write(output, content)?;
     println!("✅ Generated config file: {}", output);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uhorse_core::ChannelType;
+
+    #[tokio::test]
+    async fn init_channel_registry_registers_phase0_channels() {
+        let mut config = UHorseConfig::default();
+        config.channels.enabled = vec!["slack".to_string()];
+        config.channels.slack = Some(uhorse_config::SlackConfig {
+            bot_token: "xoxb-test-token".to_string(),
+            signing_secret: "signing-secret".to_string(),
+            app_token: None,
+        });
+
+        let registry = init_channel_registry(&config).await.unwrap();
+
+        assert!(registry.has_channel(ChannelType::Slack));
+        assert_eq!(registry.registered_channel_types(), vec![ChannelType::Slack]);
+    }
 }
 
 #[cfg(test)]

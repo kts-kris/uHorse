@@ -5,12 +5,14 @@
 pub mod dingtalk;
 pub mod discord;
 pub mod feishu;
+pub mod registry;
 pub mod slack;
 pub mod telegram;
 pub mod wework;
 pub mod whatsapp;
 
 pub use dingtalk::{DingTalkChannel, DingTalkInboundAttachment, DingTalkInboundMessage};
+pub use registry::{ChannelRegistry, RegisteredChannel};
 pub use discord::DiscordChannel;
 pub use feishu::FeishuChannel;
 pub use slack::SlackChannel;

@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, warn};
-use uhorse_core::{Channel, ChannelError, ChannelType, MessageContent, Result, UHorseError};
+use uhorse_core::{
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, MessageContent,
+    Result, UHorseError,
+};
 
 /// WhatsApp 通道
 #[derive(Debug, Clone)]
@@ -159,34 +162,48 @@ impl Channel for WhatsAppChannel {
         ChannelType::WhatsApp
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending WhatsApp message to {}: {:?}", user_id, message);
+        if recipient.channel_type != ChannelType::WhatsApp {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
+
+        debug!(
+            "Sending WhatsApp message to {}: {:?}",
+            recipient.recipient, message
+        );
 
         // 确保手机号格式正确
-        let to = if !user_id.starts_with('+') {
-            &format!("+{}", user_id)
+        let to = if !recipient.recipient.starts_with('+') {
+            format!("+{}", recipient.recipient)
         } else {
-            user_id
+            recipient.recipient.clone()
         };
 
         match message {
             MessageContent::Text(text) => {
-                self.send_text(to, text).await?;
+                self.send_text(&to, text).await?;
             }
             MessageContent::Image { url, .. } => {
-                self.send_media(to, "image", url).await?;
+                self.send_media(&to, "image", url).await?;
             }
             MessageContent::Audio { url, .. } => {
-                self.send_media(to, "audio", url).await?;
+                self.send_media(&to, "audio", url).await?;
             }
             MessageContent::Structured(data) => {
                 if let Some(text) = data.as_str() {
-                    self.send_text(to, text).await?;
+                    self.send_text(&to, text).await?;
                 }
             }
         }

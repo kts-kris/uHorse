@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
-use uhorse_core::{Channel, ChannelError, ChannelType, MessageContent, Result, UHorseError};
+use uhorse_core::{
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, MessageContent,
+    Result, UHorseError,
+};
 
 /// Discord 通道
 #[derive(Debug, Clone)]
@@ -119,16 +122,30 @@ impl Channel for DiscordChannel {
         ChannelType::Discord
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending Discord message to {}: {:?}", user_id, message);
+        if recipient.channel_type != ChannelType::Discord {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
+
+        debug!(
+            "Sending Discord message to {}: {:?}",
+            recipient.recipient, message
+        );
 
         // Discord 需要先创建 DM 通道
-        let dm_channel = self.create_dm(user_id).await?;
+        let dm_channel = self.create_dm(&recipient.recipient).await?;
 
         match message {
             MessageContent::Text(text) => {

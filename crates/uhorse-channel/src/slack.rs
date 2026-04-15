@@ -8,7 +8,10 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument};
-use uhorse_core::{Channel, ChannelError, ChannelType, MessageContent, Result};
+use uhorse_core::{
+    Channel, ChannelCapabilityFlags, ChannelError, ChannelRecipient, ChannelType, MessageContent,
+    Result,
+};
 
 /// Slack 通道
 #[derive(Debug, Clone)]
@@ -41,13 +44,27 @@ impl Channel for SlackChannel {
         ChannelType::Slack
     }
 
+    fn capability_flags(&self) -> ChannelCapabilityFlags {
+        ChannelCapabilityFlags::SEND_TO_RECIPIENT
+    }
+
     #[instrument(skip(self, message))]
-    async fn send_message(
+    async fn send_to_recipient(
         &self,
-        user_id: &str,
+        recipient: &ChannelRecipient,
         message: &MessageContent,
     ) -> Result<(), ChannelError> {
-        debug!("Sending Slack message to {}: {:?}", user_id, message);
+        if recipient.channel_type != ChannelType::Slack {
+            return Err(ChannelError::ConfigError(format!(
+                "recipient channel type mismatch: {}",
+                recipient.channel_type
+            )));
+        }
+
+        debug!(
+            "Sending Slack message to {}: {:?}",
+            recipient.recipient, message
+        );
 
         // TODO: 实现完整的 Slack API 调用
         match message {
