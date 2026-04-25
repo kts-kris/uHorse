@@ -7,14 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Channel` now has a minimal `reply_via_context` contract so Hub can use the generic reply dispatcher for channels that declare `REPLY_CONTEXT`
+- Feishu is now wired into the minimal Hub inbound sample, covering webhook challenge, message event prepared inbound, and source-`message_id` reply-context replies
+- Unified config now includes Feishu / WeCom initialization samples, with Feishu serving as the second validation channel for the multi-channel inbound / reply abstraction
+
 ### Fixed
 
 - online Skill install now accepts both `.zip` and `.tar.gz`, including zip packages with a nested root directory
 - after a DingTalk user uploads a `.zip` Skill package, the follow-up message “帮我安装这个技能” now resolves to attachment install instead of falling into general command planning
 - Python Skills that only ship `skill.yaml` now get an auto-generated `skill.toml`, and packages with `requirements.txt` get an auto-created `.venv` plus dependency installation so execution no longer fails with `Skill ... is disabled` or missing modules such as `yaml`
+- continuation fallback can now recover channel session keys from `ReplyContext` sender / team metadata, preventing legacy session keys from breaking the same conversation lane
 
 ### Changed
 
+- README / INSTALL / CHANNELS / CONFIG / API / TESTING / RELEASE_NOTES now document the current multi-channel reply-context path, minimal Feishu sample, and config boundaries
 - README / INSTALL / CHANNELS / SKILLS / API / TESTING / RELEASE_NOTES now document the current online Skill install compatibility behavior
 
 ## [4.6.0] - 2026-04-10

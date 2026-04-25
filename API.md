@@ -1,6 +1,6 @@
 # uHorse API 使用指南
 
-本文档只描述 **当前仓库已经实现并用于 v4.4.0 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
+本文档只描述 **当前仓库已经实现并用于 v4.6.0 Hub-Node 主线** 的 API。示例默认 Hub 地址为 `http://127.0.0.1:8765`。
 
 ## 目录
 
@@ -11,7 +11,7 @@
 - [任务 API](#任务-api)
 - [运行时 Session API](#运行时-session-api)
 - [审批 API](#审批-api)
-- [DingTalk 兼容回调](#dingtalk-兼容回调)
+- [通道兼容回调](#通道兼容回调)
 - [手工联调顺序](#手工联调顺序)
 - [相关文档](#相关文档)
 
@@ -43,6 +43,7 @@
 - `POST /api/v1/skills/install`
 - `POST /api/v1/skills/refresh`
 - `GET/POST /api/v1/channels/dingtalk/webhook`
+- `GET/POST /api/v1/channels/feishu/webhook`
 
 > 注意：本文档不再把旧版 `/health/live`、`/health/ready`、`/api/v1/auth/*`、`/api/v1/messages` 当作当前主线 API。
 
@@ -353,7 +354,7 @@ curl http://127.0.0.1:8765/api/tasks/task-0
 - 当前实现已经保证 `command_type` 与 `priority` 返回**真实任务元数据**，不再写死为默认值。
 - `command_type` 来自调度器里的真实命令类型，例如 `file`、`shell`。
 - `execution_workspace_id` 表示真实执行工作空间标识；`collaboration_workspace` 是 Hub 侧逻辑协作工作空间视图，不等于 Node 实际目录。
-- `collaboration_workspace.materialization` 当前固定为 `none`，表示 v4.4.0 只维护逻辑协作层，不在 Hub 侧物化真实目录。
+- `collaboration_workspace.materialization` 当前固定为 `none`，表示 v4.6.0 只维护逻辑协作层，不在 Hub 侧物化真实目录。
 
 ### 3. 取消任务：`POST /api/tasks/:task_id/cancel`
 
@@ -627,14 +628,18 @@ curl -X POST http://127.0.0.1:8765/api/approvals/<request_id>/reject \
 
 ---
 
-## DingTalk 兼容回调
+## 通道兼容回调
 
-当前仍保留以下兼容路由：
+当前仍保留以下通道 webhook 路由：
 
 - `GET /api/v1/channels/dingtalk/webhook`
 - `POST /api/v1/channels/dingtalk/webhook`
+- `GET /api/v1/channels/feishu/webhook`
+- `POST /api/v1/channels/feishu/webhook`
 
-它们主要用于兼容或辅助测试；当前推荐叙事仍是 **DingTalk Stream 模式 + Hub 任务链路**。
+DingTalk webhook 主要用于兼容或辅助测试；当前推荐叙事仍是 **DingTalk Stream 模式 + Hub 任务链路**。
+
+Feishu webhook 当前用于最小第二样本：`GET` 返回 readiness，`POST` 支持 challenge，并可把 message event 预处理成 prepared inbound turn。
 
 ---
 

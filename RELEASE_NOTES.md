@@ -16,6 +16,7 @@
 - 任务取消时也会清理处理中句柄：reaction 会 recall，legacy transient ack 会 clear，AI Card 会以“任务已取消。”收尾
 - README / INSTALL / CHANNELS / CHANGELOG / RELEASE_NOTES 已同步更新到 `v4.6.0` 口径
 - 当前文档已补齐在线 Skill 安装兼容性：`.zip` / `.tar.gz`、DingTalk 附件追装、`skill.yaml` Python Skill 自动生成 `skill.toml` 与 `requirements.txt` 自动安装依赖
+- 当前主线已补齐最小 multi-channel reply-context 抽象，并以 Feishu 作为第二样本验证 webhook challenge、message event prepared inbound 与原消息 reply 回包
 
 ### 当前主交付物
 
@@ -32,6 +33,8 @@
 
 - DingTalk 文本入口的 Skill refresh 命令；当前 refresh 只开放 HTTP API
 - 对非 `skillhub` 来源的在线安装支持
+- 将 DingTalk AI Card / reaction / transient handle 强行泛化为跨通道处理中句柄 trait
+- 将 WeWork、Telegram、Slack 等通道一次性接入 Hub prepared inbound 主线
 - 覆盖式安装已存在 Skill
 - 原生 `.app/.dmg`、签名、公证、`.msi`、Linux 原生安装器或拖拽安装体验
 - 旧时代 `agent / skill / memory` 独立平台的全面回归

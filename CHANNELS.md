@@ -6,13 +6,14 @@
 
 - **DingTalk Stream 模式**
 
-仓库中仍有 Telegram、Slack、Discord、WhatsApp、Feishu、WeCom 等通道模块，但当前 `uhorse-hub` 主运行时文档与验证重点是 DingTalk。
+同时，当前主线已经补齐最小 multi-channel inbound / reply 抽象：Feishu 可作为第二样本通过 webhook challenge / message event 进入 prepared inbound 主线，并通过 `ReplyContext` 走 generic reply path。DingTalk 的 AI Card / reaction / transient handle 仍保留为专用高级能力。
 
 ## 目录
 
 - [通道现状](#通道现状)
 - [DingTalk Stream 模式](#dingtalk-stream-模式)
 - [最小配置](#最小配置)
+- [Feishu 最小入站样本](#feishu-最小入站样本)
 - [Hub 启动后会发生什么](#hub-启动后会发生什么)
 - [消息如何进入任务链路](#消息如何进入任务链路)
 - [DingTalk 自然语言规划与本地校验](#dingtalk-自然语言规划与本地校验)
@@ -28,14 +29,15 @@
 
 | 通道 | 当前文档状态 | 当前主运行时状态 |
 |------|--------------|------------------|
-| DingTalk | 主文档路径 | 已接入主链路 |
+| DingTalk | 主文档路径 | Stream 入站、任务规划、generic reply-context 与专用高级处理中句柄均已接入主链路 |
+| Feishu | 最小第二样本文档路径 | 支持 webhook challenge、message event prepared inbound、`ReplyContext` 回包 |
+| WeCom | 配置 / 初始化样本 | 尚未接入 Hub prepared inbound 主线 |
 | Telegram | 模块存在 | 非当前主线文档重点 |
 | Slack | 模块存在 | 非当前主线文档重点 |
 | Discord | 模块存在 | 非当前主线文档重点 |
 | WhatsApp | 模块存在 | 非当前主线文档重点 |
-| Feishu / WeCom | 模块存在 | 非当前主线文档重点 |
 
-如果你正在做当前主线验证，请优先关注 DingTalk。
+如果你正在做当前主线生产验证，请优先关注 DingTalk；如果你正在验证 multi-channel 抽象边界，请使用 Feishu 最小样本。
 
 ---
 
@@ -75,7 +77,40 @@ user_id = "your-admin-user-id"
 # corp_id = "dingcorp-xxx"
 ```
 
-> 注意：DingTalk 只能通过 **统一配置** 初始化。legacy `HubConfig` 模式不能初始化 DingTalk。
+可选启用 Feishu 最小样本：
+
+```toml
+[channels]
+enabled = ["dingtalk", "feishu"]
+
+[channels.feishu]
+app_id = "your_feishu_app_id"
+app_secret = "your_feishu_app_secret"
+# encrypt_key = "your_encrypt_key"
+# verify_token = "your_verify_token"
+```
+
+> 注意：DingTalk、Feishu、WeCom 都只能通过 **统一配置** 初始化。legacy `HubConfig` 模式不能初始化这些通道。
+
+---
+
+## Feishu 最小入站样本
+
+Feishu 当前定位是验证 multi-channel 抽象的最小第二样本，而不是替代 DingTalk 的完整生产主路径。
+
+当前已接入的能力：
+
+- `GET /api/v1/channels/feishu/webhook` 返回 readiness 文本
+- `POST /api/v1/channels/feishu/webhook` 支持 challenge 响应
+- message event 可被预处理为 `PreparedInboundTurn`
+- 会话键使用 `feishu:{channel_user_id}` 形态进入 serialized session lane
+- 普通回包走 `ReplyContext` + `Channel::reply_via_context(...)`，优先使用原始 `message_id` 调用 Feishu reply API
+
+当前不包含：
+
+- Feishu 专属处理中句柄生命周期
+- Feishu AI Card / reaction 等高级交互抽象
+- WeCom / Telegram / Slack 等通道进入 Hub prepared inbound 主线
 
 ---
 
@@ -163,11 +198,15 @@ DingTalk inbound message
 
 如果同时启用了 Node Desktop 本地通知镜像，当前主路径是由 Node Desktop 发起 pairing、用户在 DingTalk 中确认后写入运行时绑定；`channels.dingtalk.notification_bindings` 仅保留为兼容 seed/fallback，用于补充“节点通知 -> 钉钉用户”的回传路径。
 
-当前结果回传逻辑会保留任务的完整执行结果，并按以下顺序尝试回到原 DingTalk 会话：
+当前结果回传逻辑会保留任务的完整执行结果。普通通道优先走 `ChannelRegistry::get(...)` + `Channel::reply_via_context(...)`，只有 DingTalk 的 AI Card / reaction / transient handle 生命周期继续走专用 adapter。
+
+DingTalk 会按以下顺序尝试回到原会话：
 
 - 优先使用 `session_webhook`（未过期时）
 - 群会话回退到 `conversation_id` 群消息发送
 - 单聊回退到 `sender_user_id` 直接发送
+
+Feishu 会优先使用 `ReplyContext.source_message_id` 对原消息 reply；缺失原消息 ID 时回退到 `sender_recipient` 或 `conversation_id` 发送。
 
 在“处理中句柄”阶段，当前主线会按以下优先级处理 DingTalk 中间态：
 
@@ -195,12 +234,15 @@ DingTalk inbound message
 ```text
 GET  /api/v1/channels/dingtalk/webhook
 POST /api/v1/channels/dingtalk/webhook
+GET  /api/v1/channels/feishu/webhook
+POST /api/v1/channels/feishu/webhook
 ```
 
 注意：
 
-- 这不改变主推荐模式仍然是 Stream
-- 文档与部署设计不应再把 webhook 当成默认入口
+- 这不改变 DingTalk 主推荐模式仍然是 Stream
+- Feishu webhook 当前用于 challenge / 最小 message event 入站样本
+- 文档与部署设计不应再把 DingTalk webhook 当成默认入口
 
 ---
 

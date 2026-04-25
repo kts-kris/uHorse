@@ -1,6 +1,6 @@
 # uHorse API Reference
 
-This document only covers the APIs that are **actually implemented and used by the current v4.4.0 Hub-Node mainline**. Examples assume the Hub is reachable at `http://127.0.0.1:8765`.
+This document only covers the APIs that are **actually implemented and used by the current v4.6.0 Hub-Node mainline**. Examples assume the Hub is reachable at `http://127.0.0.1:8765`.
 
 ## Table of Contents
 
@@ -11,7 +11,7 @@ This document only covers the APIs that are **actually implemented and used by t
 - [Task APIs](#task-apis)
 - [Runtime Session APIs](#runtime-session-apis)
 - [Approval APIs](#approval-apis)
-- [DingTalk Compatibility Webhook](#dingtalk-compatibility-webhook)
+- [Channel Compatibility Webhooks](#channel-compatibility-webhooks)
 - [Manual Regression Order](#manual-regression-order)
 - [Related Documents](#related-documents)
 
@@ -43,6 +43,7 @@ The current Hub runtime exposes these Hub-Node related endpoints:
 - `POST /api/v1/skills/install`
 - `POST /api/v1/skills/refresh`
 - `GET/POST /api/v1/channels/dingtalk/webhook`
+- `GET/POST /api/v1/channels/feishu/webhook`
 
 > Note: this document no longer treats the old `/health/live`, `/health/ready`, `/api/v1/auth/*`, or `/api/v1/messages` endpoints as the mainline API surface.
 
@@ -353,7 +354,7 @@ Notes:
 - The current implementation now returns the **real** `command_type` and `priority` from scheduler state instead of hard-coded defaults.
 - `command_type` comes from the actual queued/running/completed task metadata, such as `file` or `shell`.
 - `execution_workspace_id` is the real execution workspace identity, while `collaboration_workspace` is the Hub-side logical collaboration view and not the Node's actual directory.
-- `collaboration_workspace.materialization` is currently fixed to `none`, which means v4.4.0 only keeps a logical collaboration layer and does not materialize real directories on the Hub side.
+- `collaboration_workspace.materialization` is currently fixed to `none`, which means v4.6.0 only keeps a logical collaboration layer and does not materialize real directories on the Hub side.
 
 ### 3. Cancel a task: `POST /api/tasks/:task_id/cancel`
 
@@ -627,14 +628,18 @@ The verified approval loop in the current mainline is:
 
 ---
 
-## DingTalk Compatibility Webhook
+## Channel Compatibility Webhooks
 
-The following compatibility routes still exist:
+The following channel webhook routes still exist:
 
 - `GET /api/v1/channels/dingtalk/webhook`
 - `POST /api/v1/channels/dingtalk/webhook`
+- `GET /api/v1/channels/feishu/webhook`
+- `POST /api/v1/channels/feishu/webhook`
 
-They are mainly kept for compatibility or auxiliary testing. The recommended mainline path is still **DingTalk Stream mode + Hub task pipeline**.
+The DingTalk webhook is mainly kept for compatibility or auxiliary testing. The recommended mainline path is still **DingTalk Stream mode + Hub task pipeline**.
+
+The Feishu webhook currently serves the minimal second sample: `GET` returns readiness, `POST` supports challenge responses, and message events can be prepared into prepared inbound turns.
 
 ---
 

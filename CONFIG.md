@@ -4,7 +4,7 @@
 
 - `uhorse-hub` 的两种配置模式
 - `uhorse-node` 的 `node.toml`
-- DingTalk Stream 和 LLM 的真实字段
+- DingTalk Stream、Feishu / WeWork 样本配置和 LLM 的真实字段
 
 ## 目录
 
@@ -12,6 +12,7 @@
 - [Hub 配置](#hub-配置)
 - [Node 配置](#node-配置)
 - [DingTalk Stream 配置](#dingtalk-stream-配置)
+- [Feishu / WeWork 样本配置](#feishu--wework-样本配置)
 - [LLM 配置](#llm-配置)
 - [验证命令](#验证命令)
 
@@ -25,7 +26,7 @@
 
 适用场景：
 
-- 需要启用 DingTalk
+- 需要启用 DingTalk、Feishu 或 WeWork
 - 需要启用 LLM
 - 需要使用 `uhorse-config` 的统一结构
 
@@ -53,6 +54,7 @@
 
 - Hub 监听地址与端口（来自 `[server]`）
 - DingTalk 初始化（来自 `[channels.dingtalk]`）
+- Feishu / WeWork 初始化（来自 `[channels.feishu]` / `[channels.wework]`）
 - LLM 初始化（来自 `[llm]`）
 
 但 **`max_nodes`、`heartbeat_timeout_secs`、`task_timeout_secs`、`max_retries` 这类 Hub 专属调度参数不会从统一配置读取**，仍使用 `HubConfig::default()` 的默认值。
@@ -63,7 +65,7 @@
 
 - 只想启动最小 Hub
 - 需要显式控制 Hub 调度参数
-- 暂时不需要 DingTalk / LLM
+- 暂时不需要 DingTalk、Feishu、WeWork 或 LLM
 
 示例：
 
@@ -77,7 +79,7 @@ task_timeout_secs = 60
 max_retries = 3
 ```
 
-注意：legacy 模式**不包含** `[channels]` 或 `[llm]` 段，因此不能用于初始化 DingTalk 或 LLM。
+注意：legacy 模式**不包含** `[channels]` 或 `[llm]` 段，因此不能用于初始化 DingTalk、Feishu、WeWork 或 LLM。
 
 ---
 
@@ -85,7 +87,7 @@ max_retries = 3
 
 ### 方案 A：统一配置示例
 
-这是当前最适合 Hub 生产运行的配置方式，尤其是需要 DingTalk Stream 或 LLM 时。
+这是当前最适合 Hub 生产运行的配置方式，尤其是需要 DingTalk Stream、Feishu / WeWork 样本通道或 LLM 时。
 
 ```toml
 [server]
@@ -119,6 +121,19 @@ agent_id = 123456789
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
+
+[channels.feishu]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+# encrypt_key = "your-feishu-encrypt-key"
+# verify_token = "your-feishu-verify-token"
+
+[channels.wework]
+corp_id = "your-wework-corp-id"
+agent_id = 123456789
+secret = "your-wework-secret"
+# token = "your-wework-token"
+# encoding_aes_key = "your-wework-encoding-aes-key"
 
 [security]
 jwt_secret = "replace-with-random-secret"
@@ -338,6 +353,43 @@ user_id = "your-admin-user-id"
 
 ---
 
+## Feishu / WeWork 样本配置
+
+Feishu 和 WeWork 也通过统一配置初始化；legacy `HubConfig` 不会读取这些段。
+
+### Feishu 最小配置
+
+```toml
+[channels]
+enabled = ["feishu"]
+
+[channels.feishu]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+# encrypt_key = "your-feishu-encrypt-key"
+# verify_token = "your-feishu-verify-token"
+```
+
+当前 Hub 已为 Feishu 接入最小第二样本：`/api/v1/channels/feishu/webhook` 可处理 challenge 与 message event 预处理，普通回包走 `ReplyContext` + `reply_via_context`。
+
+### WeWork 最小配置
+
+```toml
+[channels]
+enabled = ["wework"]
+
+[channels.wework]
+corp_id = "your-wework-corp-id"
+agent_id = 123456789
+secret = "your-wework-secret"
+# token = "your-wework-token"
+# encoding_aes_key = "your-wework-encoding-aes-key"
+```
+
+当前 WeWork 已有配置与启动初始化样本，但尚未进入 Hub prepared inbound 主线。
+
+---
+
 ## LLM 配置
 
 当前 Hub 使用统一配置中的 `[llm]` 段初始化 `OpenAIClient`。
@@ -412,7 +464,7 @@ curl http://127.0.0.1:8765/api/nodes
 
 ## 建议
 
-- 要跑 DingTalk 或 LLM：优先使用**统一配置**。
+- 要跑 DingTalk、Feishu、WeWork 或 LLM：优先使用**统一配置**。
 - 要跑最小本地闭环：优先使用 **legacy HubConfig + NodeConfig**。
 - 如果你想同时做 Hub 调度参数微调和 DingTalk / LLM 初始化，当前需要了解这两种模式的边界，不要假设统一配置已经覆盖所有 Hub 专属字段。
 

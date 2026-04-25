@@ -6,13 +6,14 @@ The most important and recommended path today is:
 
 - **DingTalk Stream mode**
 
-The repository still contains Telegram, Slack, Discord, WhatsApp, Feishu, and WeCom channel modules, but the current `uhorse-hub` runtime and documentation focus on DingTalk.
+At the same time, the current mainline now has the minimal multi-channel inbound / reply abstraction: Feishu can serve as a second sample through webhook challenge / message event preparation and can reply through the generic `ReplyContext` path. DingTalk AI Card / reaction / transient-handle behavior remains a dedicated advanced capability.
 
 ## Table of Contents
 
 - [Current channel status](#current-channel-status)
 - [DingTalk Stream mode](#dingtalk-stream-mode)
 - [Minimal config](#minimal-config)
+- [Minimal Feishu inbound sample](#minimal-feishu-inbound-sample)
 - [What happens when Hub starts](#what-happens-when-hub-starts)
 - [How messages enter the task pipeline](#how-messages-enter-the-task-pipeline)
 - [DingTalk natural-language planning and local validation](#dingtalk-natural-language-planning-and-local-validation)
@@ -28,14 +29,15 @@ The repository still contains Telegram, Slack, Discord, WhatsApp, Feishu, and We
 
 | Channel | Doc status | Runtime status |
 |---------|------------|----------------|
-| DingTalk | primary documented path | wired into main flow |
+| DingTalk | primary documented path | Stream inbound, task planning, generic reply-context, and dedicated advanced processing handles are wired into the main flow |
+| Feishu | minimal second-sample path | supports webhook challenge, message event prepared inbound, and `ReplyContext` replies |
+| WeCom | config / initialization sample | not wired into the Hub prepared inbound mainline yet |
 | Telegram | module exists | not the current mainline focus |
 | Slack | module exists | not the current mainline focus |
 | Discord | module exists | not the current mainline focus |
 | WhatsApp | module exists | not the current mainline focus |
-| Feishu / WeCom | module exists | not the current mainline focus |
 
-If you are validating the current mainline, focus on DingTalk first.
+If you are validating the current production mainline, focus on DingTalk first. If you are validating the multi-channel abstraction boundary, use the minimal Feishu sample.
 
 ---
 
@@ -75,7 +77,40 @@ user_id = "your-admin-user-id"
 # corp_id = "dingcorp-xxx"
 ```
 
-> DingTalk can only be initialized from the **unified config** path. The legacy `HubConfig` mode cannot initialize DingTalk.
+Optional Feishu minimal sample:
+
+```toml
+[channels]
+enabled = ["dingtalk", "feishu"]
+
+[channels.feishu]
+app_id = "your_feishu_app_id"
+app_secret = "your_feishu_app_secret"
+# encrypt_key = "your_encrypt_key"
+# verify_token = "your_verify_token"
+```
+
+> DingTalk, Feishu, and WeCom can only be initialized from the **unified config** path. The legacy `HubConfig` mode cannot initialize these channels.
+
+---
+
+## Minimal Feishu inbound sample
+
+Feishu currently exists as the minimal second sample for validating the multi-channel abstraction. It is not a full replacement for the production DingTalk path.
+
+Currently wired capabilities:
+
+- `GET /api/v1/channels/feishu/webhook` returns readiness text
+- `POST /api/v1/channels/feishu/webhook` supports challenge responses
+- message events can be prepared as `PreparedInboundTurn`
+- session keys enter the serialized session lane as `feishu:{channel_user_id}`
+- normal replies use `ReplyContext` + `Channel::reply_via_context(...)`, preferring the original `message_id` through Feishu's reply API
+
+Not included yet:
+
+- Feishu-specific processing-handle lifecycle
+- Feishu AI Card / reaction style advanced interaction abstraction
+- WeCom / Telegram / Slack prepared inbound mainline support
 
 ---
 
@@ -163,11 +198,15 @@ For the Skill install thin entrypoint, the current boundary is:
 
 If Node Desktop local notification mirroring is enabled, the current main path is for Node Desktop to start pairing and for the user to confirm it in DingTalk, which writes a runtime binding; `channels.dingtalk.notification_bindings` is retained only as a compatibility seed/fallback for the “node notification -> DingTalk user” path.
 
-The current result handling keeps the full execution result and tries to get back to the original DingTalk session in this order:
+The current result handling keeps the full execution result. Normal channels prefer `ChannelRegistry::get(...)` + `Channel::reply_via_context(...)`, while DingTalk AI Card / reaction / transient-handle lifecycle behavior still goes through the dedicated adapter.
+
+DingTalk tries to get back to the original conversation in this order:
 
 - prefer `session_webhook` when it is still valid
 - fall back to group-message sending via `conversation_id`
 - fall back to direct personal sending via `sender_user_id`
+
+Feishu prefers `ReplyContext.source_message_id` for source-message replies, then falls back to `sender_recipient` or `conversation_id` when no source message ID exists.
 
 During the processing-handle phase, the current mainline now applies DingTalk intermediate states in this priority order:
 
@@ -195,12 +234,15 @@ Even though Stream mode is the primary path, Hub still exposes compatibility / a
 ```text
 GET  /api/v1/channels/dingtalk/webhook
 POST /api/v1/channels/dingtalk/webhook
+GET  /api/v1/channels/feishu/webhook
+POST /api/v1/channels/feishu/webhook
 ```
 
 Important:
 
-- this does not change the fact that Stream mode is the recommended mode
-- deployment and runtime docs should no longer treat webhook as the primary path
+- this does not change the fact that DingTalk Stream mode is the recommended mode
+- the Feishu webhook currently exists for challenge handling and the minimal message-event inbound sample
+- deployment and runtime docs should no longer treat DingTalk webhook as the primary path
 
 ---
 

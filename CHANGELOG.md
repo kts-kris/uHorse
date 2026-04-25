@@ -7,14 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Channel` 新增最小 `reply_via_context` 契约，Hub 可对声明 `REPLY_CONTEXT` 能力的通道走 generic reply dispatcher
+- Feishu 已接入最小 Hub 入站样本，支持 webhook challenge、message event prepared inbound，以及基于原始 `message_id` 的 reply-context 回包
+- 统一配置新增 Feishu / WeWork 初始化样本，Feishu 可作为 multi-channel inbound / reply 抽象的第二验证通道
+
 ### Fixed
 
 - 在线 Skill 安装现在同时支持 `.zip` 与 `.tar.gz`，并兼容嵌套根目录的 zip 包
 - DingTalk 上传 `.zip` 技能包后，再追发“帮我安装这个技能”会优先转成附件安装请求，而不是误走通用命令规划
 - 仅提供 `skill.yaml` 的 Python Skill 安装后会自动生成 `skill.toml`，并在存在 `requirements.txt` 时自动创建 `.venv` 安装依赖，避免执行期出现 `Skill ... is disabled` 或缺少 `yaml` 等模块
+- continuation fallback 现在可从 `ReplyContext` 的 sender / team metadata 恢复通道 session key，避免 legacy session key 破坏同一会话 lane
 
 ### Changed
 
+- README / INSTALL / CHANNELS / CONFIG / API / TESTING / RELEASE_NOTES 已补齐当前 multi-channel reply-context、Feishu 最小样本与配置边界说明
 - README / INSTALL / CHANNELS / SKILLS / API / TESTING / RELEASE_NOTES 已补齐当前在线 Skill 安装兼容性说明
 
 ## [4.6.0] - 2026-04-10

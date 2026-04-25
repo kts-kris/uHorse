@@ -4,7 +4,7 @@ This document only describes the configuration structures that are **actually co
 
 - the two runtime config modes of `uhorse-hub`
 - `node.toml` for `uhorse-node`
-- real DingTalk Stream and LLM fields
+- real DingTalk Stream, Feishu / WeCom sample config, and LLM fields
 
 ## Table of Contents
 
@@ -12,6 +12,7 @@ This document only describes the configuration structures that are **actually co
 - [Hub Configuration](#hub-configuration)
 - [Node Configuration](#node-configuration)
 - [DingTalk Stream Configuration](#dingtalk-stream-configuration)
+- [Feishu / WeCom sample configuration](#feishu--wecom-sample-configuration)
 - [LLM Configuration](#llm-configuration)
 - [Validation Commands](#validation-commands)
 
@@ -25,7 +26,7 @@ This document only describes the configuration structures that are **actually co
 
 Use this when you need:
 
-- DingTalk
+- DingTalk, Feishu, or WeCom
 - LLM
 - the shared `uhorse-config` structure
 
@@ -53,6 +54,7 @@ In the current code, unified config directly controls:
 
 - Hub bind host and port (from `[server]`)
 - DingTalk initialization (from `[channels.dingtalk]`)
+- Feishu / WeCom initialization (from `[channels.feishu]` / `[channels.wework]`)
 - LLM initialization (from `[llm]`)
 
 But **Hub-specific scheduler fields such as `max_nodes`, `heartbeat_timeout_secs`, `task_timeout_secs`, and `max_retries` are not read from unified config yet**. They still fall back to `HubConfig::default()`.
@@ -63,7 +65,7 @@ Use this when you need:
 
 - a minimal Hub startup
 - explicit control over Hub scheduler/runtime fields
-- no DingTalk / LLM initialization
+- no DingTalk, Feishu, WeCom, or LLM initialization
 
 Example:
 
@@ -77,7 +79,7 @@ task_timeout_secs = 60
 max_retries = 3
 ```
 
-Important: legacy mode does **not** contain `[channels]` or `[llm]`, so it cannot initialize DingTalk or LLM.
+Important: legacy mode does **not** contain `[channels]` or `[llm]`, so it cannot initialize DingTalk, Feishu, WeCom, or LLM.
 
 ---
 
@@ -85,7 +87,7 @@ Important: legacy mode does **not** contain `[channels]` or `[llm]`, so it canno
 
 ### Option A: unified config example
 
-This is the best option for a real Hub runtime, especially when DingTalk Stream or LLM is needed.
+This is the best option for a real Hub runtime, especially when DingTalk Stream, Feishu / WeCom sample channels, or LLM is needed.
 
 ```toml
 [server]
@@ -119,6 +121,19 @@ agent_id = 123456789
 [[channels.dingtalk.notification_bindings]]
 node_id = "your-stable-node-id"
 user_id = "your-dingtalk-user-id"
+
+[channels.feishu]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+# encrypt_key = "your-feishu-encrypt-key"
+# verify_token = "your-feishu-verify-token"
+
+[channels.wework]
+corp_id = "your-wework-corp-id"
+agent_id = 123456789
+secret = "your-wework-secret"
+# token = "your-wework-token"
+# encoding_aes_key = "your-wework-encoding-aes-key"
 
 [security]
 jwt_secret = "replace-with-random-secret"
@@ -338,6 +353,43 @@ The current mainline has already been validated once with a real enterprise tena
 
 ---
 
+## Feishu / WeCom sample configuration
+
+Feishu and WeCom are also initialized from unified config; the legacy `HubConfig` shape does not read these sections.
+
+### Minimal Feishu config
+
+```toml
+[channels]
+enabled = ["feishu"]
+
+[channels.feishu]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+# encrypt_key = "your-feishu-encrypt-key"
+# verify_token = "your-feishu-verify-token"
+```
+
+The current Hub wires Feishu as a minimal second sample: `/api/v1/channels/feishu/webhook` handles challenge and message event preparation, and normal replies use `ReplyContext` + `reply_via_context`.
+
+### Minimal WeCom config
+
+```toml
+[channels]
+enabled = ["wework"]
+
+[channels.wework]
+corp_id = "your-wework-corp-id"
+agent_id = 123456789
+secret = "your-wework-secret"
+# token = "your-wework-token"
+# encoding_aes_key = "your-wework-encoding-aes-key"
+```
+
+WeCom currently has config and startup initialization samples, but it is not wired into the Hub prepared inbound mainline yet.
+
+---
+
 ## LLM Configuration
 
 The current Hub initializes `OpenAIClient` from the unified `[llm]` section.
@@ -412,7 +464,7 @@ Note: `uhorse-hub` only exposes the unified-config health route when `server.hea
 
 ## Recommendations
 
-- Use **unified config** when you need DingTalk or LLM.
+- Use **unified config** when you need DingTalk, Feishu, WeCom, or LLM.
 - Use **legacy HubConfig + NodeConfig** when you want the smallest local Hub-Node roundtrip.
 - Do not assume unified config already covers every Hub-specific scheduler knob; the current code still has a boundary between unified runtime config and legacy Hub tuning fields.
 

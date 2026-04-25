@@ -1,251 +1,96 @@
-# 新增通道支持 - 钉钉、飞书、企业微信
+# 企业通道支持更新
 
-## ✅ 已完成的工作
+本文档记录企业通道接入状态，当前事实以 `README.md`、`CHANNELS.md`、`CONFIG.md` 和 `API.md` 为准。
 
-### 1. 新增三个企业级通道
+## 当前状态
 
-#### 1.1 钉钉通道 (`dingtalk.rs`)
-- **文件**: `crates/uhorse-channel/src/dingtalk.rs`
-- **核心功能**:
-  - 钉钉机器人 API 集成
-  - 支持文本、图片、音频、文件消息
-  - 事件回调处理
-  - OAuth 2.0 访问令牌获取
-- **配置参数**:
-  - `app_key`: 应用 Key
-  - `app_secret`: 应用密钥
-  - `agent_id`: 机器人 ID
+| 通道 | 当前状态 | 说明 |
+|------|----------|------|
+| DingTalk | 主生产路径 | Stream 入站、Hub 任务规划、原消息 reaction、AI Card / transient handle 与结果回传均已接入主链路 |
+| Feishu | 最小第二样本 | 支持 webhook challenge、message event prepared inbound，以及基于 `ReplyContext` 的原消息回包 |
+| WeWork | 配置 / 初始化样本 | 支持统一配置初始化，但尚未进入 Hub prepared inbound 主线 |
+| Telegram / Slack / Discord / WhatsApp | 模块保留 | 非当前 `v4.6.0` Hub 主线验证重点 |
 
-#### 1.2 飞书通道 (`feishu.rs`)
-- **文件**: `crates/uhorse-channel/src/feishu.rs`
-- **核心功能**:
-  - 飞书开放平台 API 集成
-  - 支持文本、图片、音频、视频、文件消息
-  - 富文本和交互式卡片支持
-  - 租户/用户访问令牌获取
-- **配置参数**:
-  - `app_id`: 应用 ID
-  - `app_secret`: 应用密钥
-  - `encrypt_key`: 加密密钥（可选）
-  - `verify_token`: 验证令牌（可选）
+## 已落地能力
 
-#### 1.3 企业微信通道 (`wework.rs`)
-- **文件**: `crates/uhorse-channel/src/wework.rs`
-- **核心功能**:
-  - 企业微信机器人 API 集成
-  - 支持文本、图片、语音、视频、文件消息
-  - 事件回调处理
-  - 访问令牌和素材上传
-- **配置参数**:
-  - `corp_id`: 企业 ID
-  - `agent_id`: 应用 ID
-  - `secret`: 应用密钥
-  - `token`: 回调 Token（可选）
-  - `encoding_aes_key`: 加密密钥（可选）
+### DingTalk
 
-### 2. 核心类型更新
+- 通过统一配置 `[channels.dingtalk]` 初始化。
+- 当前推荐使用 Stream 模式接收入站消息。
+- 自然语言消息可进入 Hub → Node 任务链路。
+- 处理中状态优先使用 AI Card；未命中时优先在原消息上贴 `🤔思考中` reaction，并在任务完成、失败或取消后 best-effort recall / clear。
+- Skill 安装薄入口支持 `安装技能 <package> <download_url> [version]`，并受 `[[channels.dingtalk.skill_installers]]` 白名单约束。
 
-#### 2.1 uhorse-core/src/types.rs
-```rust
-pub enum ChannelType {
-    Telegram,
-    Slack,
-    Discord,
-    WhatsApp,
-    DingTalk,    // ✅ 新增
-    Feishu,       // ✅ 新增
-    WeWork,       // ✅ 新增
-}
-```
+### Feishu
 
-#### 2.2 uhorse-agent/src/session_key.rs
-```rust
-pub enum ChannelType {
-    // ... 原有通道 ...
-    DingTalk,
-    Feishu,
-    WeWork,
-    // ...
-}
-```
+- 通过统一配置 `[channels.feishu]` 初始化。
+- `GET /api/v1/channels/feishu/webhook` 返回 readiness 文本。
+- `POST /api/v1/channels/feishu/webhook` 支持 challenge 响应。
+- message event 可被预处理为 `PreparedInboundTurn` 并进入 Hub 调度主线。
+- 普通回包走 `ReplyContext` + `Channel::reply_via_context(...)`，优先使用原始 `message_id` 调用 Feishu reply API。
 
-### 3. 模块导出更新
+### WeWork
 
-#### 3.1 crates/uhorse-channel/src/lib.rs
-```rust
-pub mod dingtalk;
-pub mod feishu;
-pub mod wework;
+- 通过统一配置 `[channels.wework]` 初始化。
+- 当前不作为 Hub prepared inbound 主线验证对象。
 
-pub use dingtalk::DingTalkChannel;
-pub use feishu::FeishuChannel;
-pub use wework::WeWorkChannel;
-```
+## 配置示例
 
-### 4. 配置向导更新
+### DingTalk
 
-#### 4.1 配置向导支持
-- **新增通道选项**: 钉钉、飞书、企业微信
-- **默认预装标记**: Telegram ⭐、钉钉 ⭐
-- **配置流程**:
-  ```
-    ┌─────────────────────────────────────┐
-    │  📱 通道配置                            │
-    │  [默认预装] Telegram, 钉钉               │
-    │                                          │
-    │  1. Telegram ⭐                          │
-    │  2. Slack                                 │
-    │  3. Discord                              │
-    │  4. WhatsApp                             │
-    │  5. 钉钉 ⭐                              │
-    │   6. 飞书                                 │
-    │  7. 企业微信                             │
-    └─────────────────────────────────────┘
-  ```
-
-#### 4.2 通道特定配置
-- **钉钉**:
-  - App Key
-  - App Secret
-  - Agent ID
-
-- **飞书**:
-  - App ID
-  - App Secret
-  - Encrypt Key (可选)
-  - Verify Token (可选)
-
-- **企业微信**:
-  - Corp ID
-  - Agent ID
-  - Secret
-  - Token (可选)
-  - Encoding AES Key (可选)
-
-## 📋 配置示例
-
-### 钉钉配置 (config.toml)
 ```toml
 [channels]
-enabled = ["telegram", "dingtalk"]
+enabled = ["dingtalk"]
 
 [channels.dingtalk]
 app_key = "your_app_key"
 app_secret = "your_app_secret"
 agent_id = 123456789
+
+[[channels.dingtalk.notification_bindings]]
+node_id = "your-stable-node-id"
+user_id = "your-dingtalk-user-id"
 ```
 
-### 飞书配置 (config.toml)
+### Feishu
+
 ```toml
 [channels]
-enabled = ["telegram", "feishu"]
+enabled = ["feishu"]
 
 [channels.feishu]
-app_id = "your_app_id"
-app_secret = "your_app_secret"
-encrypt_key = "your_encrypt_key"
-verify_token = "your_verify_token"
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+# encrypt_key = "your-feishu-encrypt-key"
+# verify_token = "your-feishu-verify-token"
 ```
 
-### 企业微信配置 (config.toml)
+### WeWork
+
 ```toml
 [channels]
-enabled = ["telegram", "wework"]
+enabled = ["wework"]
 
 [channels.wework]
-corp_id = "your_corp_id"
+corp_id = "your-wework-corp-id"
 agent_id = 123456789
-secret = "your_secret"
-token = "your_token"
-encoding_aes_key = "your_aes_key"
+secret = "your-wework-secret"
+# token = "your-wework-token"
+# encoding_aes_key = "your-wework-encoding-aes-key"
 ```
 
-## 🔧 API 使用示例
+## 验证入口
 
-### 钉钉
-```rust
-use uhorse_channel::DingTalkChannel;
-
-let channel = DingTalkChannel::new(
-    "your_app_key".to_string(),
-    "your_app_secret".to_string(),
-    123456789,
-);
-
-// 处理事件回调
-if let Some((user_id, message)) = channel.handle_event_raw(event_json).await? {
-    // 处理消息
-}
-
-// 发送消息
-channel.send_message(user_id, &MessageContent::Text("Hello!".to_string())).await?;
+```bash
+cargo test -p uhorse-channel
+cargo test -p uhorse-hub test_dispatch_reply_via_context_uses_generic_channel_reply_path -- --nocapture
+cargo test -p uhorse-hub test_prepare_feishu_inbound_and_submit_turn_dispatches_assignment -- --nocapture
+cargo test -p uhorse-hub session_key_from_reply_context -- --nocapture
 ```
 
-### 飞书
-```rust
-use uhorse_channel::FeishuChannel;
+更多主线说明见：
 
-let channel = FeishuChannel::new(
-    "your_app_id".to_string(),
-    "your_app_secret".to_string(),
-);
-
-// 处理事件回调
-if let Some((user_id, message)) = channel.handle_event_raw(event_json).await? {
-    // 处理消息
-}
-
-// 发送消息
-channel.send_message(user_id, &MessageContent::Text("Hello!".to_string())).await?;
-```
-
-### 企业微信
-```rust
-use uhorse_channel::WeWorkChannel;
-
-let channel = WeWorkChannel::new(
-    "your_corp_id".to_string(),
-    123456789,
-    "your_secret".to_string(),
-);
-
-// 处理事件回调
-if let Some((user_id, message)) = channel.handle_event_raw(event_json).await? {
-    // 处理消息
-}
-
-// 发送消息
-channel.send_message(user_id, &MessageContent::Text("Hello!".to_string())).await?;
-```
-
-## ⚠️ 待修复的小问题
-
-### 编译错误
-剩余 3 个编译错误，主要是：
-1. `MessageContent::Image` 的生命周期参数问题（已临时替换为 `MessageContent::Text`）
-2. 部分 `match` 语句需要添加返回分支
-
-### 快速修复
-在 `dingtalk.rs` 的 `extract_content_raw` 方法中：
-- 将 `MessageContent::Image { url, caption: ... }` 替换为简化的返回语句
-
-## 📝 下一步工作
-
-1. ✅ 修复剩余编译错误（小语法问题）
-2. ⏳ 实现实际的 HTTP API 调用（目前为 TODO）
-3. ⏳ 添加完整的错误处理和重试逻辑
-4. ⏳ 添加单元测试和集成测试
-5. ⏳ 更新文档（README.md、CHANNELS.md）
-
-## 🎯 总结
-
-uHorse 现已支持 **7 个主流通道**：
-1. ✅ Telegram (默认预装)
-2. ✅ Slack
-3. ✅ Discord
-4. ✅ WhatsApp
-5. ✅ **钉钉 (新增，默认预装)** ⭐
-6. ✅ **飞书 (新增)**
-7. ✅ **企业微信 (新增)**
-
-默认预装通道：**Telegram** 和 **钉钉**，这两个通道在配置向导中有特殊标记（⭐），推荐优先配置。
+- [CHANNELS.md](CHANNELS.md)
+- [CONFIG.md](CONFIG.md)
+- [API.md](API.md)
+- [TESTING.md](TESTING.md)

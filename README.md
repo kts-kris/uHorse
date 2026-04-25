@@ -51,6 +51,8 @@ uHorse 当前对外正式发布口径是 **v4.6.0 Hub-Node 主线**。
 - Hub 已对浏览器目标执行本地安全校验，拒绝 `file://`、localhost、私网地址和其他越界目标。
 - Node Desktop 与 runtime 已支持浏览器能力路由，浏览器任务会优先调度到声明 `CommandType::Browser` 的节点；对于“打开网页”这类 DingTalk 指令，主线契约会规划为 `BrowserCommand::OpenSystem`，以宿主机系统浏览器语义执行。
 - DingTalk 现在会优先在用户原消息上贴 `🤔思考中` reaction，并在任务完成、失败或取消后自动 recall；如果 reaction attach 失败，则会 best-effort 回退到现有处理中路径。
+- 通道抽象已补齐最小 `ReplyContext` 回包契约：Hub 可对声明 `REPLY_CONTEXT` 能力的通道走 generic reply path；DingTalk 的 AI Card / reaction / transient handle 生命周期仍保留在专用 adapter 内。
+- Feishu 已作为第二样本接入最小 Hub 主线：支持 webhook challenge、message event 预处理、prepared inbound 提交，以及基于原消息 `message_id` 的 reply-context 回包。
 - `memory / agent / skill` 已支持 `global / tenant / enterprise / department / role / user / session` 分层共享链；`memory_context_chain` 从共享读到私有，`visibility_chain` 从私有回退到共享。
 - 任务上下文与 runtime session 已显式区分稳定 `execution_workspace_id` 和 Hub 侧逻辑 `collaboration_workspace_id` / `CollaborationWorkspace`；前者决定真实执行边界，后者仅承载协作上下文与默认绑定。
 - runtime API 与 Web UI 已支持 `source_layer`、`source_scope` 的来源感知展示与按来源详情查询。
@@ -76,6 +78,8 @@ uHorse 当前对外正式发布口径是 **v4.6.0 Hub-Node 主线**。
 | 本地真实集成测试 | ✅ | `test_local_hub_node_roundtrip_file_exists` 与 `test_local_hub_node_roundtrip_file_write` 已覆盖真实 Hub + Node + WebSocket 闭环 |
 | 鉴权拒绝路径 | ✅ | `test_local_hub_rejects_node_with_mismatched_auth_token` 已覆盖 token 与注册 `node_id` 不一致场景 |
 | DingTalk Stream 接入 | ✅ | 当前推荐模式为 Stream；Node Desktop 可通过 pairing 发起运行时绑定，`channels.dingtalk.notification_bindings` 仅作为兼容 seed/fallback |
+| Generic reply-context 回包 | ✅ | `ReplyContext` + `Channel::reply_via_context` 已接入 Hub generic dispatcher，DingTalk 高级处理中句柄仍由专用 adapter 保留 |
+| Feishu 最小入站样本 | ✅ | 支持 `/api/v1/channels/feishu/webhook` challenge / message event 预处理，并可进入 prepared inbound 主线 |
 | DingTalk 浏览器规划链路 | ✅ | Hub 已允许受控 `BrowserCommand`，并可把浏览器任务调度到具备 `CommandType::Browser` 的节点 |
 | Agent Browser Skill 安装自动化回归 | ✅ | `test_agent_browser_natural_language_install_flow_returns_chinese_hint` 已覆盖自然语言安装、SkillHub 安装与中文提示 |
 | 在线 Skill 安装兼容性 | ✅ | `POST /api/v1/skills/install` 与 DingTalk 安装薄入口已支持 `.zip` / `.tar.gz`，并兼容 `skill.yaml` Python Skill 自动生成 `skill.toml`、`.venv` 依赖安装 |

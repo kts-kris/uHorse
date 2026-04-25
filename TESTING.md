@@ -31,6 +31,8 @@ cargo test -p uhorse-hub
 cargo test --workspace
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 cargo test -p uhorse-hub test_local_hub_rejects_node_with_mismatched_auth_token -- --nocapture
+cargo test -p uhorse-hub test_dispatch_reply_via_context_uses_generic_channel_reply_path -- --nocapture
+cargo test -p uhorse-hub test_prepare_feishu_inbound_and_submit_turn_dispatches_assignment -- --nocapture
 make skill-install-smoke
 make agent-loop-smoke
 make approval-loop-smoke
@@ -155,7 +157,25 @@ cargo test -p uhorse-agent test_load_from_dir_supports_skill_yaml_python_entrypo
 - `requirements.txt` 触发 `.venv` 依赖安装
 - Agent 运行时对 yaml-only Python Skill 的加载与工作目录执行
 
-### 4. 安全与审批相关测试
+### 4. 通道抽象与 Feishu 最小样本回归
+
+```bash
+cargo test -p uhorse-hub test_dispatch_reply_via_context_uses_generic_channel_reply_path -- --nocapture
+cargo test -p uhorse-hub test_prepare_feishu_inbound_builds_generic_turn -- --nocapture
+cargo test -p uhorse-hub test_prepare_feishu_inbound_and_submit_turn_dispatches_assignment -- --nocapture
+cargo test -p uhorse-hub session_key_from_reply_context -- --nocapture
+cargo test -p uhorse-channel test_feishu_channel_declares_reply_context_capability -- --nocapture
+```
+
+这组回归验证：
+
+- 非 DingTalk 通道可通过 `Channel::reply_via_context` 走 generic reply dispatcher
+- Feishu webhook message event 可预处理成 `PreparedInboundTurn`
+- Feishu prepared inbound 可进入 Hub 调度主线
+- continuation fallback 可从 `ReplyContext` 恢复通道 session key
+- DingTalk 高级处理中句柄不被强行泛化，仍保留专用 adapter 路径
+
+### 5. 安全与审批相关测试
 
 ```bash
 cargo test -p uhorse-hub security_test -- --nocapture
@@ -168,7 +188,7 @@ cargo test -p uhorse-hub security_test -- --nocapture
 - Node 发起审批请求后，Hub 是否创建对应审批项
 - 未启用 `SecurityManager` 时的错误路径
 
-### 5. Agent Loop continuation smoke
+### 6. Agent Loop continuation smoke
 
 ```bash
 make agent-loop-smoke
@@ -183,7 +203,7 @@ cargo test -p uhorse-hub test_project_transcript_messages_includes_intermediate_
 - continuation compaction 与 planner retry 记录
 - transcript 是否包含中间 loop 事件
 
-### 6. approval wait / resume smoke
+### 7. approval wait / resume smoke
 
 ```bash
 make approval-loop-smoke
@@ -198,7 +218,7 @@ cargo test -p uhorse-hub test_approve_approval_appends_transcript_event_for_boun
 - approval approve 后是否为已绑定 turn 追加 transcript 事件
 - approval wait / resume 是否进入统一 loop 观测模型
 
-### 7. observability smoke
+### 8. observability smoke
 
 ```bash
 make observability-smoke
@@ -217,7 +237,7 @@ cargo test -p uhorse-backup test_restore_lifecycle_records_audit_events -- --noc
 
 这些指标与审计事件是否能通过默认 smoke 入口稳定回归
 
-### 8. audit smoke
+### 9. audit smoke
 
 ```bash
 make audit-smoke
@@ -394,6 +414,26 @@ system_prompt = "You are a helpful AI assistant for uHorse."
 - LLM client 是否成功初始化
 - 自然语言请求是否被规划为受本地校验约束的 `FileCommand` / `ShellCommand`
 - 结果总结失败时是否回退到结构化文本
+
+### Feishu 最小样本配置
+
+```toml
+[channels]
+enabled = ["feishu"]
+
+[channels.feishu]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+# encrypt_key = "your-feishu-encrypt-key"
+# verify_token = "your-feishu-verify-token"
+```
+
+验证重点：
+
+- `GET /api/v1/channels/feishu/webhook` 是否返回 readiness
+- `POST /api/v1/channels/feishu/webhook` 是否能响应 challenge
+- message event 是否能进入 prepared inbound 主线
+- 回包是否走 `ReplyContext` + generic `reply_via_context` 路径
 
 ---
 

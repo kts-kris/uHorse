@@ -9,6 +9,7 @@
 - 生成 `hub.toml` 和 `node.toml`
 - 按本地或部署场景分别启动 Hub 与 Node
 - 如需验证 DingTalk 当前主线体验，可联调原消息 `🤔思考中` reaction attach / recall
+- 如需验证 multi-channel 抽象边界，可启用 Feishu 最小 webhook / reply-context 样本
 
 > 注意：仓库里仍保留 `uhorse` 单体二进制以及 `install.sh`、`quick-setup.sh` 等脚本，但它们主要围绕旧单体路径，不是本文档的主推荐安装方式。
 
@@ -88,6 +89,8 @@ cargo build --release -p uhorse-hub -p uhorse-node -p uhorse-node-desktop
 - `node.toml`：Node 名称、工作目录、Hub WebSocket 地址
 
 完整字段见 [CONFIG.md](CONFIG.md)。如果你要验证 Node Desktop 真实通知镜像到钉钉，除 DingTalk 凭据外，还需启用 pairing 并在桌面端完成绑定；`channels.dingtalk.notification_bindings` 仅用于兼容 seed/fallback。
+
+如果你要验证 Feishu 最小样本，请在统一配置中启用 `channels.feishu`，并使用 `/api/v1/channels/feishu/webhook` 做 challenge / message event 入站验证；当前它用于验证 prepared inbound 与 generic reply-context 边界。
 
 如果你还要验证当前在线 Skill 安装链路，请注意：
 
@@ -212,6 +215,7 @@ curl http://127.0.0.1:8765/api/nodes
 ```bash
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
+cargo test -p uhorse-hub test_prepare_feishu_inbound_and_submit_turn_dispatches_assignment -- --nocapture
 make skill-install-smoke
 ```
 
@@ -222,6 +226,7 @@ make skill-install-smoke
 - Node
 - 一个文件存在性命令 roundtrip
 - 一个真实写文件 roundtrip（包含落盘与 structured file_operation 返回）
+- Feishu prepared inbound 进入 Hub 调度主线的最小样本
 - Agent Browser Skill 自然语言安装、SkillHub 安装与中文提示回归
 
 如果你希望使用默认快速回归入口，也可以直接执行：

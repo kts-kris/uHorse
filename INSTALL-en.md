@@ -9,6 +9,7 @@ The recommended path is:
 - generate `hub.toml` and `node.toml`
 - start Hub and Node separately
 - if you want to validate the current DingTalk UX, also verify original-message `🤔思考中` reaction attach / recall
+- if you want to validate the multi-channel abstraction boundary, enable the minimal Feishu webhook / reply-context sample
 
 > Note: the repository still contains the legacy `uhorse` monolithic binary and helper scripts such as `install.sh` and `quick-setup.sh`, but those are not the primary path documented here.
 
@@ -88,6 +89,8 @@ For a minimal local roundtrip you usually only need:
 - `node.toml` for node name / workspace / Hub WebSocket URL
 
 See [CONFIG-en.md](CONFIG-en.md) for the actual config structure. If you want to validate Node Desktop notification mirroring to DingTalk, configure DingTalk credentials, enable pairing, and complete binding from Node Desktop; `channels.dingtalk.notification_bindings` is only a compatibility seed/fallback.
+
+If you want to validate the minimal Feishu sample, enable `channels.feishu` in unified config and use `/api/v1/channels/feishu/webhook` for challenge / message event inbound checks; it currently validates the prepared inbound and generic reply-context boundary.
 
 If you also want to validate the current online Skill install path, note that:
 
@@ -212,6 +215,7 @@ curl http://127.0.0.1:8765/api/nodes
 ```bash
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_exists -- --nocapture
 cargo test -p uhorse-hub test_local_hub_node_roundtrip_file_write -- --nocapture
+cargo test -p uhorse-hub test_prepare_feishu_inbound_and_submit_turn_dispatches_assignment -- --nocapture
 make skill-install-smoke
 ```
 
@@ -222,6 +226,7 @@ These checks cover:
 - Node
 - a file existence roundtrip task
 - a real file write roundtrip, including on-disk persistence and structured `file_operation` output
+- the minimal Feishu prepared inbound sample entering the Hub scheduling mainline
 - the Agent Browser Skill natural-language install path, SkillHub install, and Chinese reply-hint regression
 
 If you want the default quick regression entrypoint instead, run:
