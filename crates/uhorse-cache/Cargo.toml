@@ -20,7 +20,7 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 
 # Redis client
-redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.1", features = ["tokio-comp", "connection-manager"] }
 
 # LRU cache for local caching
 lru = "0.12"
